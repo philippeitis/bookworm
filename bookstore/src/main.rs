@@ -16,9 +16,6 @@ use crate::database::{AppDatabase, BasicDatabase};
 use crate::ui::{settings::Settings, terminal_ui};
 
 fn main() -> Result<(), terminal_ui::ApplicationError> {
-    // fn main() {
-    // println!("{:?}", parser::parser::parse_command_string("!a Hello -d"));
-
     #[cfg(feature = "cloud-google")]
     {
         google_cloud_lib::CloudDatabase::open_database();

@@ -206,6 +206,15 @@ impl From<TomlSort> for SortSettings {
 }
 
 impl Settings {
+    /// Opens the settings at the provided location, and fills in missing settings from default
+    /// values.
+    ///
+    /// # Arguments
+    ///
+    /// * ` file ` - The path to the settings.
+    ///
+    /// # Error
+    /// Errors if reading the file or parsing the settings fails.
     pub(crate) fn open<P: AsRef<Path>>(file: P) -> Result<Self, std::io::Error> {
         let f = std::fs::read_to_string(file.as_ref())?;
         let value: TomlSettings = toml::from_str(f.as_str())?;
