@@ -1,0 +1,31 @@
+[package]
+name = "bookstore"
+version = "0.1.0"
+authors = ["philippeitis <33013301+philippeitis@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tui = { version = "0.12", default-features = false, features = ['crossterm'] }
+epub = "1.2.2"
+crossterm = "0.17"
+shellwords = "1.1.0"
+glob = "0.3.0"
+unicase = "2.6.0"
+toml = "0.5.7"
+
+google-drive3 = { version = "*", optional = true}
+hyper = { version = "^0.10", optional = true}
+hyper-rustls = { version = "^0.6", optional = true}
+serde_json = { version = "^1.0", optional = true}
+yup-oauth2 = { version = "^1.0", optional = true}
+
+[dependencies.rustbreak]
+version = "2"
+features = ["ron_enc"] # You can also use "yaml_enc" or "bin_enc"
+                       # Check the documentation to add your own!
+
+[features]
+cloud = ["google-drive3", "hyper", "hyper-rustls", "serde_json", "yup-oauth2"]
