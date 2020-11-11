@@ -1,6 +1,6 @@
 bookstore is a fast (hopefully) terminal based library management system (like Calibre).
 
-#Current Features#
+# Current Features
 - Adding single books and books from directories
 - Command based interaction
   - Edit (!e *id*? *column* *new_value*)
@@ -14,7 +14,7 @@ Hotkey navigation and interaction
 - Scrolling up and down using up / down arrow keys, page up / page down, and home / end
 - Selecting books and editing their metadata using F2, or deleting them using Del
  
-#Planned Features#
+# Planned Features
 - Cloud synchronization (eg. back up database and all books)
 - More robust backend database
 - Support for supplementary files (eg. more than one cover for a book)
