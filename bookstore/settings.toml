@@ -1,0 +1,13 @@
+[colors]
+selected_fg = "white"
+selected_bg = "lightblue"
+
+[layout]
+columns = ["Title", "Authors", "ID"]
+
+[sorting]
+column = "ID"
+reverse = true
+
+[database]
+file = "books.db"
