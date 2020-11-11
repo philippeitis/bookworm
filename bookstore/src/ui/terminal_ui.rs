@@ -113,10 +113,7 @@ pub(crate) struct App<D> {
     auto_completer: AutoCompleter<PathBuf>,
     sort_settings: SortSettings,
     edit: EditState,
-    // live_edit: bool,
-    // live_edit_string: String,
     selected_column: usize,
-    // started_editing: bool,
     updated: bool,
 
     // Database
@@ -194,7 +191,16 @@ impl<D: AppDatabase> App<D> {
     //         Self::new(file_name, style, D::open(file_name));
     //     })?
     // }
-
+    /// Returns a new database, instantiated with the provided settings and database.
+    ///
+    /// # Arguments
+    ///
+    /// * ` name ` - The application instance name. Not to confused with the file name.
+    /// * ` settings` - The application settings.
+    /// * ` db ` - The database which contains books to be read.
+    ///
+    /// # Errors
+    /// None.
     pub(crate) fn new<S: AsRef<str>>(
         name: S,
         settings: Settings,
@@ -234,13 +240,11 @@ impl<D: AppDatabase> App<D> {
             style: settings.interface_style,
             terminal_size: None,
             edit: EditState::default(),
-            // live_edit: false,
-            // started_editing: false,
-            // live_edit_string: "".to_string(),
             selected_column: 0
         })
     }
 
+    /// Generates the autofill string, specifically for selecting files or folders.
     fn generate_autofill(&mut self) -> Result<(), ()> {
         if !self.curr_command.starts_with(&['!', 'a']) {
             self.auto_fill = false;
@@ -286,6 +290,12 @@ impl<D: AppDatabase> App<D> {
         Ok(())
     }
 
+    /// Gets the index of the book in the internal list, if it exists. May become invalidated
+    /// if changes to the list occur between reading this value and using this value.
+    ///
+    /// # Arguments
+    ///
+    /// * ` id ` - The book ID.
     fn get_book_index(&mut self, id: u32) -> Option<usize> {
         self.books
             .data()
@@ -293,6 +303,16 @@ impl<D: AppDatabase> App<D> {
             .position(|b| b.get_id() == Some(id))
     }
 
+    /// Deletes the book with the given ID. If deleting the book reduces the number of books such
+    /// that the books no longer fill the frame, the selection is decreased so that the last book
+    /// is selected.
+    ///
+    /// # Arguments
+    ///
+    /// * ` id ` - The book ID.
+    ///
+    /// # Error
+    /// Errors if deleting the book fails for any reason.
     fn delete_book(&mut self, id: u32) -> Result<(), ApplicationError> {
         self.db.remove_book(id)?;
         self.update_columns = ColumnUpdate::Regenerate;
@@ -308,6 +328,11 @@ impl<D: AppDatabase> App<D> {
         Ok(())
     }
 
+    /// Gets the book with the given ID, returning None if it does not exist.
+    ///
+    /// # Arguments
+    ///
+    /// * ` id ` - The book ID.
     fn get_book_with_id(&self, id: u32) -> Option<&Book> {
         if let Some(book) = self.books.data().iter().find(|b| b.get_id() == Some(id)) {
             Some(book)
@@ -316,12 +341,26 @@ impl<D: AppDatabase> App<D> {
         }
     }
 
+    /// Adds the provided books to the internal database and adjusts sorting settings.
+    ///
+    /// # Arguments
+    ///
+    /// * ` books ` - A collection of books.
     fn add_books(&mut self, books: impl IntoIterator<Item = Book>) {
         self.books.data_mut().extend(books);
         self.sort_settings.is_sorted = false;
         self.update_columns = ColumnUpdate::Regenerate;
     }
 
+    /// Edits the book with the given ID, updating the selected column to the new value.
+    ///
+    /// # Arguments
+    ///
+    /// * ` column ` - The value in the book to update.
+    /// * ` new_value` - What to update the value to.
+    ///
+    /// # Errors
+    /// Errors if no book with the given ID exists.
     fn edit_book_with_id(
         &mut self,
         id: u32,
@@ -336,6 +375,15 @@ impl<D: AppDatabase> App<D> {
         }
     }
 
+    /// Edits the selected book, updating the selected column to the new value.
+    ///
+    /// # Arguments
+    ///
+    /// * ` column ` - The value in the book to update.
+    /// * ` new_value` - What to update the value to.
+    ///
+    /// # Errors
+    /// Errors if no book is selected.
     fn edit_selected_book(
         &mut self,
         column: String,
@@ -349,6 +397,12 @@ impl<D: AppDatabase> App<D> {
         }
     }
 
+    /// Adds the book to the internal database if a book with the same ID does not exist,
+    /// otherwise overwrites the existing book with the same id.
+    ///
+    /// # Arguments
+    ///
+    /// * ` book ` - The book to add.
     fn update_book(&mut self, book: &Book) -> Result<(), ApplicationError> {
         let id = if let Some(id) = book.get_id() {
             self.db.remove_book(id)?;
@@ -369,6 +423,12 @@ impl<D: AppDatabase> App<D> {
         Ok(())
     }
 
+    /// Updates the required sorting settings if the column changes.
+    ///
+    /// # Arguments
+    ///
+    /// * ` word ` - The column to sort the table on.
+    /// * ` reverse ` - Whether to reverse the sort.
     fn update_selected_column(&mut self, word: UniCase<String>, reverse: bool) {
         if self.selected_cols.contains(&word) {
             self.sort_settings.column = word;
@@ -389,6 +449,7 @@ impl<D: AppDatabase> App<D> {
         Ok(())
     }
 
+    /// Updates the table data if a change occurs.
     fn update_column_data(&mut self) -> bool {
         match &self.update_columns {
             ColumnUpdate::Regenerate => {
@@ -462,6 +523,12 @@ impl<D: AppDatabase> App<D> {
         }
     }
 
+    /// Renders the table, sized according to the chunk.
+    ///
+    /// # Arguments
+    ///
+    /// * ` f ` - A frame to render into.
+    /// * ` chunk ` - A chunk to specify the visible table size.
     fn render_columns<B: Backend>(&mut self, f: &mut Frame<B>, chunk: Rect) {
         fn cut_word_to_fit(word: &String, max_len: usize) -> String {
             if word.len() > max_len {
@@ -532,6 +599,12 @@ impl<D: AppDatabase> App<D> {
         }
     }
 
+    /// Renders the command string into the frame, sized according to the chunk.
+    ///
+    /// # Arguments
+    ///
+    /// * ` f ` - A frame to render into.
+    /// * ` chunk ` - A chunk to specify the command string size.
     fn render_command_prompt<B: Backend>(&mut self, f: &mut Frame<B>, chunk: Rect) {
         let command_widget = if !self.curr_command.is_empty() {
             Paragraph::new(Text::styled(
@@ -547,6 +620,15 @@ impl<D: AppDatabase> App<D> {
         f.render_widget(command_widget, chunk);
     }
 
+    // TODO: Make this set an Action so that the handling is external.
+    /// Reads and handles user input.
+    ///
+    /// # Arguments
+    ///
+    /// * ` terminal ` - The current terminal.
+    ///
+    /// # Errors
+    /// This function may error if executing a particular action fails.
     fn get_input<B: Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
@@ -713,6 +795,12 @@ impl<D: AppDatabase> App<D> {
         Ok(false)
     }
 
+    /// Returns the first available path amongst the variants of the book, or None if no such
+    /// path exists.
+    ///
+    /// # Arguments
+    ///
+    /// * ` book ` - The book to find a path for.
     fn get_first_book_path(book: &Book) -> Option<std::path::PathBuf> {
         if let Some(variants) = book.get_variants() {
             for variant in variants {
@@ -727,6 +815,16 @@ impl<D: AppDatabase> App<D> {
     }
 
     #[cfg(windows)]
+    /// Opens the book in SumatraPDF on Windows.
+    /// Other operating systems not currently supported
+    ///
+    /// # Arguments
+    ///
+    /// * ` book ` - The book to open.
+    ///
+    /// # Errors
+    /// This function may error if the book's variants do not exist,
+    /// or if the command itself fails.
     fn open_book(&self, book: &Book) -> Result<(), ApplicationError> {
         if let Some(path) = Self::get_first_book_path(book) {
             Command::new("cmd.exe")
@@ -738,6 +836,16 @@ impl<D: AppDatabase> App<D> {
     }
 
     #[cfg(windows)]
+    /// Opens the book and selects it, in File Explorer on Windows.
+    /// Other operating systems not currently supported
+    ///
+    /// # Arguments
+    ///
+    /// * ` book ` - The book to open.
+    ///
+    /// # Errors
+    /// This function may error if the book's variants do not exist,
+    /// or if the command itself fails.
     fn open_book_in_dir(&self, book: &Book) -> Result<(), ApplicationError> {
         if let Some(path) = Self::get_first_book_path(book) {
             let open_book_path = PathBuf::from(".\\src\\open_book.py").canonicalize()?;
@@ -752,6 +860,12 @@ impl<D: AppDatabase> App<D> {
         Ok(())
     }
 
+    /// Gets the book that selected by the BookIndex,
+    /// or None if the particular book does not exist.
+    ///
+    /// # Arguments
+    ///
+    /// * ` b ` - A BookIndex which either represents an exact ID, or the selected book.
     fn get_book(&self, b: BookIndex) -> Option<&Book> {
         match b {
             BookIndex::Selected => self.books.selected_item(),
@@ -759,6 +873,15 @@ impl<D: AppDatabase> App<D> {
         }
     }
 
+    /// Runs the command currently in the current command string. On success, returns a bool
+    /// indicating whether to quit or not.
+    ///
+    /// # Arguments
+    ///
+    /// * ` terminal ` - The current terminal.
+    ///
+    /// # Errors
+    /// This function will return an error if the current command fails for any reason.
     fn run_command<B: Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
@@ -832,6 +955,7 @@ impl<D: AppDatabase> App<D> {
         Ok(true)
     }
 
+    /// Sorts the books internally, using the current sort settings.
     fn sort_books_by_col(&mut self) {
         let col_string = self.sort_settings.column.as_str();
         if self.sort_settings.reverse {
@@ -845,6 +969,15 @@ impl<D: AppDatabase> App<D> {
         };
         self.sort_settings.is_sorted = true;
     }
+
+    /// Runs the application - including handling user inputs and refreshing the output.
+    ///
+    /// # Arguments
+    ///
+    /// * ` terminal ` - The terminal to output text to.
+    ///
+    /// # Errors
+    /// This function will return an error if running the program fails for any reason.
     pub(crate) fn run<B: Backend>(
         mut self,
         terminal: &mut Terminal<B>,

@@ -43,31 +43,84 @@ pub(crate) struct BasicDatabase {
 }
 
 pub(crate) trait AppDatabase {
+    /// Opens the database at the path if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * ` file_path ` - A path to a database.
+    ///
+    /// # Errors
+    /// This function will return an error if the file can not be found, or the database
+    /// is itself invalid.
     fn open<S>(file_path: S) -> Result<Self, DatabaseError>
     where
         S: AsRef<path::Path>,
         Self: Sized;
 
+    /// Saves the database to its original location.
+    ///
+    /// # Errors
+    /// This function will return an error if the database can not be saved correctly.
     fn save(&self) -> Result<(), DatabaseError>;
 
+    /// Reads each book in the directory into the database, and returns a
+    /// Vec of corresponding IDs.
+    ///
+    /// # Arguments
+    /// * ` dir ` - A path to directories containing books to load.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails,
+    /// the directory does not exist, or reading a file fails.
     fn read_books_from_dir<S>(&self, dir: S) -> Result<Vec<u32>, DatabaseError>
     where
         S: AsRef<path::Path>;
 
+    /// Reads the book at the given location into the database, and returns the book's ID.
+    ///
+    /// # Arguments
+    /// * ` file_path ` - The path to the book to be read.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails,
+    /// the file does not exist, or can not be read.
     fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
     where
         S: AsRef<path::Path>;
 
+    /// Inserts the given book into the database. If the book does not have an ID, it is given
+    /// an ID equal to the largest ID in the database so far, plus one.
+    ///
+    /// # Arguments
+    /// * ` book ` - A book to be stored.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn insert_book(&self, book: Book) -> Result<u32, DatabaseError>;
 
+    /// Removes the book with the given ID. If no book with the given ID exists, no change occurs.
+    ///
+    /// # Arguments
+    /// * ` id ` - The ID of the book to be removed.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn remove_book(&self, id: u32) -> Result<(), DatabaseError>;
 
+    /// Returns a copy of every book in the database. If reading fails, None is returned.
     fn get_all_books(&self) -> Option<Vec<Book>>;
 
-    fn get_book(&self, book_id: u32) -> Option<Book>;
+    /// Finds and returns the book with the given ID. If no book is found, nothing is returned.
+    ///
+    /// # Arguments
+    /// * ` id ` - The ID of the book to be returned.
+    fn get_book(&self, id: u32) -> Option<Book>;
 
-    fn get_books(&self, book_ids: Vec<u32>) -> Vec<Option<Book>>;
+    /// Finds and returns the books with the given IDs, and if a particular book is not found,
+    /// nothing is returned for that particular book.
+    fn get_books(&self, ids: Vec<u32>) -> Vec<Option<Book>>;
 
+    /// Returns a list of columns that exist for at least one book in the database.
     fn get_available_columns(&self) -> Option<Vec<String>>;
 }
 
@@ -139,8 +192,8 @@ impl AppDatabase for BasicDatabase {
         }
     }
 
-    fn get_book(&self, book_id: u32) -> Option<Book> {
-        match self.backend.read(|db| match db.books.get(&book_id) {
+    fn get_book(&self, id: u32) -> Option<Book> {
+        match self.backend.read(|db| match db.books.get(&id) {
             None => Err(()),
             Some(book) => Ok(Some(book.clone())),
         }) {
@@ -149,8 +202,8 @@ impl AppDatabase for BasicDatabase {
         }
     }
 
-    fn get_books(&self, book_ids: Vec<u32>) -> Vec<Option<Book>> {
-        book_ids.iter().map(|&id| self.get_book(id)).collect()
+    fn get_books(&self, ids: Vec<u32>) -> Vec<Option<Book>> {
+        ids.iter().map(|&id| self.get_book(id)).collect()
     }
 
     fn get_available_columns(&self) -> Option<Vec<String>> {

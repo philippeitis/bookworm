@@ -10,6 +10,11 @@ pub(crate) struct AutoCompleter<S> {
 }
 
 impl AutoCompleter<PathBuf> {
+    /// Returns a new AutoCompleter, which will fill in entries from the path fragment.
+    ///
+    /// # Arguments
+    ///
+    /// * ` word ` - The word to provide autofills for.
     pub(crate) fn new<S: AsRef<str>>(word: S) -> Result<Self, ()> {
         let word = word.as_ref().to_string();
         let mut glob_str = word.clone();
@@ -27,6 +32,8 @@ impl AutoCompleter<PathBuf> {
         })
     }
 
+    /// Returns the next path which is at least as long as the original, or None if none can be
+    /// found. If at least one such word exists, this function will always return a value.
     pub(crate) fn get_next_word(&mut self) -> Option<PathBuf> {
         let init_state = self.curr_state;
         while self.curr_state < self.possibilities.len() {
@@ -51,6 +58,13 @@ impl AutoCompleter<PathBuf> {
         None
     }
 
+    /// Returns the next path which is at least as long as the original, and matches the provided
+    /// predicate, or None if none can be found. If at least one such word exists,
+    /// this function will always return a value.
+    ///
+    /// # Arguments
+    ///
+    /// * ` p ` - A predicate to test the paths.
     pub(crate) fn get_next_word_by(&mut self, p: &dyn Fn(&PathBuf) -> bool) -> Option<PathBuf> {
         let init_state = self.curr_state;
         while self.curr_state < self.possibilities.len() {
