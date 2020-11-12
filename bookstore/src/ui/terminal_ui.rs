@@ -488,7 +488,7 @@ impl<D: AppDatabase> App<D> {
                         self.books
                             .window_slice()
                             .iter()
-                        :i    .map(|book| book.get_column_or(column_string, ""))
+                            .map(|book| book.get_column_or(column_string, ""))
                             .collect(),
                     );
                 }
