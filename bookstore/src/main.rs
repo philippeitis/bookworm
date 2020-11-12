@@ -1,4 +1,5 @@
 use std::io;
+use std::env;
 
 mod book;
 mod database;
@@ -22,6 +23,27 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
         return Ok(());
     }
 
+    let args: Vec<_> = env::args().collect();
+    let db = if let Some(i) = args.iter().position(|s| "--db".eq(s)) {
+        if let Some(db) = args.get(i + 1) {
+            BasicDatabase::open(db)?
+        } else {
+            BasicDatabase::open("big_books.db")?
+        }
+    } else {
+        BasicDatabase::open("big_books.db")?
+    };
+
+    let settings = if let Some(i) = args.iter().position(|s| "--settings".eq(s)) {
+        if let Some(db) = args.get(i + 1) {
+            Settings::open(db)
+        } else {
+            Settings::open("settings.toml")
+        }
+    } else {
+        Settings::open("big_books.db")
+    }.unwrap_or(Settings::default());
+
     let stdout = io::stdout();
 
     let backend = if cfg!(windows) {
@@ -36,8 +58,8 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
     // terminal_ui::App::splash(InterfaceStyle::default(), &mut terminal);
     terminal_ui::App::new(
         "Really Cool Library",
-        Settings::open("settings.toml").unwrap_or(Settings::default()),
-        BasicDatabase::open("books.db")?,
+        settings,
+        db,
     )?
-    .run(&mut terminal)
+        .run(&mut terminal)
 }
