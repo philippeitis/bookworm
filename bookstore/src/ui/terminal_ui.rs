@@ -465,7 +465,7 @@ impl<D: AppDatabase> App<D> {
                 }
 
                 let _ = self.log(format!(
-                    "{} {} {:?}",
+                    "update_column_data(ColumnUpdate::Regenerate): {} {} {:?}",
                     0,
                     self.books.window_size(),
                     self.books.selected()
@@ -562,7 +562,9 @@ impl<D: AppDatabase> App<D> {
             .books
             .selected()
             .map(|x| { x <= chunk.height as usize })
-            .unwrap_or(true));
+            .unwrap_or(true),
+            format!("{:?}", self.books.selected())
+        );
 
         let edit_style = Style::default()
                 .fg(self.style.edit_fg)
@@ -996,8 +998,10 @@ impl<D: AppDatabase> App<D> {
             }
 
             self.update_column_data();
+
             let frame_size = terminal.get_frame().size();
             let size = Some((frame_size.width, frame_size.height));
+
             if size != self.terminal_size {
                 self.terminal_size = size;
                 self.updated = true;
@@ -1019,6 +1023,7 @@ impl<D: AppDatabase> App<D> {
                             self.books
                                 .refresh_window_size(vchunks[0].height as usize - 1);
                             self.update_columns = ColumnUpdate::Regenerate;
+
                             self.update_column_data();
                             if self.edit.active {
                                 self.column_data[self.selected_column][self.books.selected().unwrap()] = self.edit.visible().to_string();
@@ -1036,10 +1041,8 @@ impl<D: AppDatabase> App<D> {
                 })?;
                 self.updated = false;
             }
-            if let Ok(quit) = self.get_input(terminal) {
-                if quit {
-                    return Ok(());
-                }
+            if self.get_input(terminal)? {
+                return Ok(());
             }
         }
     }

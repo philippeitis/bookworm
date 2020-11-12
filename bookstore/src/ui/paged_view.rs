@@ -62,17 +62,23 @@ impl<T> PageView<T> {
     /// Selects the value at index. If index is greater than the window size or data len,
     /// selects the largest index that is still visible.
     pub(crate) fn select(&mut self, index: Option<usize>) -> bool {
-        if let Some(mut ind) = index {
-            if ind >= self.window_size {
-                ind = self.window_size - 1;
-            }
-            if ind >= self.data.len() {
-                ind = self.data.len() - 1;
-            }
-            if self.selected == Some(ind) {
+        if let Some(ind) = index {
+            let ind = {
+                let min = self.window_size.min(self.data.len());
+                if ind >= min {
+                    if min > 0 {
+                        Some(self.data.len() - 1)
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(ind)
+                }
+            };
+            if self.selected == ind {
                 false
             } else {
-                self.selected = Some(ind);
+                self.selected = ind;
                 true
             }
         } else {
