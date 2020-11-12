@@ -28,10 +28,10 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
         if let Some(db) = args.get(i + 1) {
             BasicDatabase::open(db)?
         } else {
-            BasicDatabase::open("big_books.db")?
+            BasicDatabase::open("books.db")?
         }
     } else {
-        BasicDatabase::open("big_books.db")?
+        BasicDatabase::open("books.db")?
     };
 
     let settings = if let Some(i) = args.iter().position(|s| "--settings".eq(s)) {
@@ -41,7 +41,7 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
             Settings::open("settings.toml")
         }
     } else {
-        Settings::open("big_books.db")
+        Settings::open("settings.toml")
     }.unwrap_or(Settings::default());
 
     let stdout = io::stdout();
@@ -55,7 +55,6 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
 
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
-    // terminal_ui::App::splash(InterfaceStyle::default(), &mut terminal);
     terminal_ui::App::new(
         "Really Cool Library",
         settings,
