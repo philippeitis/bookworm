@@ -2,6 +2,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::iter::FromIterator;
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::process::Command;
 use std::time::Duration;
 

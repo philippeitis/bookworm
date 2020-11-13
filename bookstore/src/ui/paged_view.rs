@@ -20,8 +20,8 @@ impl<T> PageView<T> {
 
     /// Returns whether the last element of data is in the window.
     pub(crate) fn at_end(&self) -> bool {
-        self.top_index >= self.data.len() - self.window_size - 1
-            || self.window_size >= self.data.len()
+        self.window_size >= self.data.len() ||
+            self.top_index >= self.data.len() - self.window_size - 1
     }
 
     /// Returns whether the first element of data is in the window
