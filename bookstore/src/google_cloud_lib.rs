@@ -1,7 +1,6 @@
-use drive3::DriveHub;
 use google_drive3::{DriveHub, Error, Result};
 use std::default::Default;
-use yup_oauth2::{ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, MemoryStorage};
+use yup_oauth2::{ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, MemoryStorage, FlowType};
 
 pub(crate) struct CloudDatabase {}
 
@@ -15,6 +14,7 @@ impl CloudDatabase {
         // Provide your own `AuthenticatorDelegate` to adjust the way it operates and get feedback about
         // what's going on. You probably want to bring in your own `TokenStorage` to persist tokens and
         // retrieve them from storage.
+        let flow = FlowType::InstalledInteractive;
         let auth = Authenticator::new(
             &secret,
             DefaultAuthenticatorDelegate,
@@ -22,7 +22,7 @@ impl CloudDatabase {
                 hyper_rustls::TlsClient::new(),
             )),
             <MemoryStorage as Default>::default(),
-            None,
+            Some(flow),
         );
         let mut hub = DriveHub::new(
             hyper::Client::with_connector(hyper::net::HttpsConnector::new(
@@ -35,7 +35,7 @@ impl CloudDatabase {
         // Values shown here are possibly random and not representative !
         let result = hub.files().list();
 
-        match result {
+        match result.doit() {
             Err(e) => match e {
                 // The Error enum provides details about what exactly happened.
                 // You can also just use its `Debug`, `Display` or `Error` traits

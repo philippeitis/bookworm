@@ -3,7 +3,7 @@ use std::env;
 
 mod book;
 mod database;
-#[cfg(feature = "cloud-google")]
+#[cfg(feature = "cloud")]
 mod google_cloud_lib;
 #[allow(dead_code)]
 mod isbn;
@@ -17,7 +17,7 @@ use crate::database::{AppDatabase, BasicDatabase};
 use crate::ui::{settings::Settings, terminal_ui};
 
 fn main() -> Result<(), terminal_ui::ApplicationError> {
-    #[cfg(feature = "cloud-google")]
+    #[cfg(feature = "cloud")]
     {
         google_cloud_lib::CloudDatabase::open_database();
         return Ok(());
