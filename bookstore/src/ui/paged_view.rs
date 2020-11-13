@@ -67,7 +67,7 @@ impl<T> PageView<T> {
                 let min = self.window_size.min(self.data.len());
                 if ind >= min {
                     if min > 0 {
-                        Some(self.data.len() - 1)
+                        Some(min - 1)
                     } else {
                         None
                     }
@@ -173,7 +173,6 @@ impl<T> PageView<T> {
                 false
             };
         }
-
         self.scroll_down(self.window_size)
     }
 
@@ -332,6 +331,25 @@ mod test {
         assert_eq!(view.window_slice().len(), 25);
         view.scroll_up(100);
         assert_eq!(view.window_slice().len(), 25);
+    }
+
+    #[test]
+    fn test_selected_never_out_of_bounds() {
+        let mut view = PageView::new(25, vec![0; 50]);
+        view.select(Some(15));
+        assert!(view.selected().unwrap() < 25);
+        view.end();
+        assert!(view.selected().unwrap() < 25);
+        view.home();
+        assert!(view.selected().unwrap() < 25);
+        view.scroll_down(40);
+        assert!(view.selected().unwrap() < 25);
+        view.scroll_down(15);
+        assert!(view.selected().unwrap() < 25);
+        view.scroll_up(15);
+        assert!(view.selected().unwrap() < 25);
+        view.scroll_up(40);
+        assert!(view.selected().unwrap() < 25);
 
     }
 
