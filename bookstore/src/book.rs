@@ -278,21 +278,21 @@ impl Book {
 }
 
 impl Book {
-    pub(crate) fn set_column(&mut self, column: String, value: String) -> Result<(), BookError> {
-        match column.to_lowercase().as_str() {
+    pub(crate) fn set_column<S: AsRef<str>, T: AsRef<str>>(&mut self, column: S, value: T) -> Result<(), BookError> {
+        match column.as_ref().to_lowercase().as_str() {
             "title" => {
-                self.title = Some(value);
+                self.title = Some(value.as_ref().to_string());
             }
             "author" | "authors" => {
-                self.authors = Some(vec![value]);
+                self.authors = Some(vec![value.as_ref().to_string()]);
             }
             "id" | "variants" => {
                 return Err(BookError::ImmutableColumnError);
             }
             "series" => {
-                if value.ends_with("]") {
+                if value.as_ref().ends_with("]") {
                     // Replace with rsplit_once when stable.
-                    let mut words = value.rsplitn(2, |c: char| c.is_whitespace()).into_iter();
+                    let mut words = value.as_ref().rsplitn(2, |c: char| c.is_whitespace()).into_iter();
                     if let Some(id) = words.next() {
                         if let Some(series) = words.next() {
                             if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str())
@@ -302,16 +302,15 @@ impl Book {
                         }
                     }
                 } else {
-                    self.series = Some((value.clone(), None));
+                    self.series = Some((value.as_ref().to_string(), None));
                 }
             }
             _ => {
-                if let Some(mut d) = self.extended_tags.clone() {
-                    d.insert(column, value);
-                    self.extended_tags = Some(d);
+                if let Some(d) = self.extended_tags.as_mut() {
+                    d.insert(column.as_ref().to_string(), value.as_ref().to_string());
                 } else {
                     let mut d = HashMap::new();
-                    d.insert(column, value);
+                    d.insert(column.as_ref().to_string(), value.as_ref().to_string());
                     self.extended_tags = Some(d);
                 }
             }
