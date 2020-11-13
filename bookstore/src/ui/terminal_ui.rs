@@ -275,6 +275,12 @@ impl<D: AppDatabase> App<D> {
             {
                 self.curr_command.clear();
                 self.curr_command.extend("!a -d ".chars());
+                // let word = word.display().to_string();
+                // if word.contains(" ") {
+                //     self.curr_command.extend(format!("\"{}\"", word).chars());
+                // } else {
+                //     self.curr_command.extend(word.chars());
+                // }
                 self.curr_command.extend(word.display().to_string().chars());
                 self.updated = true;
             }
@@ -623,7 +629,8 @@ impl<D: AppDatabase> App<D> {
     }
 
     // TODO: Make this set an Action so that the handling is external.
-    /// Reads and handles user input.
+    /// Reads and handles user input. On success, returns a bool
+    /// indicating whether to continue or not.
     ///
     /// # Arguments
     ///
@@ -631,10 +638,7 @@ impl<D: AppDatabase> App<D> {
     ///
     /// # Errors
     /// This function may error if executing a particular action fails.
-    fn get_input<B: Backend>(
-        &mut self,
-        terminal: &mut Terminal<B>,
-    ) -> Result<bool, ApplicationError> {
+    fn get_input(&mut self) -> Result<bool, ApplicationError> {
         loop {
             if poll(Duration::from_millis(500))? {
                 if self.edit.active {
@@ -726,9 +730,11 @@ impl<D: AppDatabase> App<D> {
                                     self.completer_is_valid = false;
                                 }
                                 KeyCode::Enter => {
-                                    if !self.run_command(terminal)? {
+                                    if !self.run_command(parse_command_string(self.curr_command.iter().collect::<String>()))? {
                                         return Ok(true);
                                     }
+                                    self.curr_command.clear();
+                                    self.completer_is_valid = false;
                                 }
                                 KeyCode::Tab | KeyCode::BackTab => {
                                     self.auto_fill = true;
@@ -876,19 +882,13 @@ impl<D: AppDatabase> App<D> {
     }
 
     /// Runs the command currently in the current command string. On success, returns a bool
-    /// indicating whether to quit or not.
+    /// indicating whether to continue or not.
     ///
     /// # Arguments
     ///
-    /// * ` terminal ` - The current terminal.
-    ///
-    /// # Errors
-    /// This function will return an error if the current command fails for any reason.
-    fn run_command<B: Backend>(
-        &mut self,
-        terminal: &mut Terminal<B>,
-    ) -> Result<bool, ApplicationError> {
-        match parse_command_string(self.curr_command.iter().collect::<String>()) {
+    /// * ` command ` - The command to run.
+    fn run_command(&mut self, command: parser::Command) -> Result<bool, ApplicationError> {
+        match command {
             parser::Command::DeleteBook(b) => {
                 let id = if let Some(b) = self.get_book(b) {
                     b.get_id()
@@ -944,16 +944,12 @@ impl<D: AppDatabase> App<D> {
                 if x {
                     self.db.save()?;
                 }
-                terminal.clear()?;
                 return Ok(false);
             }
             _ => {
                 return Ok(true);
             }
         }
-
-        self.completer_is_valid = false;
-        self.curr_command.clear();
         Ok(true)
     }
 
@@ -1041,7 +1037,8 @@ impl<D: AppDatabase> App<D> {
                 })?;
                 self.updated = false;
             }
-            if self.get_input(terminal)? {
+            if self.get_input()? {
+                terminal.clear()?;
                 return Ok(());
             }
         }
