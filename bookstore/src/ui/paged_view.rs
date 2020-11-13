@@ -288,3 +288,51 @@ impl<T> PageView<T> {
 
     // TODO: Add pop / insert / in_window
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_at_end() {
+        let view = PageView::new(25, vec![0; 20]);
+        assert!(view.at_end());
+        let mut view = PageView::new(20, vec![0; 40]);
+        assert!(!view.at_end());
+        view.scroll_down(10);
+        assert!(!view.at_end());
+        view.scroll_down(10);
+        assert!(view.at_end());
+    }
+
+    #[test]
+    fn test_window_slice() {
+        let vals: Vec<_> = (0..50).into_iter().collect();
+        let mut view = PageView::new(25, vals.clone());
+        assert!(view.window_slice().eq(&vals[0..25]));
+        view.scroll_down(10);
+        assert!(view.window_slice().eq(&vals[10..35]));
+        view.scroll_down(20);
+        assert!(view.window_slice().eq(&vals[25..50]));
+    }
+
+    #[test]
+    fn test_scroll() {
+        let mut view = PageView::new(25, vec![0; 50]);
+        assert_eq!(view.window_slice().len(), 25);
+        view.scroll_down(10);
+        assert_eq!(view.window_slice().len(), 25);
+        view.scroll_down(20);
+        assert_eq!(view.window_slice().len(), 25);
+        view.scroll_down(100);
+        assert_eq!(view.window_slice().len(), 25);
+        view.scroll_up(10);
+        assert_eq!(view.window_slice().len(), 25);
+        view.scroll_up(20);
+        assert_eq!(view.window_slice().len(), 25);
+        view.scroll_up(100);
+        assert_eq!(view.window_slice().len(), 25);
+
+    }
+
+}
