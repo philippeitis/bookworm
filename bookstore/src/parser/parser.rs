@@ -3,6 +3,8 @@ use std::str::FromStr;
 
 extern crate shellwords;
 
+use itertools::Itertools;
+
 #[derive(Debug)]
 pub enum Flag {
     Flag(String),
@@ -96,10 +98,8 @@ pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
                 "!a" => {
                     match &flags[0] {
                         Flag::FlagWithArgument(d, _) => {
-                            if d == &"d".to_string() {
-                                if let Some(s) = s.strip_prefix("!a -d ") {
-                                    return Command::AddBooksFromDir(PathBuf::from(s));
-                                }
+                            if d.as_str().eq("d") {
+                                return Command::AddBooksFromDir(PathBuf::from(s.trim_start_matches("!a -d ")));
                             }
                         }
                         _ => {
@@ -154,33 +154,39 @@ pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
                     return Command::DeleteBook(BookIndex::Selected);
                 }
                 "!e" => {
-                    for flag in flags {
-                        return match flag {
-                            Flag::PositionalArg(args) => {
-                                if args.len() == 3 {
-                                    if let Ok(i) = u32::from_str(args[0].as_str()) {
-                                        Command::EditBook(
-                                            BookIndex::BookID(i),
-                                            args[1].clone(),
-                                            args[2].clone(),
-                                        )
-                                    } else {
-                                        Command::InvalidCommand
-                                    }
-                                } else if args.len() == 2 {
-                                    Command::EditBook(
-                                        BookIndex::Selected,
-                                        args[0].clone(),
-                                        args[1].clone(),
-                                    )
-                                } else {
-                                    Command::InvalidCommand
-                                }
-                            }
-                            _ => Command::InvalidCommand,
-                        };
+                    // TODO: Decide column format? Numerical strings banned? Spaces banned?
+                    //  Allow if quoted?
+                    let mut c = s.chars();
+                    c.next();
+                    c.next();
+                    c.take_while_ref(|x| x.is_whitespace()).for_each(drop);
+                    let num: String = c.take_while_ref(|x| x.is_numeric()).collect();
+                    c.take_while_ref(|x| x.is_whitespace()).for_each(drop);
+                    let col: String = c.take_while_ref(|x| x.is_alphanumeric()).collect();
+                    c.take_while_ref(|x| x.is_whitespace()).for_each(drop);
+                    let new_val: String = c.collect();
+
+                    if col.is_empty() || new_val.is_empty() {
+                        return Command::InvalidCommand;
                     }
-                    return Command::InvalidCommand;
+
+                    return if !num.is_empty() {
+                        if let Ok(i) = u32::from_str(num.as_str()) {
+                            Command::EditBook(
+                                BookIndex::BookID(i),
+                                col,
+                                new_val,
+                            )
+                        } else {
+                            Command::InvalidCommand
+                        }
+                    } else {
+                        Command::EditBook(
+                            BookIndex::Selected,
+                                col,
+                                new_val,
+                        )
+                    };
                 }
                 "!s" => {
                     for flag in flags {

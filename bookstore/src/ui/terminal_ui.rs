@@ -361,11 +361,11 @@ impl<D: AppDatabase> App<D> {
     ///
     /// # Errors
     /// Errors if no book with the given ID exists.
-    fn edit_book_with_id(
+    fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
         &mut self,
         id: u32,
-        column: String,
-        new_value: String,
+        column: S,
+        new_value: T,
     ) -> Result<(), ApplicationError> {
         if let Some(mut book) = self.get_book_with_id(id).cloned() {
             let _ = book.set_column(column, new_value);
@@ -384,10 +384,10 @@ impl<D: AppDatabase> App<D> {
     ///
     /// # Errors
     /// Errors if no book is selected.
-    fn edit_selected_book(
+    fn edit_selected_book<S: AsRef<str>, T: AsRef<str>>(
         &mut self,
-        column: String,
-        new_value: String,
+        column: S,
+        new_value: T,
     ) -> Result<(), ApplicationError> {
         if let Some(mut book) = self.books.selected_item().cloned() {
             let _ = book.set_column(column, new_value);
