@@ -616,10 +616,23 @@ impl<D: AppDatabase> App<D> {
     /// * ` chunk ` - A chunk to specify the command string size.
     fn render_command_prompt<B: Backend>(&mut self, f: &mut Frame<B>, chunk: Rect) {
         let command_widget = if !self.curr_command.is_empty() {
-            Paragraph::new(Text::styled(
+            // TODO: Slow blink looks wrong
+            // let s = self.curr_command[..self.curr_command.len()-1]
+            //     .iter()
+            //     .collect::<String>();
+            // let b = self.curr_command[self.curr_command.len()-1].to_string();
+
+            let text = Text::styled(
                 self.curr_command.iter().collect::<String>(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ))
+                Style::default()
+                    .add_modifier(Modifier::BOLD));
+            // text.extend(
+            //     Text::styled(
+            //         b,
+            //     Style::default()
+            //         .add_modifier(Modifier::RAPID_BLINK))
+            // );
+            Paragraph::new(text)
         } else {
             Paragraph::new(Text::styled(
                 "Enter command or search",
@@ -627,6 +640,49 @@ impl<D: AppDatabase> App<D> {
             ))
         };
         f.render_widget(command_widget, chunk);
+    }
+
+    fn render_book_into_view<B: Backend>(&self, book: &Book, f: &mut Frame<B>, chunk: Rect) {
+        let field_exists = Style::default()
+            .add_modifier(Modifier::BOLD);
+        let field_not_provided = Style::default();
+
+        let mut data = if let Some(t) = &book.title {
+            Text::styled(t, field_exists)
+        } else {
+            Text::styled("No title provided", field_not_provided)
+        };
+        if let Some(t) = &book.authors {
+            let mut s = "By: ".to_string();
+            s.extend(t.join(", ").chars());
+            data.extend(Text::styled(s, field_exists));
+        } else {
+            data.extend(Text::styled("No author provided", field_not_provided))
+        };
+
+        if let Some(columns) = book.get_extended_columns() {
+            data.extend(Text::raw("\nTags provided:"));
+            for (key, value) in columns.iter() {
+                data.extend(Text::styled([key.as_str(), value.as_str()].join(": "), field_exists));
+            }
+        }
+
+        if let Some(variants) = book.get_variants() {
+            for variant in variants {
+                if let Some(paths) = variant.get_paths() {
+                    data.extend(Text::raw("\nVariant paths:"));
+                    for (booktype, path) in paths {
+                        let s = format!("{:?}: {}", booktype, path.display().to_string());
+                        data.extend(Text::styled(s, field_exists));
+                    }
+                }
+            }
+        }
+
+        let p = Paragraph::new(data);
+
+        f.render_widget(p, chunk);
+
     }
 
     // TODO: Make this set an Action so that the handling is external.
@@ -1006,14 +1062,22 @@ impl<D: AppDatabase> App<D> {
 
             if self.updated {
                 terminal.draw(|f| {
-                    let vchunks = Layout::default()
+                    let hchunks = Layout::default()
                         .margin(1)
+                        .direction(Direction::Horizontal)
+                        .constraints([
+                            Constraint::Percentage(75),
+                            Constraint::Percentage(25),
+                        ])
+                        .split(f.size());
+
+                    let vchunks = Layout::default()
                         .direction(Direction::Vertical)
                         .constraints([
                             Constraint::Length(f.size().height - 3),
                             Constraint::Length(1),
                         ])
-                        .split(f.size());
+                        .split(hchunks[0]);
 
                     if vchunks[0].height != 0 {
                         if self.books.window_size() != vchunks[0].height as usize - 1 {
@@ -1035,6 +1099,9 @@ impl<D: AppDatabase> App<D> {
 
                     self.render_columns(f, vchunks[0]);
                     self.render_command_prompt(f, vchunks[1]);
+                    if let Some(b) = self.books.selected_item() {
+                        self.render_book_into_view(b, f, hchunks[1]);
+                    }
                 })?;
                 self.updated = false;
             }
