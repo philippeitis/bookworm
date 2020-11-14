@@ -33,11 +33,7 @@ impl<T> PageView<T> {
     /// of data if possible.
     pub(crate) fn scroll_down(&mut self, inc: usize) -> bool {
         if self.top_index + inc + self.window_size > self.data.len() {
-            let new_val = if self.data.len() <= self.window_size {
-                0
-            } else {
-                self.data.len() - self.window_size
-            };
+            let new_val = self.data.len().saturating_sub(self.window_size);
             let c = self.top_index != new_val;
             self.top_index = new_val;
             c
@@ -117,13 +113,17 @@ impl<T> PageView<T> {
     /// If the cursor moves past the end of the visible window, the window is moved down.
     pub(crate) fn select_down(&mut self) -> bool {
         if let Some(s) = self.selected {
-            if s < self.window_size - 1 && s < self.data.len() - 1 {
+            if s + 1 < self.window_size && s + 1 < self.data.len() {
                 self.select(Some(s + 1))
             } else {
                 self.scroll_down(1)
             }
         } else {
-            self.select(Some(self.window_size - 1))
+            if self.window_size != 0 {
+                self.select(Some(self.window_size - 1))
+            } else {
+                self.select(None)
+            }
         }
     }
 
@@ -165,7 +165,7 @@ impl<T> PageView<T> {
     /// If a value is selected and the view is already at the bottom, the selection is also moved
     /// to the bottom. Otherwise, the selected index is unchanged.
     pub(crate) fn page_down(&mut self) -> bool {
-        if self.selected.is_some() && self.at_end() {
+        if self.selected.is_some() && self.at_end() && self.window_size != 0 {
             return if self.selected != Some(self.window_size - 1) {
                 self.selected = Some(self.window_size - 1);
                 true
