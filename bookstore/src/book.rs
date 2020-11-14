@@ -87,9 +87,9 @@ pub(crate) enum BookError {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct Book {
-    title: Option<String>,
-    authors: Option<Vec<String>>,
-    series: Option<(String, Option<f32>)>,
+    pub(crate) title: Option<String>,
+    pub(crate) authors: Option<Vec<String>>,
+    pub(crate) series: Option<(String, Option<f32>)>,
     variants: Option<Vec<BookVariant>>,
     id: Option<u32>,
     extended_tags: Option<HashMap<String, String>>,
@@ -124,17 +124,18 @@ impl Book {
         }
     }
 
-    pub(crate) fn get_series(&self) -> Option<(String, Option<f32>)> {
-        self.series.clone()
+
+    pub(crate) fn get_series(&self) -> &Option<(String, Option<f32>)> {
+        &self.series
     }
 
     #[allow(dead_code)]
-    pub(crate) fn get_variants(&self) -> Option<Vec<BookVariant>> {
-        self.variants.clone()
+    pub(crate) fn get_variants(&self) -> &Option<Vec<BookVariant>> {
+        &self.variants
     }
 
-    pub(crate) fn get_extended_columns(&self) -> Option<HashMap<String, String>> {
-        self.extended_tags.clone()
+    pub(crate) fn get_extended_columns(&self) -> &Option<HashMap<String, String>> {
+        &self.extended_tags
     }
 
     pub(crate) fn get_column_or<S: AsRef<str>, T: AsRef<str>>(
@@ -152,7 +153,7 @@ impl Book {
                     if let Some(nth_in_series) = nth_in_series {
                         format!("{} [{}]", series_name, nth_in_series)
                     } else {
-                        series_name
+                        series_name.clone()
                     }
                 } else {
                     default.as_ref().to_string()
@@ -211,7 +212,7 @@ impl BookVariant {
             id: None,
         };
         for (booktype, path) in paths {
-            let _ = booktype.fill_in_metadata(&mut book, path.clone());
+            let _ = booktype.fill_in_metadata(&mut book, path);
         }
         if book.local_title == None {
             book.local_title = Some(
@@ -221,11 +222,11 @@ impl BookVariant {
                     .to_string(),
             );
         }
-        Ok(book.clone())
+        Ok(book)
     }
 
-    pub(crate) fn get_paths(&self) -> Option<Vec<(BookType, path::PathBuf)>> {
-        self.paths.clone()
+    pub(crate) fn get_paths(&self) -> &Option<Vec<(BookType, path::PathBuf)>> {
+        &self.paths
     }
 }
 
@@ -342,7 +343,7 @@ impl Book {
                     Ordering::Equal
                 } else if let Some((s_st, s_ind)) = s_series {
                     if let Some((o_st, o_ind)) = o_series {
-                        if s_st.eq(&o_st) {
+                        if s_st.eq(o_st) {
                             if s_ind == o_ind {
                                 Ordering::Equal
                             } else if let Some(s_ind) = s_ind {
