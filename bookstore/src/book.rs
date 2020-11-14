@@ -108,20 +108,12 @@ pub(crate) struct BookVariant {
 }
 
 impl Book {
-    pub(crate) fn get_authors_or(&self, vs: Vec<String>) -> Vec<String> {
-        if let Some(authors) = &self.authors {
-            authors.clone()
-        } else {
-            vs
-        }
+    pub(crate) fn get_authors(&self) -> &Option<Vec<String>> {
+        &self.authors
     }
 
-    pub(crate) fn get_title_or<S: AsRef<str>>(&self, s: S) -> String {
-        if let Some(title) = &self.title {
-            title.clone()
-        } else {
-            s.as_ref().to_string()
-        }
+    pub(crate) fn get_title(&self) -> &Option<String> {
+        &self.title
     }
 
 
@@ -144,9 +136,10 @@ impl Book {
         default: T,
     ) -> String {
         match column.as_ref().to_ascii_lowercase().as_str() {
-            "title" => self.get_title_or(default),
+            "title" => self.get_title().clone().unwrap_or(default.as_ref().to_string()),
             "author" | "authors" => self
-                .get_authors_or(vec![default.as_ref().to_string()])
+                .get_authors().as_ref()
+                .unwrap_or(&vec![default.as_ref().to_string()])
                 .join(", "),
             "series" => {
                 if let Some((series_name, nth_in_series)) = self.get_series() {
