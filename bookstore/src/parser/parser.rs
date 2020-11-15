@@ -10,7 +10,7 @@ pub enum Flag {
     PositionalArg(Vec<String>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum BookIndex {
     Selected,
     BookID(u32),
@@ -34,6 +34,27 @@ pub enum Command {
     Quit,
     Write,
     WriteAndQuit,
+}
+
+impl Command {
+    pub(crate) fn requires_ui(&self) -> bool {
+        match self {
+            Command::UnknownCommand => false,
+            Command::InvalidCommand => false,
+            Command::DeleteBook(b) => b == &BookIndex::Selected,
+            Command::EditBook(b, _, _) => b == &BookIndex::Selected,
+            Command::AddBookFromFile(_) => false,
+            Command::AddBooksFromDir(_) => false,
+            Command::AddColumn(_) => true,
+            Command::RemoveColumn(_) => true,
+            Command::SortColumn(_, _) => true,
+            Command::OpenBookInApp(b) => b == &BookIndex::Selected,
+            Command::OpenBookInExplorer(b) => b == &BookIndex::Selected,
+            Command::Quit => true,
+            Command::Write => true,
+            Command::WriteAndQuit => true,
+        }
+    }
 }
 
 // Get flags and corresponding values
@@ -87,19 +108,19 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
 pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
     let s = s.to_string();
     match shellwords::split(s.as_str()) {
-        Ok(vec) => parse_args(vec),
+        Ok(vec) => parse_args(&vec),
         Err(_) => Command::InvalidCommand,
     }
 }
 
-pub(crate) fn parse_args(vec: Vec<String>) -> Command {
-    let c = if let Some(c) = vec.first() {
+pub(crate) fn parse_args(args: &[String]) -> Command {
+    let c = if let Some(c) = args.first() {
         c
     } else {
         return Command::InvalidCommand;
     };
 
-    let flags = read_flags(&vec[1..]);
+    let flags = read_flags(&args[1..]);
     match c.as_str() {
         "!q" => {
             return Command::Quit;
