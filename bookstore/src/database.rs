@@ -35,7 +35,16 @@ impl From<BookError> for DatabaseError {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub(crate) struct BookMap {
+    max_id: u32,
     books: HashMap<u32, Book>,
+}
+
+impl BookMap {
+    fn new_id(&mut self) -> u32 {
+        let id = self.max_id;
+        self.max_id += 1;
+        id
+    }
 }
 
 pub(crate) struct BasicDatabase {
@@ -122,6 +131,9 @@ pub(crate) trait AppDatabase {
 
     /// Returns a list of columns that exist for at least one book in the database.
     fn get_available_columns(&self) -> Option<Vec<String>>;
+
+    /// Returns a new ID which is larger than all previous IDs.
+    fn get_new_id(&self) -> Result<u32, DatabaseError>;
 }
 
 impl AppDatabase for BasicDatabase {
@@ -165,11 +177,17 @@ impl AppDatabase for BasicDatabase {
         return Ok(ids);
     }
 
+    fn get_new_id(&self) -> Result<u32, DatabaseError> {
+        Ok(self.backend.write(|db| {
+            db.new_id()
+        })?)
+    }
+
     fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
     where
         S: AsRef<path::Path>,
     {
-        match self.insert_book(Book::generate_from_file(file_path)?) {
+        match self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?) {
             Ok(id) => Ok(id),
             Err(e) => Err(DatabaseError::from(e)),
         }
@@ -177,16 +195,9 @@ impl AppDatabase for BasicDatabase {
 
     fn insert_book(&self, book: Book) -> Result<u32, DatabaseError> {
         Ok(self.backend.write(|db| {
-            if let Some(id) = book.get_id() {
-                db.books.insert(id, book);
-                id
-            } else {
-                let index = db.books.keys().max().unwrap_or(&0) + 1;
-                let mut book = book.clone();
-                book.set_id(index);
-                db.books.insert(index, book);
-                index
-            }
+            let id = book.get_id();
+            db.books.insert(id, book);
+            id
         })?)
     }
 

@@ -91,7 +91,7 @@ pub(crate) struct Book {
     pub(crate) authors: Option<Vec<String>>,
     pub(crate) series: Option<(String, Option<f32>)>,
     variants: Option<Vec<BookVariant>>,
-    id: Option<u32>,
+    id: u32,
     extended_tags: Option<HashMap<String, String>>,
 }
 
@@ -115,7 +115,6 @@ impl Book {
     pub(crate) fn get_title(&self) -> &Option<String> {
         &self.title
     }
-
 
     pub(crate) fn get_series(&self) -> &Option<(String, Option<f32>)> {
         &self.series
@@ -153,11 +152,7 @@ impl Book {
                 }
             }
             "id" => {
-                if let Some(id) = self.get_id() {
-                    id.to_string()
-                } else {
-                    default.as_ref().to_string()
-                }
+                self.id.to_string()
             }
             x => {
                 if let Some(d) = &self.extended_tags {
@@ -228,7 +223,7 @@ impl BookVariant {
 }
 
 impl Book {
-    pub(crate) fn generate_from_file<S>(file_path: S) -> Result<Book, BookError>
+    pub(crate) fn generate_from_file<S>(file_path: S, id: u32) -> Result<Book, BookError>
     where
         S: AsRef<path::Path>,
     {
@@ -253,7 +248,7 @@ impl Book {
             authors: None,
             series: None,
             variants: Some(variants.clone()),
-            id: None,
+            id,
             extended_tags: None,
         };
 
@@ -272,11 +267,7 @@ impl Book {
         Ok(book.clone())
     }
 
-    pub(crate) fn set_id(&mut self, d: u32) {
-        self.id = Some(d);
-    }
-
-    pub(crate) fn get_id(&self) -> Option<u32> {
+    pub(crate) fn get_id(&self) -> u32 {
         self.id
     }
 }
@@ -338,7 +329,7 @@ impl Book {
         }
 
         match column.as_ref().to_lowercase().as_str() {
-            "id" => cmp_opt(self.id, other.get_id()),
+            "id" => self.get_id().cmp(&other.get_id()),
             "series" => {
                 let s_series = self.get_series();
                 let o_series = other.get_series();
