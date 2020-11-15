@@ -31,7 +31,9 @@ pub enum Command {
     SortColumn(String, bool),
     OpenBookInApp(BookIndex),
     OpenBookInExplorer(BookIndex),
-    Quit(bool),
+    Quit,
+    Write,
+    WriteAndQuit,
 }
 
 // Get flags and corresponding values
@@ -99,6 +101,15 @@ pub(crate) fn parse_args(vec: Vec<String>) -> Command {
 
     let flags = read_flags(&vec[1..]);
     match c.as_str() {
+        "!q" => {
+            return Command::Quit;
+        }
+        "!w" => {
+            return Command::Write;
+        }
+        "!wq" => {
+            return Command::WriteAndQuit;
+        }
         "!a" => {
             let mut d = false;
             let mut path_exists = false;
@@ -138,24 +149,6 @@ pub(crate) fn parse_args(vec: Vec<String>) -> Command {
                 };
             }
             return Command::InvalidCommand;
-        }
-        "!q" => {
-            for flag in flags {
-                match flag {
-                    Flag::Flag(c) => {
-                        if c == "s".to_string() {
-                            return Command::Quit(false);
-                        }
-                    }
-                    Flag::FlagWithArgument(c, _) => {
-                        if c == "s".to_string() {
-                            return Command::Quit(false);
-                        }
-                    }
-                    _ => {}
-                };
-            }
-            return Command::Quit(true);
         }
         "!d" => {
             for flag in flags {

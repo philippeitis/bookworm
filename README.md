@@ -8,7 +8,9 @@ bookstore is a fast (hopefully) terminal based library management system (like C
   - Sort ascending/descending (!s *column* d?)
   - Add/Remove column (!c -?*column*)
   - Add book(s) (!a path\to\book.ext) | (!a -d path\to\books)
-  - Quit (and don't save) (!q (-s)?)
+  - Quit (!q)
+  - Write (!w)
+  - Write and quit (!wq)
   - (Windows Only) Opening books in native file viewer or File Explorer (!o *id*?) | (!o -f *id*?)
 Hotkey navigation and interaction
 - Scrolling up and down using up / down arrow keys, page up / page down, and home / end

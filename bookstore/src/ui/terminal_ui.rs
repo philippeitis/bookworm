@@ -1113,10 +1113,14 @@ impl<D: AppDatabase> App<D> {
                     self.open_book_in_dir(b)?;
                 }
             }
-            parser::Command::Quit(x) => {
-                if x {
-                    self.db.save()?;
-                }
+            parser::Command::Write => {
+                self.db.save()?;
+            }
+            parser::Command::Quit => {
+                return Ok(false);
+            }
+            parser::Command::WriteAndQuit => {
+                self.db.save()?;
                 return Ok(false);
             }
             _ => {
@@ -1225,20 +1229,18 @@ impl<D: AppDatabase> App<D> {
     }
 }
 
-// Todos:
-// Live search & search by tags - mysql? meillisearch?
-// web support - eg. directly to google drive - google_drive3
-// conversion
-// Description pane
-// Help menu
-// Splash screen
-// New database
-// Copy books to central directory
-// Conversion? Use calibre's code?
-// support for calibre
-// duplicate detection - blake3
-// inline editing w/ deletes and everything: f2
-// add date column?
-// direct commands
-// Convert format to media, convert book to something else
-//
+// TODO:
+//  Live search & search by tags - mysql? meillisearch?
+//  web support - eg. directly to google drive - google_drive3
+//  Conversion (using calibre?)
+//  Help menu
+//  Splash screen
+//  New database
+//  Copy books to central directory: -c flag && set dir in settings.toml
+//  duplicate detection - blake3
+//  add date column?
+//  direct commands: Very close (need to pass in args)
+//      - Pass in args via CLI
+//      - Add Command::requires_ui()
+//  Convert format to media, convert book to something else
+//  Infinite undo redo (!u, !r)
