@@ -182,6 +182,10 @@ impl BookVariant {
         // let data = file.metadata().map_err(|_e| BookError::MetadataError)?;
         let path = file_path.as_ref();
 
+        if !path.is_file() {
+            return Err(BookError::FileError);
+        }
+
         let file_name = if let Some(file_name) = path.file_name() {
             file_name.to_owned()
         } else {
@@ -233,6 +237,12 @@ impl Book {
             .as_ref()
             .canonicalize()
             .unwrap_or(file_path.as_ref().to_path_buf());
+
+        if !file_path.is_file() {
+            return Err(BookError::FileError);
+        }
+
+
         if let Ok(mut variant) = BookVariant::generate_from_file(file_path) {
             variant.id = Some(0);
             variants.push(variant);
