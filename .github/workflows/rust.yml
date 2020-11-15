@@ -4,9 +4,11 @@ on:
   push:
     paths:
     - "**/*.rs"
+    - "**/*.yml"
   pull_request:
     paths:
     - "**/*.rs"
+    - "**/*.yml"
 
 env:
   CARGO_TERM_COLOR: always
