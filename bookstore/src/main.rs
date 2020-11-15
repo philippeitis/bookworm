@@ -15,6 +15,7 @@ use tui::Terminal;
 
 use crate::database::{AppDatabase, BasicDatabase};
 use crate::ui::{settings::Settings, terminal_ui};
+use crate::parser::parse_args;
 
 fn main() -> Result<(), terminal_ui::ApplicationError> {
     #[cfg(feature = "cloud")]
@@ -24,6 +25,14 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
     }
 
     let args: Vec<_> = env::args().collect();
+
+    let before_index = if let Some(i) = args.iter().position(|s| "--".eq(s)) {
+        i
+    } else {
+        args.len()
+    };
+
+    // TODO: Check that these indices are before the flag.
     let db = if let Some(i) = args.iter().position(|s| "--db".eq(s)) {
         if let Some(db) = args.get(i + 1) {
             BasicDatabase::open(db)?
@@ -44,21 +53,33 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
         Settings::open("settings.toml")
     }.unwrap_or(Settings::default());
 
-    let stdout = io::stdout();
-
-    let backend = if cfg!(windows) {
-        CrosstermBackend::new(stdout)
-    } else {
-        println!("Current backend may not offer best results on current operating system.");
-        CrosstermBackend::new(stdout)
-    };
-
-    let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
-    terminal_ui::App::new(
+    let mut app = terminal_ui::App::new(
         "Really Cool Library",
         settings,
         db,
-    )?
-        .run(&mut terminal)
+    )?;
+
+    if before_index != args.len() {
+        let command = parse_args(&args[before_index+1..]);
+        if command.requires_ui() {
+            println!("The selected command ({:?}) requires opening the user interface.", command);
+            return Ok(());
+        }
+        app.run_command(command)?;
+    }
+
+    // TODO: Make -h do something interesting, like open a server in the background.
+    if args.contains(&"-h".to_string()) {
+        return Ok(());
+    }
+
+    if !cfg!(windows) {
+        println!("Current backend may not offer best results on current operating system.");
+    };
+
+    let stdout = io::stdout();
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
+    app.run(&mut terminal)
 }
