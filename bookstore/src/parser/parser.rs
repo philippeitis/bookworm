@@ -3,8 +3,6 @@ use std::str::FromStr;
 
 extern crate shellwords;
 
-use itertools::Itertools;
-
 #[derive(Debug)]
 pub enum Flag {
     Flag(String),
@@ -87,181 +85,186 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
 pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
     let s = s.to_string();
     match shellwords::split(s.as_str()) {
-        Ok(vec) => {
-            let c = if let Some(c) = vec.first() {
-                c
-            } else {
-                return Command::InvalidCommand;
-            };
-            let flags = read_flags(&vec[1..]);
-            match c.as_str() {
-                "!a" => {
-                    match &flags[0] {
-                        Flag::FlagWithArgument(d, _) => {
-                            if d.as_str().eq("d") {
-                                return Command::AddBooksFromDir(PathBuf::from(s.trim_start_matches("!a -d ")));
-                            }
-                        }
-                        _ => {
-                            if let Some(f) = flags.last() {
-                                match f {
-                                    Flag::Flag(d) => {
-                                        if d == &"d".to_string() {
-                                            if let Some(s) = s.strip_prefix("!a -d") {
-                                                return Command::AddBooksFromDir(PathBuf::from(s));
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                    let s = s.chars().skip(3).collect::<String>();
-                    return Command::AddBookFromFile(PathBuf::from(s));
-                }
-                "!q" => {
-                    for flag in flags {
-                        match flag {
-                            Flag::Flag(c) => {
-                                if c == "s".to_string() {
-                                    return Command::Quit(false);
-                                }
-                            }
-                            Flag::FlagWithArgument(c, _) => {
-                                if c == "s".to_string() {
-                                    return Command::Quit(false);
-                                }
-                            }
-                            _ => {}
-                        };
-                    }
-                    return Command::Quit(true);
-                }
-                "!d" => {
-                    for flag in flags {
-                        return match flag {
-                            Flag::PositionalArg(args) => {
-                                if let Ok(i) = u32::from_str(args[0].as_str()) {
-                                    Command::DeleteBook(BookIndex::BookID(i))
-                                } else {
-                                    Command::InvalidCommand
-                                }
-                            }
-                            _ => Command::InvalidCommand,
-                        };
-                    }
-                    return Command::DeleteBook(BookIndex::Selected);
-                }
-                "!e" => {
-                    // TODO: Decide column format? Numerical strings banned? Spaces banned?
-                    //  Allow if quoted?
-                    let mut c = s.chars();
-                    c.next();
-                    c.next();
-                    c.take_while_ref(|x| x.is_whitespace()).for_each(drop);
-                    let num: String = c.take_while_ref(|x| x.is_numeric()).collect();
-                    c.take_while_ref(|x| x.is_whitespace()).for_each(drop);
-                    let col: String = c.take_while_ref(|x| x.is_alphanumeric()).collect();
-                    c.take_while_ref(|x| x.is_whitespace()).for_each(drop);
-                    let new_val: String = c.collect();
+        Ok(vec) => parse_args(vec),
+        Err(_) => Command::InvalidCommand,
+    }
+}
 
-                    if col.is_empty() || new_val.is_empty() {
-                        return Command::InvalidCommand;
-                    }
+pub(crate) fn parse_args(vec: Vec<String>) -> Command {
+    let c = if let Some(c) = vec.first() {
+        c
+    } else {
+        return Command::InvalidCommand;
+    };
 
-                    return if !num.is_empty() {
-                        if let Ok(i) = u32::from_str(num.as_str()) {
-                            Command::EditBook(
-                                BookIndex::BookID(i),
-                                col,
-                                new_val,
-                            )
+    let flags = read_flags(&vec[1..]);
+    match c.as_str() {
+        "!a" => {
+            let mut d = false;
+            let mut path_exists = false;
+            let mut path = PathBuf::new();
+
+            for flag in flags {
+                match flag {
+                    Flag::Flag(c) => {
+                        if c == "d".to_string() {
+                            if path_exists {
+                                return Command::AddBooksFromDir(path);
+                            }
+                            d = true;
+                        }
+                    }
+                    Flag::FlagWithArgument(c, args) => {
+                        if c == "d".to_string() || d {
+                            return Command::AddBooksFromDir(PathBuf::from(&args[0]));
+                        }
+                    }
+                    Flag::PositionalArg(args) => {
+                        if !path_exists {
+                            path_exists = true;
+                            path = PathBuf::from(&args[0]);
+                        }
+                        if d {
+                            return Command::AddBooksFromDir(path);
+                        }
+                    }
+                };
+            }
+            if path_exists {
+                return if d {
+                    Command::AddBooksFromDir(path)
+                } else {
+                    Command::AddBookFromFile(path)
+                };
+            }
+            return Command::InvalidCommand;
+        }
+        "!q" => {
+            for flag in flags {
+                match flag {
+                    Flag::Flag(c) => {
+                        if c == "s".to_string() {
+                            return Command::Quit(false);
+                        }
+                    }
+                    Flag::FlagWithArgument(c, _) => {
+                        if c == "s".to_string() {
+                            return Command::Quit(false);
+                        }
+                    }
+                    _ => {}
+                };
+            }
+            return Command::Quit(true);
+        }
+        "!d" => {
+            for flag in flags {
+                return match flag {
+                    Flag::PositionalArg(args) => {
+                        if let Ok(i) = u32::from_str(args[0].as_str()) {
+                            Command::DeleteBook(BookIndex::BookID(i))
                         } else {
                             Command::InvalidCommand
                         }
-                    } else {
-                        Command::EditBook(
-                            BookIndex::Selected,
-                                col,
-                                new_val,
-                        )
-                    };
-                }
-                "!s" => {
-                    for flag in flags {
-                        return match flag {
-                            Flag::PositionalArg(args) => {
-                                if let Some(s) = args.get(1) {
-                                    if s == "d" {
-                                        return Command::SortColumn(args[0].to_string(), true);
-                                    }
-                                    return Command::InvalidCommand;
-                                }
-                                Command::SortColumn(args[0].to_string(), false)
-                            }
-                            _ => {
-                                return Command::InvalidCommand;
-                            }
-                        };
                     }
-                }
-                "!c" => {
-                    for flag in flags {
-                        return match flag {
-                            Flag::PositionalArg(args) => Command::AddColumn(args[0].clone()),
-                            Flag::Flag(arg) => Command::RemoveColumn(arg),
-                            _ => Command::InvalidCommand,
-                        };
-                    }
-                    return Command::InvalidCommand;
-                }
-                "!o" => {
-                    let mut f = false;
-                    let mut loc_exists = false;
-                    let mut loc = String::new();
-                    for flag in flags {
-                        match flag {
-                            Flag::Flag(c) => {
-                                f |= c == "f".to_string();
+                    _ => Command::InvalidCommand,
+                };
+            }
+            return Command::DeleteBook(BookIndex::Selected);
+        }
+        "!e" => {
+            // TODO: Decide column format? Numerical strings banned? Spaces banned?
+            //  Allow if quoted?
+            for flag in flags {
+                return match flag {
+                    Flag::PositionalArg(args) => {
+                        if args.len() >= 3 {
+                            if let Ok(id) = u32::from_str(args[0].as_str()) {
+                                Command::EditBook(BookIndex::BookID(id), args[1].clone(), args[2].clone())
+                            } else {
+                                Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
                             }
-                            Flag::FlagWithArgument(c, args) => {
-                                if c == "f".to_string() {
-                                    if let Ok(i) = u32::from_str(args[0].as_str()) {
-                                        return Command::OpenBookInExplorer(BookIndex::BookID(i));
-                                    }
-                                    return Command::OpenBookInExplorer(BookIndex::Selected);
-                                }
-                                return Command::InvalidCommand;
-                            }
-                            Flag::PositionalArg(args) => {
-                                loc_exists = true;
-                                loc = args[0].clone();
-                            }
+                        } else {
+                            Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
                         }
-                        if f && loc_exists {
-                            if let Ok(i) = u32::from_str(loc.as_str()) {
+                    }
+                    _ => Command::InvalidCommand,
+                }
+            };
+        }
+        "!s" => {
+            for flag in flags {
+                return match flag {
+                    Flag::PositionalArg(args) => {
+                        if let Some(s) = args.get(1) {
+                            if s == "d" {
+                                return Command::SortColumn(args[0].to_string(), true);
+                            }
+                            return Command::InvalidCommand;
+                        }
+                        Command::SortColumn(args[0].to_string(), false)
+                    }
+                    _ => {
+                        return Command::InvalidCommand;
+                    }
+                };
+            }
+        }
+        "!c" => {
+            for flag in flags {
+                return match flag {
+                    Flag::PositionalArg(args) => Command::AddColumn(args[0].clone()),
+                    Flag::Flag(arg) => Command::RemoveColumn(arg),
+                    _ => Command::InvalidCommand,
+                };
+            }
+        }
+        "!o" => {
+            let mut f = false;
+            let mut loc_exists = false;
+            let mut loc = String::new();
+            for flag in flags {
+                match flag {
+                    Flag::Flag(c) => {
+                        f |= c == "f".to_string();
+                    }
+                    Flag::FlagWithArgument(c, args) => {
+                        if c == "f".to_string() {
+                            if let Ok(i) = u32::from_str(args[0].as_str()) {
                                 return Command::OpenBookInExplorer(BookIndex::BookID(i));
                             }
                             return Command::OpenBookInExplorer(BookIndex::Selected);
                         }
+                        return Command::InvalidCommand;
                     }
-                    if loc_exists {
-                        if let Ok(i) = u32::from_str(loc.as_str()) {
-                            return Command::OpenBookInApp(BookIndex::BookID(i));
-                        }
-                        return Command::OpenBookInApp(BookIndex::Selected);
-                    } else {
-                        if f {
-                            return Command::OpenBookInExplorer(BookIndex::Selected);
-                        }
-                        return Command::OpenBookInApp(BookIndex::Selected);
+                    Flag::PositionalArg(args) => {
+                        loc_exists = true;
+                        loc = args[0].clone();
                     }
                 }
-                _ => return Command::UnknownCommand,
+                if f && loc_exists {
+                    return if let Ok(i) = u32::from_str(loc.as_str()) {
+                        Command::OpenBookInExplorer(BookIndex::BookID(i))
+                    } else {
+                        return Command::OpenBookInExplorer(BookIndex::Selected)
+                    }
+                }
             }
+            return if loc_exists {
+                if let Ok(i) = u32::from_str(loc.as_str()) {
+                    Command::OpenBookInApp(BookIndex::BookID(i))
+                } else {
+                    Command::OpenBookInApp(BookIndex::Selected)
+                }
+            } else {
+                if f {
+                    Command::OpenBookInExplorer(BookIndex::Selected)
+                } else {
+                    Command::OpenBookInApp(BookIndex::Selected)
+                }
+            };
         }
-        Err(_) => return Command::InvalidCommand,
-    }
+        _ => return Command::UnknownCommand,
+    };
     Command::InvalidCommand
 }
