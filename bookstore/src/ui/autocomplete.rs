@@ -20,18 +20,20 @@ impl AutoCompleter<PathBuf> {
         let mut glob_str = word.clone();
         glob_str.push('*');
 
-        let mut p: Vec<_> = glob(glob_str.as_str())
-            .unwrap()
-            .into_iter()
-            .map(|s| s.unwrap())
-            .collect();
-
-        p.sort();
-        Ok(AutoCompleter {
-            word,
-            possibilities: p,
-            curr_state: 0,
-        })
+        if let Ok(paths) = glob(glob_str.as_str()) {
+            let mut p: Vec<_> = paths
+                .into_iter()
+                .filter_map(Result::ok)
+                .collect();
+            p.sort();
+            Ok(AutoCompleter {
+                word,
+                possibilities: p,
+                curr_state: 0,
+            })
+        } else {
+            Err(())
+        }
     }
 
     /// Returns the next path which is at least as long as the original, or None if none can be
