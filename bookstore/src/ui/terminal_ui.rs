@@ -39,6 +39,8 @@ struct CommandString {
     char_buf: Vec<char>,
     auto_fill: Option<AutoCompleter<PathBuf>>,
     autofilled: Option<String>,
+    open_end: bool,
+    keep_last: bool
 }
 
 impl CommandString {
@@ -61,8 +63,11 @@ impl CommandString {
             char_buf: vec![],
             auto_fill: None,
             autofilled: None,
+            open_end: true,
+            keep_last: false,
         }
     }
+
     fn push(&mut self, c: char) {
         self.write_back();
         self.auto_fill = None;
@@ -73,23 +78,19 @@ impl CommandString {
         self.write_back();
         self.auto_fill = None;
         self.char_buf.pop();
+        self.open_end = true;
     }
 
     fn write_back(&mut self) {
         if let Some(s) = &self.autofilled {
             let v = self.get_values();
             self.char_buf = CommandString::vals_to_string(&mut chain(
-                        v[0..v.len() - 1].iter(),
+                        v[0..v.len() - if self.keep_last {0} else {1}].iter(),
                         std::iter::once(&(s.contains(' '), s.clone()))
                     )
                 ).chars().collect();
             self.autofilled = None;
         }
-    }
-
-    fn extend(&mut self, iter: impl Iterator<Item=char>) {
-        self.auto_fill = None;
-        self.char_buf.extend(iter);
     }
 
     fn clear(&mut self) {
@@ -102,16 +103,35 @@ impl CommandString {
         self.char_buf.is_empty()
     }
 
-    fn iter(&self) -> impl Iterator<Item=&char> {
-        self.char_buf.iter()
+    fn refresh_autofill(&mut self) -> Result<(), ()> {
+        if self.auto_fill.is_some() {
+            return Ok(());
+        }
+
+        let values = self.get_values();
+
+        let val = if let Some(val) = values.last() {
+            if !val.0 && val.1.starts_with("-") && self.char_buf.last().eq(&Some(&' ')) {
+                self.keep_last = true;
+                "".to_string()
+            } else {
+                self.keep_last = false;
+                val.1.clone()
+            }
+        } else {
+            "".to_string()
+        };
+
+        self.auto_fill = Some(AutoCompleter::new(val)?);
+        Ok(())
     }
 
     /// Runs autofill on the last value.
-    fn auto_fill(&mut self, dir_or_file: bool) -> String {
-        let values = self.get_values();
+    fn auto_fill(&mut self, dir: bool) {
+        self.open_end = false;
 
         if let Some(af) = self.auto_fill.as_mut() {
-            let path = if dir_or_file {
+            let path = if dir {
                 af.get_next_word_by(&|x| x.is_dir())
             } else {
                 af.get_next_word()
@@ -120,43 +140,8 @@ impl CommandString {
             if let Some(p) = path {
                 let s = p.display().to_string();
                 self.autofilled = Some(s.clone());
-                return CommandString::vals_to_string(&mut chain(
-                        values[0..values.len() - 1].iter(),
-                        std::iter::once(&(s.contains(' '), s))
-                    )
-                );
-            }
-        } else {
-            let val = if let Some(val) = values.last() {
-                if !val.0 && val.1.starts_with("-") && self.char_buf.last().eq(&Some(&' ')) {
-                    "".to_string()
-                } else {
-                    val.1.clone()
-                }
-            } else {
-                "".to_string()
-            };
-
-            let mut af = AutoCompleter::new(val).unwrap();
-            let path = if dir_or_file {
-                af.get_next_word_by(&|x| x.is_dir())
-            } else {
-                af.get_next_word()
-            };
-            self.auto_fill = Some(af);
-
-            if let Some(p) = path {
-                let mut s = p.display().to_string();
-                self.autofilled = Some(s.clone());
-                return CommandString::vals_to_string(&mut chain(
-                        values[0..values.len() - 1].iter(),
-                        std::iter::once(&(s.contains(' '), s))
-                    )
-                );
             }
         }
-
-        CommandString::vals_to_string(&mut values.iter())
     }
 
     fn get_values(&self) -> Vec<(bool, String)> {
@@ -199,10 +184,10 @@ impl CommandString {
 
 impl fmt::Display for CommandString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let vals = if let Some(s) = &self.autofilled {
+        let mut vals = if let Some(s) = &self.autofilled {
             let values = self.get_values();
             CommandString::vals_to_string(&mut chain(
-                    values[0..values.len() - 1].iter(),
+                    values[0..values.len() - if self.keep_last {0} else {1}].iter(),
                     std::iter::once(&(s.contains(' '), s.clone()))
                 )
             )
@@ -210,6 +195,9 @@ impl fmt::Display for CommandString {
             CommandString::vals_to_string(&mut self.get_values().iter())
         };
 
+        if self.open_end && vals.chars().last() == Some('"') {
+            vals.pop();
+        }
         write!(f, "{}", vals)
     }
 }
@@ -292,7 +280,6 @@ pub(crate) struct App<D> {
 
     curr_command: CommandString,
     books: PageView<Book>,
-    auto_fill: bool,
     sort_settings: SortSettings,
     edit: EditState,
     selected_column: usize,
@@ -412,7 +399,6 @@ impl<D: AppDatabase> App<D> {
             available_cols,
             curr_command: CommandString::new(),
             books: PageView::new(0, books),
-            auto_fill: false,
             sort_settings: settings.sort_settings,
             updated: true,
             update_columns: ColumnUpdate::Regenerate,
@@ -744,41 +730,10 @@ impl<D: AppDatabase> App<D> {
     fn render_command_prompt<B: Backend>(&mut self, f: &mut Frame<B>, chunk: Rect) {
         let command_widget = if !self.curr_command.is_empty() {
             // TODO: Slow blink looks wrong
-            // let s = self.curr_command[..self.curr_command.len()-1]
-            //     .iter()
-            //     .collect::<String>();
-            // let b = self.curr_command[self.curr_command.len()-1].to_string();
-            let command = if self.auto_fill {
-                let vals = self.curr_command.get_values();
-                if let Some(val) = vals.get(0) {
-                    if val.1 == "!a" {
-                        let dir = if let Some(val) = self.curr_command.get_values().get(1) {
-                            val.1 == "-d"
-                        } else {
-                            false
-                        };
-                        self.auto_fill = false;
-                        self.curr_command.auto_fill(dir)
-                    } else {
-                        self.curr_command.iter().collect()
-                    }
-                } else {
-                    self.curr_command.iter().collect()
-                }
-            } else {
-                self.curr_command.iter().collect()
-            };
-
             let text = Text::styled(
-                command,
-                Style::default()
-                    .add_modifier(Modifier::BOLD));
-            // text.extend(
-            //     Text::styled(
-            //         b,
-            //     Style::default()
-            //         .add_modifier(Modifier::RAPID_BLINK))
-            // );
+                self.curr_command.to_string(),
+                Style::default().add_modifier(Modifier::BOLD)
+            );
             Paragraph::new(text)
         } else {
             Paragraph::new(Text::styled(
@@ -940,7 +895,18 @@ impl<D: AppDatabase> App<D> {
                                     self.curr_command.clear();
                                 }
                                 KeyCode::Tab | KeyCode::BackTab => {
-                                    self.auto_fill = true;
+                                    self.curr_command.refresh_autofill()?;
+                                    let vals = self.curr_command.get_values();
+                                    if let Some(val) = vals.get(0) {
+                                        if val.1 == "!a" {
+                                            let dir = if let Some(val) = vals.get(1) {
+                                                val.1 == "-d"
+                                            } else {
+                                                false
+                                            };
+                                            self.curr_command.auto_fill(dir);
+                                        }
+                                    };
                                 }
                                 KeyCode::Esc => {
                                     self.curr_command.clear();
@@ -1188,10 +1154,6 @@ impl<D: AppDatabase> App<D> {
             .refresh_window_size(terminal.size()?.height as usize);
 
         loop {
-            // if self.auto_fill {
-            //     let _ = self.generate_autofill();
-            // }
-
             if !self.sort_settings.is_sorted {
                 self.sort_books_by_col();
             }
