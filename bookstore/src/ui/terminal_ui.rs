@@ -26,7 +26,7 @@ use crate::ui::autocomplete::AutoCompleter;
 use crate::ui::settings::{InterfaceStyle, Settings, SortSettings};
 use crate::ui::PageView;
 
-use itertools::{Itertools, chain};
+use itertools::Itertools;
 
 struct EditState {
     pub active: bool,
@@ -145,12 +145,10 @@ impl CommandString {
     }
 
     fn write_back(&mut self) {
-        if let Some(s) = &self.autofilled {
-            let v = self.get_values();
-            self.char_buf = CommandString::vals_to_string(&mut chain(
-                        v[0..v.len() - if self.keep_last {0} else {1}].iter(),
-                        std::iter::once(&(s.contains(' '), s.clone()))
-                    )
+        if self.autofilled.is_some() {
+            let v = self.get_values_autofilled();
+            self.char_buf = CommandString::vals_to_string(
+                &mut v.iter()
                 ).chars().collect();
             self.autofilled = None;
         }
@@ -243,20 +241,21 @@ impl CommandString {
         }
         values
     }
+
+    fn get_values_autofilled(&self) -> Vec<(bool, String)> {
+        let mut values = self.get_values();
+        if let Some(s) = &self.autofilled {
+            values.pop();
+            values.push((s.contains(' '), s.clone()));
+        }
+        values
+    }
+
 }
 
 impl fmt::Display for CommandString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut vals = if let Some(s) = &self.autofilled {
-            let values = self.get_values();
-            CommandString::vals_to_string(&mut chain(
-                    values[0..values.len() - if self.keep_last {0} else {1}].iter(),
-                    std::iter::once(&(s.contains(' '), s.clone()))
-                )
-            )
-        } else {
-            CommandString::vals_to_string(&mut self.get_values().iter())
-        };
+        let mut vals = CommandString::vals_to_string(&mut self.get_values_autofilled().iter());
 
         if self.open_end && vals.chars().last() == Some('"') {
             vals.pop();
@@ -424,7 +423,7 @@ impl<D: AppDatabase> App<D> {
         self.books
             .data()
             .iter()
-            .position(|b| b.get_id() == Some(id))
+            .position(|b| b.get_id() == id)
     }
 
     /// Deletes the book with the given ID. If deleting the book reduces the number of books such
@@ -458,11 +457,7 @@ impl<D: AppDatabase> App<D> {
     ///
     /// * ` id ` - The book ID.
     fn get_book_with_id(&self, id: u32) -> Option<&Book> {
-        if let Some(book) = self.books.data().iter().find(|b| b.get_id() == Some(id)) {
-            Some(book)
-        } else {
-            None
-        }
+        self.books.data().iter().find(|b| b.get_id() == id)
     }
 
     /// Adds the provided books to the internal database and adjusts sorting settings.
@@ -528,13 +523,9 @@ impl<D: AppDatabase> App<D> {
     ///
     /// * ` book ` - The book to add.
     fn update_book(&mut self, book: &Book) -> Result<(), ApplicationError> {
-        let id = if let Some(id) = book.get_id() {
-            self.db.remove_book(id)?;
-            self.db.insert_book(book.clone())?;
-            id
-        } else {
-            self.db.insert_book(book.clone())?
-        };
+        let id = book.get_id();
+        self.db.remove_book(id)?;
+        self.db.insert_book(book.clone())?;
 
         if let Some(index) = self.get_book_index(id) {
             self.books.data_mut()[index] = book.clone();
@@ -891,7 +882,7 @@ impl<D: AppDatabase> App<D> {
                                 }
                                 KeyCode::Enter => {
                                     let args: Vec<_> = self.curr_command
-                                        .get_values().into_iter().map(|(_, a)| a).collect();
+                                        .get_values_autofilled().into_iter().map(|(_, a)| a).collect();
 
                                     if !self.run_command(parse_args(&args))? {
                                         return Ok(true);
@@ -919,7 +910,7 @@ impl<D: AppDatabase> App<D> {
                                 KeyCode::Delete => {
                                     if self.curr_command.is_empty() {
                                         let id = if let Some(b) = self.books.selected_item() {
-                                            b.get_id()
+                                            Some(b.get_id())
                                         } else {
                                             None
                                         };
@@ -1064,7 +1055,7 @@ impl<D: AppDatabase> App<D> {
         match command {
             parser::Command::DeleteBook(b) => {
                 let id = if let Some(b) = self.get_book(b) {
-                    b.get_id()
+                    Some(b.get_id())
                 } else {
                     None
                 };
