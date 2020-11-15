@@ -116,6 +116,16 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database fails.
     fn remove_book(&self, id: u32) -> Result<(), DatabaseError>;
 
+    /// Removes all books with the given IDs. If a book with a given ID does not exists, no change
+    /// for that particular ID.
+    ///
+    /// # Arguments
+    /// * ` ids ` - The IDs of the book to be removed.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
+    fn remove_books(&self, ids: Vec<u32>) -> Result<(), DatabaseError>;
+
     /// Returns a copy of every book in the database. If reading fails, None is returned.
     fn get_all_books(&self) -> Option<Vec<Book>>;
 
@@ -204,6 +214,14 @@ impl AppDatabase for BasicDatabase {
     fn remove_book(&self, id: u32) -> Result<(), DatabaseError> {
         Ok(self.backend.write(|db| {
             db.books.remove(&id);
+        })?)
+    }
+
+    fn remove_books(&self, ids: Vec<u32>) -> Result<(), DatabaseError> {
+        Ok(self.backend.write(|db| {
+            for id in ids {
+                db.books.remove(&id);
+            }
         })?)
     }
 
