@@ -138,16 +138,31 @@ impl AppDatabase for BasicDatabase {
         Ok(self.backend.save()?)
     }
 
+    // TODO: Return vec of successful ids, and vec of unsuccessful (path, error) tuples.
     fn read_books_from_dir<S>(&self, dir: S) -> Result<Vec<u32>, DatabaseError>
     where
         S: AsRef<path::Path>,
     {
-        fs::read_dir(dir)?
+        let results = fs::read_dir(dir)?
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, std::io::Error>>()?
             .iter()
             .map(|path| self.read_book_from_file(path))
-            .collect::<Result<Vec<_>, _>>()
+            .collect::<Vec<_>>();
+        let mut ids = vec![];
+        let mut err = None;
+        for result in results {
+            match result {
+                Ok(id) => {ids.push(id)}
+                Err(e) => {err = Some(e);}
+            }
+        }
+        if let Some(e) = err {
+            if ids.is_empty() {
+                return Err(e);
+            }
+        }
+        return Ok(ids);
     }
 
     fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
