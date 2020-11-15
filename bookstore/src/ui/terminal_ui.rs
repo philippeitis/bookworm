@@ -30,9 +30,72 @@ use itertools::{Itertools, chain};
 
 struct EditState {
     pub active: bool,
+    pub selected: usize,
     pub started_edit: bool,
     pub orig_value: String,
     pub new_value: String
+}
+
+impl Default for EditState {
+    fn default() -> Self {
+        EditState {
+            active: false,
+            selected: 0,
+            started_edit: false,
+            orig_value: "".to_string(),
+            new_value: "".to_string()
+        }
+    }
+}
+
+impl EditState {
+    fn new<S: AsRef<str>>(orig_value: S, selected: usize) -> Self {
+        EditState {
+            active: true,
+            selected,
+            started_edit: false,
+            orig_value: orig_value.as_ref().to_string(),
+            new_value: "".to_string()
+        }
+    }
+
+    fn del(&mut self) {
+        if self.started_edit {
+            self.new_value.pop();
+        } else {
+            self.new_value.clear();
+        }
+        self.started_edit = true;
+    }
+
+    fn push(&mut self, c: char) {
+        if !self.started_edit {
+            self.new_value.clear();
+        }
+        self.started_edit = true;
+        self.new_value.push(c);
+    }
+
+    fn edit_orig(&mut self) {
+        if !self.started_edit {
+            self.started_edit = true;
+            self.new_value = self.orig_value.clone();
+        }
+    }
+
+    fn reset_orig(&mut self, orig_value: String) {
+        self.started_edit = false;
+        self.orig_value = orig_value;
+        self.new_value.clear();
+    }
+
+    fn visible(&self) -> &str {
+        if self.started_edit {
+            self.new_value.as_str()
+        } else {
+            self.orig_value.as_str()
+        }
+    }
 }
 
 struct CommandString {
@@ -199,65 +262,6 @@ impl fmt::Display for CommandString {
             vals.pop();
         }
         write!(f, "{}", vals)
-    }
-}
-
-impl Default for EditState {
-    fn default() -> Self {
-        EditState {
-            active: false,
-            started_edit: false,
-            orig_value: "".to_string(),
-            new_value: "".to_string()
-        }
-    }
-}
-impl EditState {
-    fn new<S: AsRef<str>>(orig_value: S) -> Self {
-        EditState {
-            active: true,
-            started_edit: false,
-            orig_value: orig_value.as_ref().to_string(),
-            new_value: "".to_string()
-        }
-    }
-
-    fn del(&mut self) {
-        if self.started_edit {
-            self.new_value.pop();
-        } else {
-            self.new_value.clear();
-        }
-        self.started_edit = true;
-    }
-
-    fn push(&mut self, c: char) {
-        if !self.started_edit {
-            self.new_value.clear();
-        }
-        self.started_edit = true;
-        self.new_value.push(c);
-    }
-
-    fn edit_orig(&mut self) {
-        if !self.started_edit {
-            self.started_edit = true;
-            self.new_value = self.orig_value.clone();
-        }
-    }
-
-    fn reset_orig(&mut self, orig_value: String) {
-        self.started_edit = false;
-        self.orig_value = orig_value;
-        self.new_value.clear();
-    }
-
-    fn visible(&self) -> &str {
-        if self.started_edit {
-            self.new_value.as_str()
-        } else {
-            self.orig_value.as_str()
-        }
     }
 }
 
@@ -814,7 +818,7 @@ impl<D: AppDatabase> App<D> {
                                     self.updated = true;
                                     if !self.edit.started_edit {
                                         self.edit.active = false;
-                                        self.column_data[self.selected_column][self.books.selected().unwrap()] = self.edit.orig_value.clone();
+                                        self.column_data[self.selected_column][self.edit.selected] = self.edit.orig_value.clone();
                                         return Ok(false);
                                     }
                                     self.edit_selected_book(
@@ -828,7 +832,7 @@ impl<D: AppDatabase> App<D> {
                                 KeyCode::Esc => {
                                     self.edit.active = false;
                                     self.updated = true;
-                                    self.column_data[self.selected_column][self.books.selected().unwrap()] = self.edit.orig_value.clone();
+                                    self.column_data[self.selected_column][self.edit.selected] = self.edit.orig_value.clone();
                                     return Ok(false);
                                 }
                                 KeyCode::Delete => {
@@ -848,7 +852,7 @@ impl<D: AppDatabase> App<D> {
                                         }
                                         self.selected_column += 1;
                                     }
-                                    self.edit.reset_orig(self.column_data[self.selected_column][self.books.selected().unwrap()].clone());
+                                    self.edit.reset_orig(self.column_data[self.selected_column][self.edit.selected].clone());
                                 }
                                 KeyCode::Up => {
                                     if self.selected_column > 0 {
@@ -860,14 +864,14 @@ impl<D: AppDatabase> App<D> {
                                         }
                                         self.selected_column -= 1;
                                     }
-                                    self.edit.reset_orig(self.column_data[self.selected_column][self.books.selected().unwrap()].clone());
+                                    self.edit.reset_orig(self.column_data[self.selected_column][self.edit.selected].clone());
                                 }
                                 _ => return Ok(false),
                             }
                         }
                         _ => return Ok(false),
                     }
-                    self.column_data[self.selected_column][self.books.selected().unwrap()] = self.edit.visible().to_string();
+                    self.column_data[self.selected_column][self.edit.selected] = self.edit.visible().to_string();
                 } else {
                     match read()? {
                         Event::Resize(_, _) => {}
@@ -876,7 +880,7 @@ impl<D: AppDatabase> App<D> {
                             match event.code {
                                 KeyCode::F(2) => {
                                     if let Some(x) = self.books.selected() {
-                                        self.edit = EditState::new(&self.column_data[self.selected_column][x]);
+                                        self.edit = EditState::new(&self.column_data[self.selected_column][x], x);
                                     }
                                 }
                                 KeyCode::Backspace => {
@@ -1195,7 +1199,7 @@ impl<D: AppDatabase> App<D> {
 
                             self.update_column_data();
                             if self.edit.active {
-                                self.column_data[self.selected_column][self.books.selected().unwrap()] = self.edit.visible().to_string();
+                                self.column_data[self.selected_column][self.edit.selected] = self.edit.visible().to_string();
                             }
                         }
                     }
