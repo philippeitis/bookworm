@@ -1064,6 +1064,15 @@ impl<D: AppDatabase> App<D> {
                     self.delete_book(id)?;
                 }
             }
+            parser::Command::DeleteAll => {
+                let ids = self.books.data().iter().map(|b| {
+                    b.get_id()
+                }).collect::<Vec<_>>();
+                self.db.remove_books(ids)?;
+                self.books.data_mut().clear();
+                self.books.refresh();
+                self.update_columns = ColumnUpdate::Regenerate;
+            }
             parser::Command::EditBook(b, field, new_value) => {
                 match b {
                     BookIndex::Selected => self.edit_selected_book(field, new_value)?,

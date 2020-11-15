@@ -23,6 +23,7 @@ pub enum Command {
     UnknownCommand,
     InvalidCommand,
     DeleteBook(BookIndex),
+    DeleteAll,
     EditBook(BookIndex, String, String),
     AddBookFromFile(PathBuf),
     AddBooksFromDir(PathBuf),
@@ -53,6 +54,7 @@ impl Command {
             Command::Quit => true,
             Command::Write => true,
             Command::WriteAndQuit => true,
+            Command::DeleteAll => false,
         }
     }
 }
@@ -174,6 +176,13 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
         "!d" => {
             for flag in flags {
                 return match flag {
+                    Flag::Flag(a) => {
+                        if a.eq("a") {
+                            Command::DeleteAll
+                        } else {
+                            Command::InvalidCommand
+                        }
+                    },
                     Flag::PositionalArg(args) => {
                         if let Ok(i) = u32::from_str(args[0].as_str()) {
                             Command::DeleteBook(BookIndex::BookID(i))

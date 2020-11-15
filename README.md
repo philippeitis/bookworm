@@ -4,7 +4,7 @@ bookstore is a fast (hopefully) terminal based library management system (like C
 - Adding single books and books from directories
 - Command based interaction
   - Edit (!e *id*? *column* *new_value*)
-  - Delete (!d *id*?)
+  - Delete (a specific book, or all books) (!d *id*? -a?)
   - Sort ascending/descending (!s *column* d?)
   - Add/Remove column (!c -?*column*)
   - Add book(s) (!a path\to\book.ext) | (!a -d path\to\books)
