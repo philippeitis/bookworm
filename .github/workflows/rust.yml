@@ -2,17 +2,22 @@ name: Rust
 
 on:
   push:
-    branches: [ master ]
+    paths:
+    - "**/*.rs"
   pull_request:
-    branches: [ master ]
+    paths:
+    - "**/*.rs"
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
 
     steps:
     - uses: actions/checkout@v2
