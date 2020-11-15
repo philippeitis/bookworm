@@ -890,10 +890,10 @@ impl<D: AppDatabase> App<D> {
                                     self.curr_command.push(x);
                                 }
                                 KeyCode::Enter => {
-                                    let args = self.curr_command
+                                    let args: Vec<_> = self.curr_command
                                         .get_values().into_iter().map(|(_, a)| a).collect();
 
-                                    if !self.run_command(parse_args(args))? {
+                                    if !self.run_command(parse_args(&args))? {
                                         return Ok(true);
                                     }
                                     self.curr_command.clear();
@@ -1060,7 +1060,7 @@ impl<D: AppDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` command ` - The command to run.
-    fn run_command(&mut self, command: parser::Command) -> Result<bool, ApplicationError> {
+    pub(crate) fn run_command(&mut self, command: parser::Command) -> Result<bool, ApplicationError> {
         match command {
             parser::Command::DeleteBook(b) => {
                 let id = if let Some(b) = self.get_book(b) {
@@ -1239,8 +1239,5 @@ impl<D: AppDatabase> App<D> {
 //  Copy books to central directory: -c flag && set dir in settings.toml
 //  duplicate detection - blake3
 //  add date column?
-//  direct commands: Very close (need to pass in args)
-//      - Pass in args via CLI
-//      - Add Command::requires_ui()
 //  Convert format to media, convert book to something else
 //  Infinite undo redo (!u, !r)
