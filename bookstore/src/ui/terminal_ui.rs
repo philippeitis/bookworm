@@ -24,6 +24,7 @@ use crate::parser::{parse_args, BookIndex};
 use crate::ui::settings::{InterfaceStyle, Settings, SortSettings};
 use crate::ui::PageView;
 use crate::ui::user_input::{EditState, CommandString};
+use std::collections::HashSet;
 
 // TODO: Add MoveUp / MoveDown for stepping up and down so we don't
 //      regenerate everything from scratch.
@@ -40,7 +41,7 @@ pub(crate) struct App<D> {
     db: D,
 
     selected_cols: Vec<UniCase<String>>,
-    available_cols: Vec<UniCase<String>>,
+    available_cols: HashSet<UniCase<String>>,
 
     curr_command: CommandString,
     books: PageView<Book>,
@@ -148,7 +149,7 @@ impl<D: AppDatabase> App<D> {
             .into_iter()
             .flatten()
             .map(|x| UniCase::new(x))
-            .collect::<Vec<_>>();
+            .collect();
 
         let books = db.get_all_books().into_iter().flatten().collect();
         let column_data = (0..selected_cols.len())
@@ -248,6 +249,7 @@ impl<D: AppDatabase> App<D> {
         new_value: T,
     ) -> Result<(), ApplicationError> {
         if let Some(mut book) = self.get_book_with_id(id).cloned() {
+            self.available_cols.insert(UniCase::new(column.as_ref().to_string()));
             let _ = book.set_column(column, new_value);
             self.update_book(&book)
         } else {
@@ -270,6 +272,7 @@ impl<D: AppDatabase> App<D> {
         new_value: T,
     ) -> Result<(), ApplicationError> {
         if let Some(mut book) = self.books.selected_item().cloned() {
+            self.available_cols.insert(UniCase::new(column.as_ref().to_string()));
             let _ = book.set_column(column, new_value);
             self.update_book(&book)
         } else {
