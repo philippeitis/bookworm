@@ -1,12 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::{fs, path};
 
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 
-use std::fs;
-
-use crate::book::{Book, BookError};
-use std::path;
+use crate::record::{Book, BookError};
 
 #[derive(Debug)]
 pub(crate) enum DatabaseError {

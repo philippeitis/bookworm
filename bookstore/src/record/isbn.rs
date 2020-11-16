@@ -2,8 +2,6 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::isbn::ISBN::ISBN10;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ISBNError {
     DigitTooLarge,
@@ -73,7 +71,7 @@ impl ISBN {
                 num >>= 5;
                 digits[10 - i - 1] = digit;
             }
-            Ok(ISBN10(digits))
+            Ok(ISBN::ISBN10(digits))
         } else {
             Err(ISBNError::UnrecognizedCompactU64Header)
         }
