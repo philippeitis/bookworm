@@ -22,9 +22,13 @@ fn main() -> Result<(), ApplicationError> {
 
     let (args, command) = {
         let args: Vec<_> = env::args().skip(1).collect();
-        let before_index = args.iter().position(|s| "--".eq(s)).unwrap_or(args.len());
-        let (args, command) = args.split_at(before_index);
-        (args.to_owned(), command[1..].to_owned())
+        if args.is_empty() {
+            (vec![], vec![])
+        } else {
+            let before_index = args.iter().position(|s| "--".eq(s)).unwrap_or(args.len());
+            let (args, command) = args.split_at(before_index);
+            (args.to_owned(), command[1..].to_owned())
+        }
     };
 
     let db = if let Some(i) = args.iter().position(|s| "--db".eq(s)) {
