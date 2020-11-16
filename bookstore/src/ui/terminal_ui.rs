@@ -309,6 +309,11 @@ impl<D: AppDatabase> App<D> {
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
     fn update_selected_column(&mut self, word: UniCase<String>, reverse: bool) {
+        let word = UniCase::new(match word.as_str() {
+            "author" => "authors",
+            x => x,
+        }.to_string());
+
         if self.selected_cols.contains(&word) {
             self.sort_settings.column = word;
             self.sort_settings.is_sorted = false;
