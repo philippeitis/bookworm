@@ -46,7 +46,7 @@ impl ISBN {
             let mut digits = [0; 13];
 
             for i in 0..6 {
-                let dual_digit = (num & 0b1111111) as u8;
+                let dual_digit = (num & 0b111_1111) as u8;
                 let low_digit = dual_digit % 10;
                 let high_digit = dual_digit / 10;
                 if dual_digit >= 100 {
