@@ -7,6 +7,8 @@ use std::{fmt, path};
 use epub::doc::EpubDoc;
 use serde::{Deserialize, Serialize};
 
+use mobi::Mobi;
+
 use crate::record::ISBN;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -17,6 +19,25 @@ pub(crate) enum BookType {
     Unsupported(OsString),
 }
 
+#[derive(Debug)]
+pub(crate) enum BookError {
+    FileError,
+    ImmutableColumnError,
+    UnsupportedExtension(BookType)
+    //    MetadataError,
+}
+
+fn unravel_author(author: &String) -> String {
+    if let Some(i) = author.find(",") {
+        let (a, b) = author.split_at(i);
+        let b = b.trim_start_matches(", ");
+        format!("{} {}", b, a).to_string()
+    } else {
+        author.clone()
+    }
+}
+
+// TODO: Implement time out to prevent crashing if reading explodes.
 impl BookType {
     fn new<S>(s: S) -> BookType
     where
@@ -55,16 +76,20 @@ impl BookType {
                 if book.additional_authors == None {
                     for &key in &["author", "authors", "creator"] {
                         if let Some(authors) = doc.metadata.get(key) {
-                            book.additional_authors = Some(authors.clone());
+                            book.additional_authors = Some(
+                                authors
+                                    .iter()
+                                    .map(|a| unravel_author(a))
+                                    .collect()
+                            );
                             break;
                         }
                     }
                 }
-
                 if book.language == None {
                     for &key in &["language", "languages"] {
-                        if let Some(authors) = doc.metadata.get(key) {
-                            book.language = Some(authors[0].clone());
+                        if let Some(language) = doc.metadata.get(key) {
+                            book.language = Some(language[0].clone());
                             break;
                         }
                     }
@@ -72,18 +97,37 @@ impl BookType {
 
                 Ok(())
             }
-            _ => {
-                unimplemented!();
+            BookType::MOBI => {
+                let doc = match Mobi::from_path(file_path) {
+                    Err(_) => return Err(BookError::FileError),
+                    Ok(d) => d,
+                };
+
+                if book.local_title == None {
+                    if let Some(title) = doc.title() {
+                        book.local_title = Some(title.clone());
+                    }
+                }
+
+                if book.additional_authors == None {
+                    if let Some(author) = doc.author() {
+                        book.additional_authors = Some(vec![unravel_author(author)]);
+                    }
+                }
+
+                if book.language == None {
+                    if let Some(language) = doc.language() {
+                        book.language = Some(language);
+                    }
+                }
+
+                Ok(())
+            }
+            b => {
+                Err(BookError::UnsupportedExtension(b.clone()))
             }
         }
     }
-}
-
-#[derive(Debug)]
-pub(crate) enum BookError {
-    FileError,
-    ImmutableColumnError,
-    //    MetadataError,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -315,19 +359,19 @@ impl Book {
     }
 
     pub(crate) fn cmp_column<S: AsRef<str>>(&self, other: &Self, column: S) -> Ordering {
-        fn cmp_opt<T: std::cmp::Ord>(a: Option<T>, b: Option<T>) -> Ordering {
-            if a == b {
-                Ordering::Equal
-            } else if let Some(a) = a {
-                if let Some(b) = b {
-                    a.cmp(&b)
-                } else {
-                    Ordering::Greater
-                }
-            } else {
-                Ordering::Less
-            }
-        }
+        // fn cmp_opt<T: std::cmp::Ord>(a: Option<T>, b: Option<T>) -> Ordering {
+        //     if a == b {
+        //         Ordering::Equal
+        //     } else if let Some(a) = a {
+        //         if let Some(b) = b {
+        //             a.cmp(&b)
+        //         } else {
+        //             Ordering::Greater
+        //         }
+        //     } else {
+        //         Ordering::Less
+        //     }
+        // }
 
         match column.as_ref().to_lowercase().as_str() {
             "id" => self.get_id().cmp(&other.get_id()),
