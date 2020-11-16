@@ -67,13 +67,13 @@ impl BookType {
                     Ok(d) => d,
                 };
 
-                if book.local_title == None {
+                if book.local_title.is_none() {
                     if let Some(title) = doc.metadata.get("title") {
                         book.local_title = Some(title[0].clone());
                     }
                 }
 
-                if book.additional_authors == None {
+                if book.additional_authors.is_none() {
                     for &key in &["author", "authors", "creator"] {
                         if let Some(authors) = doc.metadata.get(key) {
                             book.additional_authors = Some(
@@ -86,11 +86,19 @@ impl BookType {
                         }
                     }
                 }
-                if book.language == None {
+                if book.language.is_none() {
                     for &key in &["language", "languages"] {
                         if let Some(language) = doc.metadata.get(key) {
                             book.language = Some(language[0].clone());
                             break;
+                        }
+                    }
+                }
+
+                if book.isbn.is_none() {
+                    if let Some(isbn) = doc.metadata.get("isbn") {
+                        if let Ok(isbn) = ISBN::from_str(&isbn[0]) {
+                            book.isbn = Some(isbn);
                         }
                     }
                 }
@@ -103,21 +111,29 @@ impl BookType {
                     Ok(d) => d,
                 };
 
-                if book.local_title == None {
+                if book.local_title.is_none() {
                     if let Some(title) = doc.title() {
                         book.local_title = Some(title.clone());
                     }
                 }
 
-                if book.additional_authors == None {
+                if book.additional_authors.is_none() {
                     if let Some(author) = doc.author() {
                         book.additional_authors = Some(vec![unravel_author(author)]);
                     }
                 }
 
-                if book.language == None {
+                if book.language.is_none() {
                     if let Some(language) = doc.language() {
                         book.language = Some(language);
+                    }
+                }
+
+                if book.isbn.is_none() {
+                    if let Some(isbn) = doc.isbn() {
+                        if let Ok(isbn) = ISBN::from_str(isbn) {
+                            book.isbn = Some(isbn);
+                        }
                     }
                 }
 
