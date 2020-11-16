@@ -230,11 +230,14 @@ impl CommandString {
 
 impl fmt::Display for CommandString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut vals = CommandString::vals_to_string(&mut self.get_values_autofilled().iter());
-
-        if self.open_end && vals.chars().last() == Some('"') {
-            vals.pop();
+        if self.autofilled.is_some() {
+            let mut vals = CommandString::vals_to_string(&mut self.get_values_autofilled().iter());
+            if self.open_end && vals.chars().last() == Some('"') {
+                vals.pop();
+            }
+            write!(f, "{}", vals)
+        } else {
+            write!(f, "{}", self.char_buf.iter().collect::<String>())
         }
-        write!(f, "{}", vals)
     }
 }
