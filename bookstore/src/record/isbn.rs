@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
@@ -6,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub(crate) enum ISBNError {
     DigitTooLarge,
     UnrecognizedCompactU64Header,
+    UnexpectedNumberOfDigits(usize),
+    BadChecksum,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -93,7 +96,7 @@ impl ISBN {
         Ok(ISBN::ISBN13(digits))
     }
 
-    pub(crate) fn check(self) -> bool {
+    pub(crate) fn check(&self) -> bool {
         match self {
             ISBN::ISBN13(digits) => {
                 let mut sum = 0u16;
@@ -107,7 +110,7 @@ impl ISBN {
                 let mut s = 0;
                 let mut t = 0;
 
-                for &digit in &digits {
+                for &digit in digits {
                     t += digit as u16;
                     s += t;
                 }
@@ -123,6 +126,37 @@ impl ISBN {
         }
     }
 }
+
+impl FromStr for ISBN {
+    type Err = ISBNError;
+
+    // TODO: Check assumption that ISBN will have either 10 or 13 digits.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let digits: Vec<_> = s.chars().filter_map(|c| c.to_digit(10)).map(|d| d as u8).collect();
+        if digits.len() == 10 {
+            let mut digit_arr = [0; 10];
+            digit_arr.clone_from_slice(&digits);
+            let isbn = ISBN::ISBN10(digit_arr);
+            if isbn.check() {
+                Ok(isbn)
+            } else {
+                Err(ISBNError::BadChecksum)
+            }
+        } else if digits.len() == 13 {
+            let mut digit_arr = [0; 13];
+            digit_arr.clone_from_slice(&digits);
+            let isbn = ISBN::ISBN13(digit_arr);
+            if isbn.check() {
+                Ok(isbn)
+            } else {
+                Err(ISBNError::BadChecksum)
+            }
+        } else {
+            Err(ISBNError::UnexpectedNumberOfDigits(digits.len()))
+        }
+    }
+}
+
 
 impl fmt::Display for ISBN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
