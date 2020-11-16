@@ -1,12 +1,8 @@
 use std::io;
 use std::env;
 
-mod book;
 mod database;
-#[cfg(feature = "cloud")]
-mod google_cloud_lib;
-#[allow(dead_code)]
-mod isbn;
+mod record;
 mod parser;
 mod ui;
 
@@ -14,13 +10,13 @@ use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
 use crate::database::{AppDatabase, BasicDatabase};
-use crate::ui::{settings::Settings, terminal_ui};
+use crate::ui::{Settings, App, ApplicationError};
 use crate::parser::parse_args;
 
-fn main() -> Result<(), terminal_ui::ApplicationError> {
+fn main() -> Result<(), ApplicationError> {
     #[cfg(feature = "cloud")]
     {
-        google_cloud_lib::CloudDatabase::open_database();
+        database::google_cloud_database::CloudDatabase::open_database();
         return Ok(());
     }
 
@@ -51,14 +47,14 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
         Settings::open("settings.toml")
     }.unwrap_or(Settings::default());
 
-    let mut app = terminal_ui::App::new(
+    let mut app = App::new(
         "Really Cool Library",
         settings,
         db,
     )?;
 
-    if before_index != args.len() {
-        let command = parse_args(&args[before_index+1..]);
+    if !command.is_empty() {
+        let command = parse_args(&command);
         if command.requires_ui() {
             println!("The selected command ({:?}) requires opening the user interface.", command);
             return Ok(());
