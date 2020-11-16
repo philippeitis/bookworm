@@ -216,21 +216,38 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             };
         }
         "!s" => {
+            let mut d = false;
+            let mut col_exists = false;
+            let mut col = String::new();
+
             for flag in flags {
-                return match flag {
-                    Flag::PositionalArg(args) => {
-                        if let Some(s) = args.get(1) {
-                            if s == "d" {
-                                return Command::SortColumn(args[0].to_string(), true);
+                match flag {
+                    Flag::Flag(f) => {
+                        if f == "d".to_string() {
+                            if col_exists {
+                                return Command::SortColumn(col, true);
                             }
-                            return Command::InvalidCommand;
+                            d = true;
                         }
-                        Command::SortColumn(args[0].to_string(), false)
                     }
-                    _ => {
-                        return Command::InvalidCommand;
+                    Flag::FlagWithArgument(f, args) => {
+                        if f == "d".to_string() || d {
+                            return Command::SortColumn(args[0].clone(), d);
+                        }
+                    }
+                    Flag::PositionalArg(args) => {
+                        if !col_exists {
+                            col_exists = true;
+                            col = args[0].clone();
+                        }
+                        if d {
+                            return Command::SortColumn(args[0].clone(), true);
+                        }
                     }
                 };
+            }
+            if col_exists {
+                return Command::SortColumn(col, d);
             }
         }
         "!c" => {
