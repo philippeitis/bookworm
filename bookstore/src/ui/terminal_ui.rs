@@ -855,7 +855,8 @@ impl<D: AppDatabase> App<D> {
                 }
             }
             parser::Command::AddBooksFromDir(dir) => {
-                if let Ok(ids) = self.db.read_books_from_dir(dir) {
+                // TODO: Handle fails.
+                if let Ok((ids, _fails)) = self.db.read_books_from_dir(dir) {
                     self.add_books(self.db.get_books(ids).into_iter().flatten());
                 }
             }

@@ -5,6 +5,7 @@ use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 
 use crate::record::{Book, BookError};
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub(crate) enum DatabaseError {
@@ -71,15 +72,16 @@ pub(crate) trait AppDatabase {
     fn save(&self) -> Result<(), DatabaseError>;
 
     /// Reads each book in the directory into the database, and returns a
-    /// Vec of corresponding IDs.
+    /// Vec of corresponding IDs as well as a Vec of paths and errors which occured while trying to
+    /// read them.
     ///
     /// # Arguments
     /// * ` dir ` - A path to directories containing books to load.
     ///
     /// # Errors
     /// This function will return an error if the database fails,
-    /// the directory does not exist, or reading a file fails.
-    fn read_books_from_dir<S>(&self, dir: S) -> Result<Vec<u32>, DatabaseError>
+    /// or the directory does not exist.
+    fn read_books_from_dir<S>(&self, dir: S) -> Result<(Vec<u32>, Vec<(PathBuf, DatabaseError)>), DatabaseError>
     where
         S: AsRef<path::Path>;
 
@@ -158,31 +160,24 @@ impl AppDatabase for BasicDatabase {
         Ok(self.backend.save()?)
     }
 
-    // TODO: Return vec of successful ids, and vec of unsuccessful (path, error) tuples.
-    fn read_books_from_dir<S>(&self, dir: S) -> Result<Vec<u32>, DatabaseError>
+    // TODO: Add possibility of doing this accross multiple threads.
+    fn read_books_from_dir<S>(&self, dir: S) -> Result<(Vec<u32>, Vec<(PathBuf, DatabaseError)>), DatabaseError>
     where
         S: AsRef<path::Path>,
     {
-        let results = fs::read_dir(dir)?
+        let mut ids = vec![];
+        let mut errs = vec![];
+        fs::read_dir(dir)?
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, std::io::Error>>()?
             .iter()
-            .map(|path| self.read_book_from_file(path))
-            .collect::<Vec<_>>();
-        let mut ids = vec![];
-        let mut err = None;
-        for result in results {
-            match result {
-                Ok(id) => {ids.push(id)}
-                Err(e) => {err = Some(e);}
-            }
-        }
-        if let Some(e) = err {
-            if ids.is_empty() {
-                return Err(e);
-            }
-        }
-        return Ok(ids);
+            .for_each(|path| {
+                match self.read_book_from_file(path) {
+                    Ok(id) => ids.push(id),
+                    Err(e) => errs.push((path.clone(), e)),
+                }
+            });
+        return Ok((ids, errs));
     }
 
     fn get_new_id(&self) -> Result<u32, DatabaseError> {
