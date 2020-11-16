@@ -317,14 +317,13 @@ impl<D: AppDatabase> App<D> {
         }
     }
 
-    #[allow(dead_code)]
     fn log(&self, msg: impl AsRef<str>) -> Result<(), ApplicationError> {
         let mut file = OpenOptions::new()
             .write(true)
             .append(true)
             .create(true)
             .open("log.txt")?;
-        file.write_all(format!("{}\n", msg.as_ref()).as_bytes())?;
+        writeln!(file, "{}", msg.as_ref())?;
         Ok(())
     }
 
