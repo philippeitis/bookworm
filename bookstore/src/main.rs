@@ -24,15 +24,13 @@ fn main() -> Result<(), terminal_ui::ApplicationError> {
         return Ok(());
     }
 
-    let args: Vec<_> = env::args().collect();
-
-    let before_index = if let Some(i) = args.iter().position(|s| "--".eq(s)) {
-        i
-    } else {
-        args.len()
+    let (args, command) = {
+        let args: Vec<_> = env::args().skip(1).collect();
+        let before_index = args.iter().position(|s| "--".eq(s)).unwrap_or(args.len());
+        let (args, command) = args.split_at(before_index);
+        (args.to_owned(), command[1..].to_owned())
     };
 
-    // TODO: Check that these indices are before the flag.
     let db = if let Some(i) = args.iter().position(|s| "--db".eq(s)) {
         if let Some(db) = args.get(i + 1) {
             BasicDatabase::open(db)?

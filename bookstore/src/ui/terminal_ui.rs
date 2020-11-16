@@ -5,7 +5,6 @@ use std::path::PathBuf;
 #[cfg(windows)]
 use std::process::Command;
 use std::time::Duration;
-use std::fmt;
 
 use crossterm::event::{poll, read, Event, KeyCode};
 
@@ -18,251 +17,13 @@ use tui::{Frame, Terminal};
 
 use unicase::UniCase;
 
-use crate::book::Book;
+use crate::record::Book;
 use crate::database::{AppDatabase, DatabaseError};
 use crate::parser::parser;
 use crate::parser::{parse_args, BookIndex};
-use crate::ui::autocomplete::AutoCompleter;
 use crate::ui::settings::{InterfaceStyle, Settings, SortSettings};
 use crate::ui::PageView;
-
-use itertools::Itertools;
-
-struct EditState {
-    pub active: bool,
-    pub selected: usize,
-    pub started_edit: bool,
-    pub orig_value: String,
-    pub new_value: String
-}
-
-impl Default for EditState {
-    fn default() -> Self {
-        EditState {
-            active: false,
-            selected: 0,
-            started_edit: false,
-            orig_value: "".to_string(),
-            new_value: "".to_string()
-        }
-    }
-}
-
-impl EditState {
-    fn new<S: AsRef<str>>(orig_value: S, selected: usize) -> Self {
-        EditState {
-            active: true,
-            selected,
-            started_edit: false,
-            orig_value: orig_value.as_ref().to_string(),
-            new_value: "".to_string()
-        }
-    }
-
-    fn del(&mut self) {
-        if self.started_edit {
-            self.new_value.pop();
-        } else {
-            self.new_value.clear();
-        }
-        self.started_edit = true;
-    }
-
-    fn push(&mut self, c: char) {
-        if !self.started_edit {
-            self.new_value.clear();
-        }
-        self.started_edit = true;
-        self.new_value.push(c);
-    }
-
-    fn edit_orig(&mut self) {
-        if !self.started_edit {
-            self.started_edit = true;
-            self.new_value = self.orig_value.clone();
-        }
-    }
-
-    fn reset_orig(&mut self, orig_value: String) {
-        self.started_edit = false;
-        self.orig_value = orig_value;
-        self.new_value.clear();
-    }
-
-    fn visible(&self) -> &str {
-        if self.started_edit {
-            self.new_value.as_str()
-        } else {
-            self.orig_value.as_str()
-        }
-    }
-}
-
-struct CommandString {
-    char_buf: Vec<char>,
-    auto_fill: Option<AutoCompleter<PathBuf>>,
-    autofilled: Option<String>,
-    open_end: bool,
-    keep_last: bool
-}
-
-impl CommandString {
-    fn vals_to_string(values: &mut dyn Iterator<Item=&(bool, std::string::String)>) -> String {
-        values.
-            map(|(escaped, raw_str)| {
-                if *escaped {
-                    let mut s = '"'.to_string();
-                    s.push_str(raw_str.as_str());
-                    s.push('"');
-                    s
-                } else {
-                    raw_str.clone()
-                }
-        }).join(" ")
-    }
-
-    fn new() -> Self {
-        CommandString {
-            char_buf: vec![],
-            auto_fill: None,
-            autofilled: None,
-            open_end: true,
-            keep_last: false,
-        }
-    }
-
-    fn push(&mut self, c: char) {
-        self.write_back();
-        self.auto_fill = None;
-        self.char_buf.push(c)
-    }
-
-    fn pop(&mut self) {
-        self.write_back();
-        self.auto_fill = None;
-        self.char_buf.pop();
-        self.open_end = true;
-    }
-
-    fn write_back(&mut self) {
-        if self.autofilled.is_some() {
-            let v = self.get_values_autofilled();
-            self.char_buf = CommandString::vals_to_string(
-                &mut v.iter()
-                ).chars().collect();
-            self.autofilled = None;
-        }
-    }
-
-    fn clear(&mut self) {
-        self.auto_fill = None;
-        self.autofilled = None;
-        self.char_buf.clear();
-    }
-
-    fn is_empty(&self) -> bool{
-        self.char_buf.is_empty()
-    }
-
-    fn refresh_autofill(&mut self) -> Result<(), ()> {
-        if self.auto_fill.is_some() {
-            return Ok(());
-        }
-
-        let values = self.get_values();
-
-        let val = if let Some(val) = values.last() {
-            if !val.0 && val.1.starts_with("-") && self.char_buf.last().eq(&Some(&' ')) {
-                self.keep_last = true;
-                "".to_string()
-            } else {
-                self.keep_last = false;
-                val.1.clone()
-            }
-        } else {
-            "".to_string()
-        };
-
-        self.auto_fill = Some(AutoCompleter::new(val)?);
-        Ok(())
-    }
-
-    /// Runs autofill on the last value.
-    fn auto_fill(&mut self, dir: bool) {
-        self.open_end = false;
-
-        if let Some(af) = self.auto_fill.as_mut() {
-            let path = if dir {
-                af.get_next_word_by(&|x| x.is_dir())
-            } else {
-                af.get_next_word()
-            };
-
-            if let Some(p) = path {
-                let s = p.display().to_string();
-                self.autofilled = Some(s.clone());
-            }
-        }
-    }
-
-    fn get_values(&self) -> Vec<(bool, String)> {
-        let mut values = vec![];
-        let mut escaped = false;
-        let mut start = 0;
-        for (end, &c) in self.char_buf.iter().enumerate() {
-            match c {
-                ' ' => {
-                    if !escaped {
-                        if start != end {
-                            values.push((escaped, self.char_buf[start..end].iter().collect()));
-                            start = end + 1;
-                        } else {
-                            start += 1;
-                        }
-                    }
-                },
-                '"' => {
-                    if escaped {
-                        values.push((escaped, self.char_buf[start..end].iter().collect()));
-                        start = end;
-                        escaped = false;
-                    } else if start == end {
-                        escaped = true;
-                        start = end + 1;
-                    }
-                }
-                _ => {
-                }
-            }
-        }
-
-        if start < self.char_buf.len() {
-            values.push((escaped, self.char_buf[start..self.char_buf.len()].iter().collect()));
-        }
-        values
-    }
-
-    fn get_values_autofilled(&self) -> Vec<(bool, String)> {
-        let mut values = self.get_values();
-        if let Some(s) = &self.autofilled {
-            values.pop();
-            values.push((s.contains(' '), s.clone()));
-        }
-        values
-    }
-
-}
-
-impl fmt::Display for CommandString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut vals = CommandString::vals_to_string(&mut self.get_values_autofilled().iter());
-
-        if self.open_end && vals.chars().last() == Some('"') {
-            vals.pop();
-        }
-        write!(f, "{}", vals)
-    }
-}
+use crate::ui::user_input::{EditState, CommandString};
 
 // TODO: Add MoveUp / MoveDown for stepping up and down so we don't
 //      regenerate everything from scratch.
@@ -1231,13 +992,17 @@ impl<D: AppDatabase> App<D> {
 
 // TODO:
 //  Live search & search by tags - mysql? meillisearch?
-//  web support - eg. directly to google drive - google_drive3
-//  Conversion (using calibre?)
+//  Cloud sync support (eg. upload database to Google Drive / read from Google Drive)
+//  File conversion (mainly using calibre?)
 //  Help menu
 //  Splash screen
-//  New database
+//  New database button / screen
 //  Copy books to central directory: -c flag && set dir in settings.toml
-//  duplicate detection - blake3
-//  add date column?
+//  Duplicate detection - use blake3 to hash first 4kb or something?
+//  Add automatic date column?
 //  Convert format to media, convert book to something else
 //  Infinite undo redo (!u, !r)
+//  Pop-up notifications
+//  Documentation
+//  Testing
+//  Organize code into specific modules

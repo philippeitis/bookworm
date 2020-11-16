@@ -7,7 +7,8 @@ use std::{fmt, path};
 use epub::doc::EpubDoc;
 use serde::{Deserialize, Serialize};
 
-use crate::isbn::ISBN;
+use crate::record::ISBN;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BookType {
     EPUB,
