@@ -27,7 +27,11 @@ fn main() -> Result<(), ApplicationError> {
         } else {
             let before_index = args.iter().position(|s| "--".eq(s)).unwrap_or(args.len());
             let (args, command) = args.split_at(before_index);
-            (args.to_owned(), command[1..].to_owned())
+            if command.is_empty() {
+                (args.to_owned(), command.to_owned())
+            } else {
+                (args.to_owned(), command[1..].to_owned())
+            }
         }
     };
 
