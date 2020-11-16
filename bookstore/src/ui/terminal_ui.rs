@@ -425,13 +425,17 @@ impl<D: AppDatabase> App<D> {
         //     (0..x).map(|i| columns.iter().map(|x| x[i].clone()).collect()).collect()
         // }
 
-        let col_width = 100 / self.selected_cols.len() as u16;
+        let col_width = chunk.width / self.selected_cols.len() as u16;
+        let mut widths: Vec<_> = std::iter::repeat(col_width).take(self.selected_cols.len()).collect();
+        let total_w: u16 = widths.iter().sum();
+        if total_w != chunk.width {
+            widths[0] += chunk.width - total_w;
+        }
         let hchunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(
-                (0..self.selected_cols.len())
-                    .into_iter()
-                    .map(|_| Constraint::Percentage(col_width))
+                widths.into_iter()
+                    .map(|w| Constraint::Length(w))
                     .collect::<Vec<Constraint>>()
                     .as_ref(),
             )
