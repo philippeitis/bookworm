@@ -5,4 +5,4 @@ pub(crate) mod isbn;
 #[allow(unused_imports)]
 pub(crate) use book::{Book, BookError, BookVariant};
 #[allow(unused_imports)]
-pub(crate) use isbn::{ISBN, ISBNError};
+pub(crate) use isbn::{ISBNError, ISBN};

@@ -1,8 +1,7 @@
-pub(crate) mod database;
+pub(crate) mod basic_database;
 #[cfg(cloud)]
 pub(crate) mod google_cloud_database;
 
-#[allow(unused_imports)]
-pub(crate) use database::{AppDatabase, BasicDatabase, DatabaseError};
+pub(crate) use basic_database::{AppDatabase, BasicDatabase, DatabaseError};
 #[cfg(cloud)]
 pub(crate) use google_cloud_database::CloudDatabase;

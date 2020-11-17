@@ -1,6 +1,10 @@
-use google_drive3::{DriveHub, Error, Result};
 use std::default::Default;
-use yup_oauth2::{ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, MemoryStorage, FlowType};
+
+use google_drive3::{DriveHub, Error, Result};
+
+use yup_oauth2::{
+    ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, FlowType, MemoryStorage,
+};
 
 pub(crate) struct CloudDatabase {}
 

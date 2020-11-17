@@ -1,4 +1,4 @@
-pub(crate) mod parser;
+pub(crate) mod command_parser;
 
 #[allow(unused_imports)]
-pub(crate) use parser::{parse_command_string, parse_args, BookIndex, Command};
+pub(crate) use command_parser::{parse_args, parse_command_string, BookIndex, Command};

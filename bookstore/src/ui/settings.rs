@@ -4,8 +4,6 @@ use tui::style::Color;
 
 use serde::Deserialize;
 
-use toml;
-
 use unicase::UniCase;
 
 /// Provides terminal UI settings.
@@ -31,7 +29,6 @@ pub(crate) struct InterfaceStyle {
     pub selected_bg: Color,
     pub edit_fg: Color,
     pub edit_bg: Color,
-
 }
 
 impl Default for InterfaceStyle {
@@ -61,7 +58,6 @@ impl Default for SortSettings {
         }
     }
 }
-
 
 fn str_to_color<S: AsRef<str>>(s: S) -> Option<Color> {
     match s.as_ref().to_ascii_lowercase().as_str() {
@@ -125,7 +121,7 @@ impl From<TomlColors> for InterfaceStyle {
 impl TomlColors {
     fn selected_bg(&self) -> Color {
         if let Some(color) = &self.selected_bg {
-            str_to_color(color).unwrap_or(Color::LightBlue)
+            str_to_color(color).unwrap_or_else(|| Color::LightBlue)
         } else {
             Color::LightBlue
         }
@@ -133,7 +129,7 @@ impl TomlColors {
 
     fn selected_fg(&self) -> Color {
         if let Some(color) = &self.selected_fg {
-            str_to_color(color).unwrap_or(Color::White)
+            str_to_color(color).unwrap_or_else(|| Color::White)
         } else {
             Color::White
         }
@@ -141,7 +137,7 @@ impl TomlColors {
 
     fn edit_bg(&self) -> Color {
         if let Some(color) = &self.edit_bg {
-            str_to_color(color).unwrap_or(Color::Blue)
+            str_to_color(color).unwrap_or_else(|| Color::Blue)
         } else {
             Color::Blue
         }
@@ -149,12 +145,11 @@ impl TomlColors {
 
     fn edit_fg(&self) -> Color {
         if let Some(color) = &self.edit_fg {
-            str_to_color(color).unwrap_or(Color::White)
+            str_to_color(color).unwrap_or_else(|| Color::White)
         } else {
             Color::White
         }
     }
-
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,29 +173,27 @@ impl From<TomlColumns> for Vec<String> {
     }
 }
 
-
 #[derive(Debug, Deserialize)]
 struct TomlSort {
     column: Option<String>,
-    reverse: Option<bool>
+    reverse: Option<bool>,
 }
 
 impl Default for TomlSort {
     fn default() -> Self {
         TomlSort {
             column: None,
-            reverse: None
+            reverse: None,
         }
     }
 }
 
-
 impl From<TomlSort> for SortSettings {
     fn from(t: TomlSort) -> Self {
         SortSettings {
-            column: UniCase::new(t.column.clone().unwrap_or("".to_string())),
+            column: UniCase::new(t.column.clone().unwrap_or_else(|| "".to_string())),
             is_sorted: t.column.is_none(),
-            reverse: t.reverse.unwrap_or(false)
+            reverse: t.reverse.unwrap_or(false),
         }
     }
 }
@@ -219,9 +212,9 @@ impl Settings {
         let f = std::fs::read_to_string(file.as_ref())?;
         let value: TomlSettings = toml::from_str(f.as_str())?;
         Ok(Settings {
-            interface_style: value.colors.unwrap_or(TomlColors::default()).into(),
-            columns: value.layout.unwrap_or(TomlColumns::default()).into(),
-            sort_settings: value.sorting.unwrap_or(TomlSort::default()).into()
+            interface_style: value.colors.unwrap_or_default().into(),
+            columns: value.layout.unwrap_or_default().into(),
+            sort_settings: value.sorting.unwrap_or_default().into(),
         })
     }
 }

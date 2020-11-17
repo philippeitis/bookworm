@@ -21,10 +21,7 @@ impl AutoCompleter<PathBuf> {
         glob_str.push('*');
 
         if let Ok(paths) = glob(glob_str.as_str()) {
-            let mut p: Vec<_> = paths
-                .into_iter()
-                .filter_map(Result::ok)
-                .collect();
+            let mut p: Vec<_> = paths.into_iter().filter_map(Result::ok).collect();
             p.sort();
             Ok(AutoCompleter {
                 word,

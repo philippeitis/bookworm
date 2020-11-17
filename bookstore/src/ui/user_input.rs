@@ -1,14 +1,16 @@
-use crate::ui::AutoCompleter;
-use std::path::PathBuf;
-use itertools::Itertools;
 use std::fmt;
+use std::path::PathBuf;
+
+use itertools::Itertools;
+
+use crate::ui::AutoCompleter;
 
 pub(crate) struct EditState {
     pub active: bool,
     pub selected: usize,
     pub started_edit: bool,
     pub orig_value: String,
-    pub new_value: String
+    pub new_value: String,
 }
 
 impl Default for EditState {
@@ -18,7 +20,7 @@ impl Default for EditState {
             selected: 0,
             started_edit: false,
             orig_value: "".to_string(),
-            new_value: "".to_string()
+            new_value: "".to_string(),
         }
     }
 }
@@ -30,7 +32,7 @@ impl EditState {
             selected,
             started_edit: false,
             orig_value: orig_value.as_ref().to_string(),
-            new_value: "".to_string()
+            new_value: "".to_string(),
         }
     }
 
@@ -78,13 +80,15 @@ pub(crate) struct CommandString {
     auto_fill: Option<AutoCompleter<PathBuf>>,
     autofilled: Option<String>,
     open_end: bool,
-    keep_last: bool
+    keep_last: bool,
 }
 
 impl CommandString {
-    pub(crate) fn vals_to_string(values: &mut dyn Iterator<Item=&(bool, std::string::String)>) -> String {
-        values.
-            map(|(escaped, raw_str)| {
+    pub(crate) fn vals_to_string(
+        values: &mut dyn Iterator<Item = &(bool, std::string::String)>,
+    ) -> String {
+        values
+            .map(|(escaped, raw_str)| {
                 if *escaped {
                     let mut s = '"'.to_string();
                     s.push_str(raw_str.as_str());
@@ -93,7 +97,8 @@ impl CommandString {
                 } else {
                     raw_str.clone()
                 }
-        }).join(" ")
+            })
+            .join(" ")
     }
 
     pub(crate) fn new() -> Self {
@@ -122,9 +127,9 @@ impl CommandString {
     pub(crate) fn write_back(&mut self) {
         if self.autofilled.is_some() {
             let v = self.get_values_autofilled();
-            self.char_buf = CommandString::vals_to_string(
-                &mut v.iter()
-                ).chars().collect();
+            self.char_buf = CommandString::vals_to_string(&mut v.iter())
+                .chars()
+                .collect();
             self.autofilled = None;
         }
     }
@@ -135,7 +140,7 @@ impl CommandString {
         self.char_buf.clear();
     }
 
-    pub(crate) fn is_empty(&self) -> bool{
+    pub(crate) fn is_empty(&self) -> bool {
         self.char_buf.is_empty()
     }
 
@@ -147,7 +152,7 @@ impl CommandString {
         let values = self.get_values();
 
         let val = if let Some(val) = values.last() {
-            if !val.0 && val.1.starts_with("-") && self.char_buf.last().eq(&Some(&' ')) {
+            if !val.0 && val.1.starts_with('-') && self.char_buf.last().eq(&Some(&' ')) {
                 self.keep_last = true;
                 "".to_string()
             } else {
@@ -174,8 +179,7 @@ impl CommandString {
             };
 
             if let Some(p) = path {
-                let s = p.display().to_string();
-                self.autofilled = Some(s.clone());
+                self.autofilled = Some(p.display().to_string());
             }
         }
     }
@@ -195,7 +199,7 @@ impl CommandString {
                             start += 1;
                         }
                     }
-                },
+                }
                 '"' => {
                     if escaped {
                         values.push((escaped, self.char_buf[start..end].iter().collect()));
@@ -206,13 +210,15 @@ impl CommandString {
                         start = end + 1;
                     }
                 }
-                _ => {
-                }
+                _ => {}
             }
         }
 
         if start < self.char_buf.len() {
-            values.push((escaped, self.char_buf[start..self.char_buf.len()].iter().collect()));
+            values.push((
+                escaped,
+                self.char_buf[start..self.char_buf.len()].iter().collect(),
+            ));
         }
         values
     }
@@ -225,14 +231,13 @@ impl CommandString {
         }
         values
     }
-
 }
 
 impl fmt::Display for CommandString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.autofilled.is_some() {
             let mut vals = CommandString::vals_to_string(&mut self.get_values_autofilled().iter());
-            if self.open_end && vals.chars().last() == Some('"') {
+            if self.open_end && vals.ends_with('"') {
                 vals.pop();
             }
             write!(f, "{}", vals)

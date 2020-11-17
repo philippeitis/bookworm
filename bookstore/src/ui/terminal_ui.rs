@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::iter::FromIterator;
@@ -17,14 +18,13 @@ use tui::{Frame, Terminal};
 
 use unicase::UniCase;
 
-use crate::record::Book;
 use crate::database::{AppDatabase, DatabaseError};
-use crate::parser::parser;
+use crate::parser::command_parser;
 use crate::parser::{parse_args, BookIndex};
+use crate::record::Book;
 use crate::ui::settings::{InterfaceStyle, Settings, SortSettings};
+use crate::ui::user_input::{CommandString, EditState};
 use crate::ui::PageView;
-use crate::ui::user_input::{EditState, CommandString};
-use std::collections::HashSet;
 
 // TODO: Add MoveUp / MoveDown for stepping up and down so we don't
 //      regenerate everything from scratch.
@@ -140,15 +140,17 @@ impl<D: AppDatabase> App<D> {
         settings: Settings,
         db: D,
     ) -> Result<App<D>, ApplicationError> {
-        let selected_cols: Vec<_> = settings.columns.iter().map(|s|
-            UniCase::new(s.clone())
-        ).collect();
+        let selected_cols: Vec<_> = settings
+            .columns
+            .iter()
+            .map(|s| UniCase::new(s.clone()))
+            .collect();
 
         let available_cols = db
             .get_available_columns()
             .into_iter()
             .flatten()
-            .map(|x| UniCase::new(x))
+            .map(UniCase::new)
             .collect();
 
         let books = db.get_all_books().into_iter().flatten().collect();
@@ -171,7 +173,7 @@ impl<D: AppDatabase> App<D> {
             style: settings.interface_style,
             terminal_size: None,
             edit: EditState::default(),
-            selected_column: 0
+            selected_column: 0,
         })
     }
 
@@ -182,10 +184,7 @@ impl<D: AppDatabase> App<D> {
     ///
     /// * ` id ` - The book ID.
     fn get_book_index(&mut self, id: u32) -> Option<usize> {
-        self.books
-            .data()
-            .iter()
-            .position(|b| b.get_id() == id)
+        self.books.data().iter().position(|b| b.get_id() == id)
     }
 
     /// Deletes the book with the given ID. If deleting the book reduces the number of books such
@@ -249,7 +248,8 @@ impl<D: AppDatabase> App<D> {
         new_value: T,
     ) -> Result<(), ApplicationError> {
         if let Some(mut book) = self.get_book_with_id(id).cloned() {
-            self.available_cols.insert(UniCase::new(column.as_ref().to_string()));
+            self.available_cols
+                .insert(UniCase::new(column.as_ref().to_string()));
             let _ = book.set_column(column, new_value);
             self.update_book(&book)
         } else {
@@ -272,7 +272,8 @@ impl<D: AppDatabase> App<D> {
         new_value: T,
     ) -> Result<(), ApplicationError> {
         if let Some(mut book) = self.books.selected_item().cloned() {
-            self.available_cols.insert(UniCase::new(column.as_ref().to_string()));
+            self.available_cols
+                .insert(UniCase::new(column.as_ref().to_string()));
             let _ = book.set_column(column, new_value);
             self.update_book(&book)
         } else {
@@ -309,10 +310,13 @@ impl<D: AppDatabase> App<D> {
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
     fn update_selected_column(&mut self, word: UniCase<String>, reverse: bool) {
-        let word = UniCase::new(match word.as_str() {
-            "author" => "authors",
-            x => x,
-        }.to_string());
+        let word = UniCase::new(
+            match word.as_str() {
+                "author" => "authors",
+                x => x,
+            }
+            .to_string(),
+        );
 
         if self.selected_cols.contains(&word) {
             self.sort_settings.column = word;
@@ -413,7 +417,7 @@ impl<D: AppDatabase> App<D> {
     /// * ` f ` - A frame to render into.
     /// * ` chunk ` - A chunk to specify the visible table size.
     fn render_columns<B: Backend>(&mut self, f: &mut Frame<B>, chunk: Rect) {
-        fn cut_word_to_fit(word: &String, max_len: usize) -> String {
+        fn cut_word_to_fit(word: &str, max_len: usize) -> String {
             if word.len() > max_len {
                 let mut base_word = word.chars().into_iter().collect::<Vec<_>>();
                 base_word.truncate(max_len - 3);
@@ -430,7 +434,9 @@ impl<D: AppDatabase> App<D> {
         // }
 
         let col_width = chunk.width / self.selected_cols.len() as u16;
-        let mut widths: Vec<_> = std::iter::repeat(col_width).take(self.selected_cols.len()).collect();
+        let mut widths: Vec<_> = std::iter::repeat(col_width)
+            .take(self.selected_cols.len())
+            .collect();
         let total_w: u16 = widths.iter().sum();
         if total_w != chunk.width {
             widths[0] += chunk.width - total_w;
@@ -438,27 +444,28 @@ impl<D: AppDatabase> App<D> {
         let hchunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(
-                widths.into_iter()
-                    .map(|w| Constraint::Length(w))
+                widths
+                    .into_iter()
+                    .map(Constraint::Length)
                     .collect::<Vec<Constraint>>()
                     .as_ref(),
             )
             .split(chunk);
 
-        assert!(self
-            .books
-            .selected()
-            .map(|x| { x <= chunk.height as usize })
-            .unwrap_or(true),
+        assert!(
+            self.books
+                .selected()
+                .map(|x| { x <= chunk.height as usize })
+                .unwrap_or(true),
             format!("{:?}", self.books.selected())
         );
 
         let edit_style = Style::default()
-                .fg(self.style.edit_fg)
-                .bg(self.style.edit_bg);
+            .fg(self.style.edit_fg)
+            .bg(self.style.edit_bg);
         let select_style = Style::default()
-                .fg(self.style.selected_fg)
-                .bg(self.style.selected_bg);
+            .fg(self.style.selected_fg)
+            .bg(self.style.selected_bg);
 
         for (i, ((title, data), &chunk)) in self
             .selected_cols
@@ -475,12 +482,11 @@ impl<D: AppDatabase> App<D> {
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))
-            .highlight_style(
-                if self.edit.active && i == self.selected_column {
-                    edit_style
-                } else {
-                    select_style
-                });
+            .highlight_style(if self.edit.active && i == self.selected_column {
+                edit_style
+            } else {
+                select_style
+            });
 
             let mut selected_row = ListState::default();
             selected_row.select(self.books.selected());
@@ -499,7 +505,7 @@ impl<D: AppDatabase> App<D> {
             // TODO: Slow blink looks wrong
             let text = Text::styled(
                 self.curr_command.to_string(),
-                Style::default().add_modifier(Modifier::BOLD)
+                Style::default().add_modifier(Modifier::BOLD),
             );
             Paragraph::new(text)
         } else {
@@ -512,8 +518,7 @@ impl<D: AppDatabase> App<D> {
     }
 
     fn render_book_into_view<B: Backend>(&self, book: &Book, f: &mut Frame<B>, chunk: Rect) {
-        let field_exists = Style::default()
-            .add_modifier(Modifier::BOLD);
+        let field_exists = Style::default().add_modifier(Modifier::BOLD);
         let field_not_provided = Style::default();
 
         let mut data = if let Some(t) = &book.title {
@@ -523,7 +528,7 @@ impl<D: AppDatabase> App<D> {
         };
         if let Some(t) = &book.authors {
             let mut s = "By: ".to_string();
-            s.extend(t.join(", ").chars());
+            s.push_str(&t.join(", "));
             data.extend(Text::styled(s, field_exists));
         } else {
             data.extend(Text::styled("No author provided", field_not_provided))
@@ -532,7 +537,10 @@ impl<D: AppDatabase> App<D> {
         if let Some(columns) = book.get_extended_columns() {
             data.extend(Text::raw("\nTags provided:"));
             for (key, value) in columns.iter() {
-                data.extend(Text::styled([key.as_str(), value.as_str()].join(": "), field_exists));
+                data.extend(Text::styled(
+                    [key.as_str(), value.as_str()].join(": "),
+                    field_exists,
+                ));
             }
         }
 
@@ -581,12 +589,13 @@ impl<D: AppDatabase> App<D> {
                                     self.updated = true;
                                     if !self.edit.started_edit {
                                         self.edit.active = false;
-                                        self.column_data[self.selected_column][self.edit.selected] = self.edit.orig_value.clone();
+                                        self.column_data[self.selected_column]
+                                            [self.edit.selected] = self.edit.orig_value.clone();
                                         return Ok(false);
                                     }
                                     self.edit_selected_book(
                                         self.selected_cols[self.selected_column].clone(),
-                                        self.edit.new_value.clone()
+                                        self.edit.new_value.clone(),
                                     )?;
                                     self.edit.active = false;
                                     self.sort_settings.is_sorted = false;
@@ -595,7 +604,8 @@ impl<D: AppDatabase> App<D> {
                                 KeyCode::Esc => {
                                     self.edit.active = false;
                                     self.updated = true;
-                                    self.column_data[self.selected_column][self.edit.selected] = self.edit.orig_value.clone();
+                                    self.column_data[self.selected_column][self.edit.selected] =
+                                        self.edit.orig_value.clone();
                                     return Ok(false);
                                 }
                                 KeyCode::Delete => {
@@ -610,31 +620,38 @@ impl<D: AppDatabase> App<D> {
                                         if self.edit.started_edit {
                                             self.edit_selected_book(
                                                 self.selected_cols[self.selected_column].clone(),
-                                                self.edit.new_value.clone()
+                                                self.edit.new_value.clone(),
                                             )?;
                                         }
                                         self.selected_column += 1;
                                     }
-                                    self.edit.reset_orig(self.column_data[self.selected_column][self.edit.selected].clone());
+                                    self.edit.reset_orig(
+                                        self.column_data[self.selected_column][self.edit.selected]
+                                            .clone(),
+                                    );
                                 }
                                 KeyCode::Up => {
                                     if self.selected_column > 0 {
                                         if self.edit.started_edit {
                                             self.edit_selected_book(
                                                 self.selected_cols[self.selected_column].clone(),
-                                                self.edit.new_value.clone()
+                                                self.edit.new_value.clone(),
                                             )?;
                                         }
                                         self.selected_column -= 1;
                                     }
-                                    self.edit.reset_orig(self.column_data[self.selected_column][self.edit.selected].clone());
+                                    self.edit.reset_orig(
+                                        self.column_data[self.selected_column][self.edit.selected]
+                                            .clone(),
+                                    );
                                 }
                                 _ => return Ok(false),
                             }
                         }
                         _ => return Ok(false),
                     }
-                    self.column_data[self.selected_column][self.edit.selected] = self.edit.visible().to_string();
+                    self.column_data[self.selected_column][self.edit.selected] =
+                        self.edit.visible().to_string();
                 } else {
                     match read()? {
                         Event::Resize(_, _) => {}
@@ -643,7 +660,10 @@ impl<D: AppDatabase> App<D> {
                             match event.code {
                                 KeyCode::F(2) => {
                                     if let Some(x) = self.books.selected() {
-                                        self.edit = EditState::new(&self.column_data[self.selected_column][x], x);
+                                        self.edit = EditState::new(
+                                            &self.column_data[self.selected_column][x],
+                                            x,
+                                        );
                                     }
                                 }
                                 KeyCode::Backspace => {
@@ -653,8 +673,12 @@ impl<D: AppDatabase> App<D> {
                                     self.curr_command.push(x);
                                 }
                                 KeyCode::Enter => {
-                                    let args: Vec<_> = self.curr_command
-                                        .get_values_autofilled().into_iter().map(|(_, a)| a).collect();
+                                    let args: Vec<_> = self
+                                        .curr_command
+                                        .get_values_autofilled()
+                                        .into_iter()
+                                        .map(|(_, a)| a)
+                                        .collect();
 
                                     if !self.run_command(parse_args(&args))? {
                                         return Ok(true);
@@ -823,9 +847,12 @@ impl<D: AppDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` command ` - The command to run.
-    pub(crate) fn run_command(&mut self, command: parser::Command) -> Result<bool, ApplicationError> {
+    pub(crate) fn run_command(
+        &mut self,
+        command: command_parser::Command,
+    ) -> Result<bool, ApplicationError> {
         match command {
-            parser::Command::DeleteBook(b) => {
+            command_parser::Command::DeleteBook(b) => {
                 let id = if let Some(b) = self.get_book(b) {
                     Some(b.get_id())
                 } else {
@@ -836,22 +863,25 @@ impl<D: AppDatabase> App<D> {
                     self.delete_book(id)?;
                 }
             }
-            parser::Command::DeleteAll => {
-                let ids = self.books.data().iter().map(|b| {
-                    b.get_id()
-                }).collect::<Vec<_>>();
+            command_parser::Command::DeleteAll => {
+                let ids = self
+                    .books
+                    .data()
+                    .iter()
+                    .map(|b| b.get_id())
+                    .collect::<Vec<_>>();
                 self.db.remove_books(ids)?;
                 self.books.data_mut().clear();
                 self.books.refresh();
                 self.update_columns = ColumnUpdate::Regenerate;
             }
-            parser::Command::EditBook(b, field, new_value) => {
+            command_parser::Command::EditBook(b, field, new_value) => {
                 match b {
                     BookIndex::Selected => self.edit_selected_book(field, new_value)?,
                     BookIndex::BookID(id) => self.edit_book_with_id(id, field, new_value)?,
                 };
             }
-            parser::Command::AddBookFromFile(f) => {
+            command_parser::Command::AddBookFromFile(f) => {
                 let id = self.db.read_book_from_file(f);
                 if let Ok(id) = id {
                     if let Some(book) = self.db.get_book(id) {
@@ -859,40 +889,40 @@ impl<D: AppDatabase> App<D> {
                     }
                 }
             }
-            parser::Command::AddBooksFromDir(dir) => {
+            command_parser::Command::AddBooksFromDir(dir) => {
                 // TODO: Handle fails.
                 if let Ok((ids, _fails)) = self.db.read_books_from_dir(dir) {
                     self.add_books(self.db.get_books(ids).into_iter().flatten());
                 }
             }
-            parser::Command::AddColumn(column) => {
+            command_parser::Command::AddColumn(column) => {
                 self.update_columns = ColumnUpdate::AddColumn(UniCase::new(column));
             }
-            parser::Command::RemoveColumn(column) => {
+            command_parser::Command::RemoveColumn(column) => {
                 self.update_columns = ColumnUpdate::RemoveColumn(UniCase::new(column));
             }
-            parser::Command::SortColumn(column, rev) => {
+            command_parser::Command::SortColumn(column, rev) => {
                 self.update_selected_column(UniCase::new(column), rev);
             }
             #[cfg(windows)]
-            parser::Command::OpenBookInApp(b) => {
+            command_parser::Command::OpenBookInApp(b) => {
                 if let Some(b) = self.get_book(b) {
                     self.open_book(b)?;
                 }
             }
             #[cfg(windows)]
-            parser::Command::OpenBookInExplorer(b) => {
+            command_parser::Command::OpenBookInExplorer(b) => {
                 if let Some(b) = self.get_book(b) {
                     self.open_book_in_dir(b)?;
                 }
             }
-            parser::Command::Write => {
+            command_parser::Command::Write => {
                 self.db.save()?;
             }
-            parser::Command::Quit => {
+            command_parser::Command::Quit => {
                 return Ok(false);
             }
-            parser::Command::WriteAndQuit => {
+            command_parser::Command::WriteAndQuit => {
                 self.db.save()?;
                 return Ok(false);
             }
@@ -954,10 +984,7 @@ impl<D: AppDatabase> App<D> {
                     let hchunks = Layout::default()
                         .margin(1)
                         .direction(Direction::Horizontal)
-                        .constraints([
-                            Constraint::Percentage(75),
-                            Constraint::Percentage(25),
-                        ])
+                        .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
                         .split(f.size());
 
                     let vchunks = Layout::default()
@@ -968,16 +995,16 @@ impl<D: AppDatabase> App<D> {
                         ])
                         .split(hchunks[0]);
 
-                    if vchunks[0].height != 0 {
-                        if self.books.window_size() != vchunks[0].height as usize - 1 {
-                            self.books
-                                .refresh_window_size(vchunks[0].height as usize - 1);
-                            self.update_columns = ColumnUpdate::Regenerate;
+                    let curr_height = vchunks[0].height as usize;
+                    if curr_height != 0 && self.books.window_size() != curr_height - 1 {
+                        self.books
+                            .refresh_window_size(vchunks[0].height as usize - 1);
+                        self.update_columns = ColumnUpdate::Regenerate;
 
-                            self.update_column_data();
-                            if self.edit.active {
-                                self.column_data[self.selected_column][self.edit.selected] = self.edit.visible().to_string();
-                            }
+                        self.update_column_data();
+                        if self.edit.active {
+                            self.column_data[self.selected_column][self.edit.selected] =
+                                self.edit.visible().to_string();
                         }
                     }
 

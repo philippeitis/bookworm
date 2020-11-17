@@ -1,17 +1,17 @@
-use std::io;
 use std::env;
+use std::io;
 
 mod database;
-mod record;
 mod parser;
+mod record;
 mod ui;
 
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
 use crate::database::{AppDatabase, BasicDatabase};
-use crate::ui::{Settings, App, ApplicationError};
 use crate::parser::parse_args;
+use crate::ui::{App, ApplicationError, Settings};
 
 fn main() -> Result<(), ApplicationError> {
     #[cfg(feature = "cloud")]
@@ -53,18 +53,18 @@ fn main() -> Result<(), ApplicationError> {
         }
     } else {
         Settings::open("settings.toml")
-    }.unwrap_or(Settings::default());
+    }
+    .unwrap_or_default();
 
-    let mut app = App::new(
-        "Really Cool Library",
-        settings,
-        db,
-    )?;
+    let mut app = App::new("Really Cool Library", settings, db)?;
 
     if !command.is_empty() {
         let command = parse_args(&command);
         if command.requires_ui() {
-            println!("The selected command ({:?}) requires opening the user interface.", command);
+            println!(
+                "The selected command ({:?}) requires opening the user interface.",
+                command
+            );
             return Ok(());
         }
         app.run_command(command)?;

@@ -1,17 +1,18 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
+use std::fs::File;
+use std::io::{BufReader, Error};
 use std::str::FromStr;
 use std::{fmt, path};
 
 use epub::doc::EpubDoc;
-use serde::{Deserialize, Serialize};
 
 use mobi::MobiMetadata;
 
+use serde::{Deserialize, Serialize};
+
 use crate::record::ISBN;
-use std::fs::File;
-use std::io::{BufReader, Error};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BookType {
@@ -25,22 +26,22 @@ pub(crate) enum BookType {
 pub(crate) enum BookError {
     FileError,
     ImmutableColumnError,
-    UnsupportedExtension(BookType)
-    //    MetadataError,
+    UnsupportedExtension(BookType), //    MetadataError,
 }
 
 impl From<std::io::Error> for BookError {
-    fn from(e: Error) -> Self {
+    fn from(_: Error) -> Self {
         BookError::FileError
     }
 }
-fn unravel_author(author: &String) -> String {
-    if let Some(i) = author.find(",") {
+
+fn unravel_author(author: &str) -> String {
+    if let Some(i) = author.find(',') {
         let (a, b) = author.split_at(i);
-        let b = b.trim_start_matches(", ");
-        format!("{} {}", b, a).to_string()
+        let b = b.trim_start_matches(',').trim_start_matches(' ');
+        format!("{} {}", b, a)
     } else {
-        author.clone()
+        author.to_string()
     }
 }
 
@@ -85,12 +86,8 @@ impl BookType {
                 if book.additional_authors.is_none() {
                     for &key in &["author", "authors", "creator"] {
                         if let Some(authors) = metadata.get(key) {
-                            book.additional_authors = Some(
-                                authors
-                                    .iter()
-                                    .map(|a| unravel_author(a))
-                                    .collect()
-                            );
+                            book.additional_authors =
+                                Some(authors.iter().map(|a| unravel_author(a)).collect());
                             break;
                         }
                     }
@@ -145,9 +142,7 @@ impl BookType {
 
                 Ok(())
             }
-            b => {
-                Err(BookError::UnsupportedExtension(b.clone()))
-            }
+            b => Err(BookError::UnsupportedExtension(b.clone())),
         }
     }
 }
@@ -187,7 +182,6 @@ impl Book {
         &self.series
     }
 
-    #[allow(dead_code)]
     pub(crate) fn get_variants(&self) -> &Option<Vec<BookVariant>> {
         &self.variants
     }
@@ -202,11 +196,16 @@ impl Book {
         default: T,
     ) -> String {
         match column.as_ref().to_ascii_lowercase().as_str() {
-            "title" => self.get_title().clone().unwrap_or(default.as_ref().to_string()),
-            "author" | "authors" => self
-                .get_authors().as_ref()
-                .unwrap_or(&vec![default.as_ref().to_string()])
-                .join(", "),
+            "title" => self
+                .get_title()
+                .clone()
+                .unwrap_or_else(|| default.as_ref().to_string()),
+            "author" | "authors" => {
+                match self.get_authors() {
+                    None => default.as_ref().to_string(),
+                    Some(authors) => authors.join(", "),
+                }
+            },
             "series" => {
                 if let Some((series_name, nth_in_series)) = self.get_series() {
                     if let Some(nth_in_series) = nth_in_series {
@@ -218,9 +217,7 @@ impl Book {
                     default.as_ref().to_string()
                 }
             }
-            "id" => {
-                self.id.to_string()
-            }
+            "id" => self.id.to_string(),
             x => {
                 if let Some(d) = &self.extended_tags {
                     match d.get(x) {
@@ -295,15 +292,17 @@ impl Book {
         S: AsRef<path::Path>,
     {
         let mut variants = vec![];
-        let file_path = file_path
-            .as_ref()
-            .canonicalize()
-            .unwrap_or(file_path.as_ref().to_path_buf());
+        let file_path = {
+            let file_path = file_path.as_ref();
+            match file_path.canonicalize() {
+                Ok(p) => p,
+                Err(_) => file_path.to_path_buf(),
+            }
+        };
 
         if !file_path.is_file() {
             return Err(BookError::FileError);
         }
-
 
         if let Ok(mut variant) = BookVariant::generate_from_file(file_path) {
             variant.id = Some(0);
@@ -331,7 +330,8 @@ impl Book {
                 }
             }
         }
-        Ok(book.clone())
+
+        Ok(book)
     }
 
     pub(crate) fn get_id(&self) -> u32 {
@@ -340,7 +340,11 @@ impl Book {
 }
 
 impl Book {
-    pub(crate) fn set_column<S: AsRef<str>, T: AsRef<str>>(&mut self, column: S, value: T) -> Result<(), BookError> {
+    pub(crate) fn set_column<S: AsRef<str>, T: AsRef<str>>(
+        &mut self,
+        column: S,
+        value: T,
+    ) -> Result<(), BookError> {
         match column.as_ref().to_lowercase().as_str() {
             "title" => {
                 self.title = Some(value.as_ref().to_string());
@@ -352,9 +356,11 @@ impl Book {
                 return Err(BookError::ImmutableColumnError);
             }
             "series" => {
-                if value.as_ref().ends_with("]") {
+                if value.as_ref().ends_with(']') {
                     // Replace with rsplit_once when stable.
-                    let mut words = value.as_ref().rsplitn(2, |c: char| c.is_whitespace()).into_iter();
+                    let mut words = value
+                        .as_ref()
+                        .rsplitn(2, |c: char| c.is_whitespace());
                     if let Some(id) = words.next() {
                         if let Some(series) = words.next() {
                             if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str())
@@ -409,7 +415,7 @@ impl Book {
                                 Ordering::Equal
                             } else if let Some(s_ind) = s_ind {
                                 if let Some(o_ind) = o_ind {
-                                    s_ind.partial_cmp(&o_ind).unwrap_or(Ordering::Equal)
+                                    s_ind.partial_cmp(&o_ind).unwrap_or_else(|| Ordering::Equal)
                                 } else {
                                     Ordering::Greater
                                 }
@@ -438,7 +444,7 @@ impl fmt::Display for Book {
         if let Some(title) = &self.title {
             write!(f, "{}", title)
         } else {
-            write!(f, "{}", "")
+            write!(f, "")
         }
     }
 }
