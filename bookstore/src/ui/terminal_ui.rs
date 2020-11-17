@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::iter::FromIterator;
+#[cfg(windows)]
 use std::path::PathBuf;
 #[cfg(windows)]
 use std::process::Command;
@@ -763,13 +764,14 @@ impl<D: AppDatabase> App<D> {
         Ok(false)
     }
 
+    #[cfg(windows)]
     /// Returns the first available path amongst the variants of the book, or None if no such
     /// path exists.
     ///
     /// # Arguments
     ///
     /// * ` book ` - The book to find a path for.
-    fn get_first_book_path(book: &Book) -> Option<std::path::PathBuf> {
+    fn get_first_book_path(book: &Book) -> Option<PathBuf> {
         if let Some(variants) = book.get_variants() {
             for variant in variants {
                 if let Some(paths) = variant.get_paths() {
