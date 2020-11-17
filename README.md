@@ -27,3 +27,13 @@ bookstore is a fast (hopefully) terminal based library management system (like C
 - Providing a mechanism to use external extensions to take advantage of existing scripts for the features below:
   - Metadata scraping (eg. fetch book data)
   - Conversion of ebooks
+  
+# Installation
+
+```bash
+git clone https://github.com/philippeitis/bookstore.git
+cd bookstore
+cargo install --path bookstore
+```
+
+The minimum supported Rust version is 1.44.0.
