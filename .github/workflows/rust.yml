@@ -33,3 +33,5 @@ jobs:
       run: cd bookstore && cargo test --verbose
     - name: Run clippy
       run: rustup component add clippy && cd bookstore && cargo clippy
+    - name: Formatting
+      run: cd bookstore && cargo fmt -- --check
