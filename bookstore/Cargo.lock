@@ -311,8 +311,7 @@ checksum = "a246d82be1c9d791c5dfde9a2bd045fc3cbba3fa2b11ad558f27d01712f00569"
 [[package]]
 name = "epub"
 version = "1.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a262c3a7f8e916c61cf659bf1d449b1fd997ccf696cec2803f2a72cf0d3b25b"
+source = "git+https://github.com/philippeitis/epub-rs?branch=simplify_new#8ad97f02ef9075df6fab7d2f7130f75a3b619ac2"
 dependencies = [
  "failure",
  "percent-encoding 2.1.0",
