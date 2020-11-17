@@ -7,7 +7,7 @@ use std::{fmt, path};
 use epub::doc::EpubDoc;
 use serde::{Deserialize, Serialize};
 
-use mobi::Mobi;
+use mobi::MobiMetadata;
 
 use crate::record::ISBN;
 
@@ -56,6 +56,7 @@ impl BookType {
         }
     }
 
+    // TODO: Pass raw files to EpubDoc / Mobi
     fn fill_in_metadata<S>(&self, book: &mut BookVariant, file_path: S) -> Result<(), BookError>
     where
         S: AsRef<path::Path>,
@@ -106,7 +107,7 @@ impl BookType {
                 Ok(())
             }
             BookType::MOBI => {
-                let doc = match Mobi::from_path(file_path) {
+                let doc = match MobiMetadata::from_path(file_path) {
                     Err(_) => return Err(BookError::FileError),
                     Ok(d) => d,
                 };
