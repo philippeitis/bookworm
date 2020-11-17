@@ -209,11 +209,7 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                                 args[2].clone(),
                             )
                         } else {
-                            Command::EditBook(
-                                BookIndex::Selected,
-                                args[0].clone(),
-                                args[1].clone(),
-                            )
+                            Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
                         }
                     } else {
                         Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())

@@ -216,13 +216,12 @@ impl AppDatabase for BasicDatabase {
         })?)
     }
 
+    // TODO: Make this return a Vec of references?
     fn get_all_books(&self) -> Option<Vec<Book>> {
         match self.backend.read(|db| -> Result<Option<Vec<Book>>, ()> {
-            Ok(Some(
-                db.books.values().cloned().collect(),
-            ))
+            Ok(Some(db.books.values().cloned().collect()))
         }) {
-            Ok(book) => book.unwrap_or(None),
+            Ok(books) => books.unwrap_or(None),
             Err(_) => None,
         }
     }
