@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use mobi::MobiMetadata;
 
 use crate::record::ISBN;
+use std::fs::File;
+use std::io::{BufReader, Error};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BookType {
@@ -27,6 +29,11 @@ pub(crate) enum BookError {
     //    MetadataError,
 }
 
+impl From<std::io::Error> for BookError {
+    fn from(e: Error) -> Self {
+        BookError::FileError
+    }
+}
 fn unravel_author(author: &String) -> String {
     if let Some(i) = author.find(",") {
         let (a, b) = author.split_at(i);
@@ -56,27 +63,28 @@ impl BookType {
         }
     }
 
-    // TODO: Pass raw files to EpubDoc / Mobi
     fn fill_in_metadata<S>(&self, book: &mut BookVariant, file_path: S) -> Result<(), BookError>
     where
         S: AsRef<path::Path>,
     {
         match self {
             BookType::EPUB => {
-                let doc = match EpubDoc::new(file_path) {
+                let file = File::open(file_path)?;
+                let buf = BufReader::new(file);
+                let metadata = match EpubDoc::from_reader(buf) {
+                    Ok(d) => d.metadata,
                     Err(_) => return Err(BookError::FileError),
-                    Ok(d) => d,
                 };
 
                 if book.local_title.is_none() {
-                    if let Some(title) = doc.metadata.get("title") {
+                    if let Some(title) = metadata.get("title") {
                         book.local_title = Some(title[0].clone());
                     }
                 }
 
                 if book.additional_authors.is_none() {
                     for &key in &["author", "authors", "creator"] {
-                        if let Some(authors) = doc.metadata.get(key) {
+                        if let Some(authors) = metadata.get(key) {
                             book.additional_authors = Some(
                                 authors
                                     .iter()
@@ -89,7 +97,7 @@ impl BookType {
                 }
                 if book.language.is_none() {
                     for &key in &["language", "languages"] {
-                        if let Some(language) = doc.metadata.get(key) {
+                        if let Some(language) = metadata.get(key) {
                             book.language = Some(language[0].clone());
                             break;
                         }
@@ -97,7 +105,7 @@ impl BookType {
                 }
 
                 if book.isbn.is_none() {
-                    if let Some(isbn) = doc.metadata.get("isbn") {
+                    if let Some(isbn) = metadata.get("isbn") {
                         if let Ok(isbn) = ISBN::from_str(&isbn[0]) {
                             book.isbn = Some(isbn);
                         }
@@ -107,10 +115,7 @@ impl BookType {
                 Ok(())
             }
             BookType::MOBI => {
-                let doc = match MobiMetadata::from_path(file_path) {
-                    Err(_) => return Err(BookError::FileError),
-                    Ok(d) => d,
-                };
+                let doc = MobiMetadata::from_path(file_path)?;
 
                 if book.local_title.is_none() {
                     if let Some(title) = doc.title() {
