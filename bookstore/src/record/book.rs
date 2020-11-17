@@ -200,11 +200,9 @@ impl Book {
                 .get_title()
                 .clone()
                 .unwrap_or_else(|| default.as_ref().to_string()),
-            "author" | "authors" => {
-                match self.get_authors() {
-                    None => default.as_ref().to_string(),
-                    Some(authors) => authors.join(", "),
-                }
+            "author" | "authors" => match self.get_authors() {
+                None => default.as_ref().to_string(),
+                Some(authors) => authors.join(", "),
             },
             "series" => {
                 if let Some((series_name, nth_in_series)) = self.get_series() {
@@ -345,22 +343,22 @@ impl Book {
         column: S,
         value: T,
     ) -> Result<(), BookError> {
-        match column.as_ref().to_lowercase().as_str() {
+        let column = column.as_ref();
+        let value = value.as_ref();
+        match column.to_lowercase().as_str() {
             "title" => {
-                self.title = Some(value.as_ref().to_string());
+                self.title = Some(value.to_string());
             }
             "author" | "authors" => {
-                self.authors = Some(vec![value.as_ref().to_string()]);
+                self.authors = Some(vec![value.to_string()]);
             }
             "id" | "variants" => {
                 return Err(BookError::ImmutableColumnError);
             }
             "series" => {
-                if value.as_ref().ends_with(']') {
+                if value.ends_with(']') {
                     // Replace with rsplit_once when stable.
-                    let mut words = value
-                        .as_ref()
-                        .rsplitn(2, |c: char| c.is_whitespace());
+                    let mut words = value.rsplitn(2, |c: char| c.is_whitespace());
                     if let Some(id) = words.next() {
                         if let Some(series) = words.next() {
                             if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str())
@@ -370,15 +368,15 @@ impl Book {
                         }
                     }
                 } else {
-                    self.series = Some((value.as_ref().to_string(), None));
+                    self.series = Some((value.to_string(), None));
                 }
             }
             _ => {
                 if let Some(d) = self.extended_tags.as_mut() {
-                    d.insert(column.as_ref().to_string(), value.as_ref().to_string());
+                    d.insert(column.to_string(), value.to_string());
                 } else {
                     let mut d = HashMap::new();
-                    d.insert(column.as_ref().to_string(), value.as_ref().to_string());
+                    d.insert(column.to_string(), value.to_string());
                     self.extended_tags = Some(d);
                 }
             }
