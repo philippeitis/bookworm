@@ -610,7 +610,7 @@ dependencies = [
 [[package]]
 name = "mobi"
 version = "0.4.3"
-source = "git+https://github.com/philippeitis/mobi-rs?branch=mobi_metadata#7aad851babd8fa278868b052d7c255916569d1cd"
+source = "git+https://github.com/philippeitis/mobi-rs?branch=mobi_metadata#87865990f6dc54f1195b61b096815f94e30b8424"
 dependencies = [
  "byteorder",
  "encoding",

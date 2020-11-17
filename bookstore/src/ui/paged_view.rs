@@ -20,8 +20,8 @@ impl<T> PageView<T> {
 
     /// Returns whether the last element of data is in the window.
     pub(crate) fn at_end(&self) -> bool {
-        self.window_size >= self.data.len() ||
-            self.top_index >= self.data.len() - self.window_size - 1
+        self.window_size >= self.data.len()
+            || self.top_index >= self.data.len() - self.window_size - 1
     }
 
     /// Returns whether the first element of data is in the window
@@ -77,13 +77,11 @@ impl<T> PageView<T> {
                 self.selected = ind;
                 true
             }
+        } else if self.selected == index {
+            false
         } else {
-            if self.selected == index {
-                false
-            } else {
-                self.selected = index;
-                true
-            }
+            self.selected = index;
+            true
         }
     }
 
@@ -118,12 +116,10 @@ impl<T> PageView<T> {
             } else {
                 self.scroll_down(1)
             }
+        } else if self.window_size != 0 {
+            self.select(Some(self.window_size - 1))
         } else {
-            if self.window_size != 0 {
-                self.select(Some(self.window_size - 1))
-            } else {
-                self.select(None)
-            }
+            self.select(None)
         }
     }
 
@@ -255,10 +251,10 @@ impl<T> PageView<T> {
                         Some(window_size - 1)
                     });
                 } else if ind >= self.data.len() {
-                    if self.data.len() > 0 {
-                        self.select(Some(self.data.len() - 1));
-                    } else {
+                    if self.data.is_empty() {
                         self.select(None);
+                    } else {
+                        self.select(Some(self.data.len() - 1));
                     }
                 }
             } else if window_size >= old_size {
@@ -350,7 +346,5 @@ mod test {
         assert!(view.selected().unwrap() < 25);
         view.scroll_up(40);
         assert!(view.selected().unwrap() < 25);
-
     }
-
 }

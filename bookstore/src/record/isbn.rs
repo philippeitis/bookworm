@@ -132,7 +132,11 @@ impl FromStr for ISBN {
 
     // TODO: Check assumption that ISBN will have either 10 or 13 digits.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let digits: Vec<_> = s.chars().filter_map(|c| c.to_digit(10)).map(|d| d as u8).collect();
+        let digits: Vec<_> = s
+            .chars()
+            .filter_map(|c| c.to_digit(10))
+            .map(|d| d as u8)
+            .collect();
         if digits.len() == 10 {
             let mut digit_arr = [0; 10];
             digit_arr.clone_from_slice(&digits);
@@ -157,7 +161,6 @@ impl FromStr for ISBN {
     }
 }
 
-
 impl fmt::Display for ISBN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fn digit_to_str(digit: u8) -> char {
@@ -165,11 +168,11 @@ impl fmt::Display for ISBN {
         }
         match self {
             ISBN::ISBN10(digits) => {
-                let s: String = digits.into_iter().map(|&c| digit_to_str(c)).collect();
+                let s: String = digits.iter().map(|&c| digit_to_str(c)).collect();
                 write!(f, "{}", s)
             }
             ISBN::ISBN13(digits) => {
-                let s: String = digits.into_iter().map(|&c| digit_to_str(c)).collect();
+                let s: String = digits.iter().map(|&c| digit_to_str(c)).collect();
                 write!(f, "{}", s)
             }
         }

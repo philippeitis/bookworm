@@ -71,7 +71,7 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
     let mut ended = false;
     for v in vec.iter() {
         ended = false;
-        if v.starts_with("-") {
+        if v.starts_with('-') {
             if last_flag_valid {
                 if flag_args.is_empty() {
                     flags.push(Flag::Flag(flag.clone()));
@@ -80,12 +80,11 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
                     flag_args.clear();
                     ended = true;
                 }
-            } else {
-                if !flag_args.is_empty() {
-                    flags.push(Flag::PositionalArg(flag_args.clone()));
-                    flag_args.clear();
-                }
+            } else if !flag_args.is_empty() {
+                flags.push(Flag::PositionalArg(flag_args.clone()));
+                flag_args.clear();
             }
+
             flag = v.trim_start_matches('-').to_string();
             last_flag_valid = true;
         } else {
@@ -101,12 +100,13 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
                 flags.push(Flag::Flag(flag));
             }
         } else {
-            flags.push(Flag::PositionalArg(flag_args.clone()));
+            flags.push(Flag::PositionalArg(flag_args));
         }
     }
     flags
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
     let s = s.to_string();
     match shellwords::split(s.as_str()) {
@@ -141,7 +141,7 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             for flag in flags {
                 match flag {
                     Flag::Flag(c) => {
-                        if c == "d".to_string() {
+                        if c == "d" {
                             if path_exists {
                                 return Command::AddBooksFromDir(path);
                             }
@@ -149,7 +149,7 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                         }
                     }
                     Flag::FlagWithArgument(c, args) => {
-                        if c == "d".to_string() || d {
+                        if c == "d" || d {
                             return Command::AddBooksFromDir(PathBuf::from(&args[0]));
                         }
                     }
@@ -174,15 +174,15 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             return Command::InvalidCommand;
         }
         "!d" => {
-            for flag in flags {
-                return match flag {
+            return if let Some(flag) = flags.first() {
+                match flag {
                     Flag::Flag(a) => {
                         if a.eq("a") {
                             Command::DeleteAll
                         } else {
                             Command::InvalidCommand
                         }
-                    },
+                    }
                     Flag::PositionalArg(args) => {
                         if let Ok(i) = u32::from_str(args[0].as_str()) {
                             Command::DeleteBook(BookIndex::BookID(i))
@@ -191,28 +191,35 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                         }
                     }
                     _ => Command::InvalidCommand,
-                };
-            }
-            return Command::DeleteBook(BookIndex::Selected);
+                }
+            } else {
+                Command::DeleteBook(BookIndex::Selected)
+            };
         }
         "!e" => {
             // TODO: Decide column format? Numerical strings banned? Spaces banned?
             //  Allow if quoted?
-            for flag in flags {
-                return match flag {
-                    Flag::PositionalArg(args) => {
-                        if args.len() >= 3 {
-                            if let Ok(id) = u32::from_str(args[0].as_str()) {
-                                Command::EditBook(BookIndex::BookID(id), args[1].clone(), args[2].clone())
-                            } else {
-                                Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
-                            }
+            return match flags.first() {
+                Some(Flag::PositionalArg(args)) => {
+                    if args.len() >= 3 {
+                        if let Ok(id) = u32::from_str(args[0].as_str()) {
+                            Command::EditBook(
+                                BookIndex::BookID(id),
+                                args[1].clone(),
+                                args[2].clone(),
+                            )
                         } else {
-                            Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
+                            Command::EditBook(
+                                BookIndex::Selected,
+                                args[0].clone(),
+                                args[1].clone(),
+                            )
                         }
+                    } else {
+                        Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
                     }
-                    _ => Command::InvalidCommand,
                 }
+                _ => Command::InvalidCommand,
             };
         }
         "!s" => {
@@ -223,7 +230,7 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             for flag in flags {
                 match flag {
                     Flag::Flag(f) => {
-                        if f == "d".to_string() {
+                        if f == "d" {
                             if col_exists {
                                 return Command::SortColumn(col, true);
                             }
@@ -231,7 +238,7 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                         }
                     }
                     Flag::FlagWithArgument(f, args) => {
-                        if f == "d".to_string() || d {
+                        if f == "d" || d {
                             return Command::SortColumn(args[0].clone(), d);
                         }
                     }
@@ -251,13 +258,11 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             }
         }
         "!c" => {
-            for flag in flags {
-                return match flag {
-                    Flag::PositionalArg(args) => Command::AddColumn(args[0].clone()),
-                    Flag::Flag(arg) => Command::RemoveColumn(arg),
-                    _ => Command::InvalidCommand,
-                };
-            }
+            return match flags.first() {
+                Some(Flag::PositionalArg(args)) => Command::AddColumn(args[0].clone()),
+                Some(Flag::Flag(arg)) => Command::RemoveColumn(arg.clone()),
+                _ => Command::InvalidCommand,
+            };
         }
         "!o" => {
             let mut f = false;
@@ -266,10 +271,10 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             for flag in flags {
                 match flag {
                     Flag::Flag(c) => {
-                        f |= c == "f".to_string();
+                        f |= c == "f";
                     }
                     Flag::FlagWithArgument(c, args) => {
-                        if c == "f".to_string() {
+                        if c == "f" {
                             if let Ok(i) = u32::from_str(args[0].as_str()) {
                                 return Command::OpenBookInExplorer(BookIndex::BookID(i));
                             }
@@ -286,8 +291,8 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                     return if let Ok(i) = u32::from_str(loc.as_str()) {
                         Command::OpenBookInExplorer(BookIndex::BookID(i))
                     } else {
-                        return Command::OpenBookInExplorer(BookIndex::Selected)
-                    }
+                        return Command::OpenBookInExplorer(BookIndex::Selected);
+                    };
                 }
             }
             return if loc_exists {
@@ -296,12 +301,10 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                 } else {
                     Command::OpenBookInApp(BookIndex::Selected)
                 }
+            } else if f {
+                Command::OpenBookInExplorer(BookIndex::Selected)
             } else {
-                if f {
-                    Command::OpenBookInExplorer(BookIndex::Selected)
-                } else {
-                    Command::OpenBookInApp(BookIndex::Selected)
-                }
+                Command::OpenBookInApp(BookIndex::Selected)
             };
         }
         _ => return Command::UnknownCommand,

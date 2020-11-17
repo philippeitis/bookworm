@@ -5,30 +5,29 @@ use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 
 use crate::record::{Book, BookError};
-use std::path::PathBuf;
 
 #[derive(Debug)]
 pub(crate) enum DatabaseError {
-    IoError(std::io::Error),
-    BookReadingError(BookError),
-    BackendError(RustbreakError),
+    Io(std::io::Error),
+    BookReading(BookError),
+    Backend(RustbreakError),
 }
 
 impl From<std::io::Error> for DatabaseError {
     fn from(e: std::io::Error) -> Self {
-        DatabaseError::IoError(e)
+        DatabaseError::Io(e)
     }
 }
 
 impl From<RustbreakError> for DatabaseError {
     fn from(e: RustbreakError) -> Self {
-        DatabaseError::BackendError(e)
+        DatabaseError::Backend(e)
     }
 }
 
 impl From<BookError> for DatabaseError {
     fn from(e: BookError) -> Self {
-        DatabaseError::BookReadingError(e)
+        DatabaseError::BookReading(e)
     }
 }
 
@@ -81,7 +80,10 @@ pub(crate) trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails,
     /// or the directory does not exist.
-    fn read_books_from_dir<S>(&self, dir: S) -> Result<(Vec<u32>, Vec<(PathBuf, DatabaseError)>), DatabaseError>
+    fn read_books_from_dir<S>(
+        &self,
+        dir: S,
+    ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
     where
         S: AsRef<path::Path>;
 
@@ -161,7 +163,10 @@ impl AppDatabase for BasicDatabase {
     }
 
     // TODO: Add possibility of doing this accross multiple threads.
-    fn read_books_from_dir<S>(&self, dir: S) -> Result<(Vec<u32>, Vec<(PathBuf, DatabaseError)>), DatabaseError>
+    fn read_books_from_dir<S>(
+        &self,
+        dir: S,
+    ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
     where
         S: AsRef<path::Path>,
     {
@@ -171,29 +176,22 @@ impl AppDatabase for BasicDatabase {
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, std::io::Error>>()?
             .iter()
-            .for_each(|path| {
-                match self.read_book_from_file(path) {
-                    Ok(id) => ids.push(id),
-                    Err(e) => errs.push((path.clone(), e)),
-                }
+            .for_each(|path| match self.read_book_from_file(path) {
+                Ok(id) => ids.push(id),
+                Err(e) => errs.push(e),
             });
-        return Ok((ids, errs));
+        Ok((ids, errs))
     }
 
     fn get_new_id(&self) -> Result<u32, DatabaseError> {
-        Ok(self.backend.write(|db| {
-            db.new_id()
-        })?)
+        Ok(self.backend.write(|db| db.new_id())?)
     }
 
     fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
     where
         S: AsRef<path::Path>,
     {
-        match self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?) {
-            Ok(id) => Ok(id),
-            Err(e) => Err(DatabaseError::from(e)),
-        }
+        Ok(self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?)?)
     }
 
     fn insert_book(&self, book: Book) -> Result<u32, DatabaseError> {
@@ -221,7 +219,7 @@ impl AppDatabase for BasicDatabase {
     fn get_all_books(&self) -> Option<Vec<Book>> {
         match self.backend.read(|db| -> Result<Option<Vec<Book>>, ()> {
             Ok(Some(
-                db.books.values().into_iter().map(|b| b.clone()).collect(),
+                db.books.values().cloned().collect(),
             ))
         }) {
             Ok(book) => book.unwrap_or(None),
@@ -264,7 +262,7 @@ impl AppDatabase for BasicDatabase {
             Ok(book) => {
                 if let Ok(x) = book {
                     if let Some(hset) = x {
-                        return Some(hset.iter().map(|col| col.clone()).collect());
+                        return Some(hset.iter().cloned().collect());
                     }
                 }
                 None
