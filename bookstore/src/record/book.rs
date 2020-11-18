@@ -170,24 +170,24 @@ pub(crate) struct BookVariant {
 }
 
 impl Book {
-    pub(crate) fn get_authors(&self) -> &Option<Vec<String>> {
-        &self.authors
+    pub(crate) fn get_authors(&self) -> Option<&[String]> {
+        self.authors.as_deref()
     }
 
-    pub(crate) fn get_title(&self) -> &Option<String> {
-        &self.title
+    pub(crate) fn get_title(&self) -> Option<&str> {
+        self.title.as_deref()
     }
 
-    pub(crate) fn get_series(&self) -> &Option<(String, Option<f32>)> {
-        &self.series
+    pub(crate) fn get_series(&self) -> Option<&(String, Option<f32>)> {
+        self.series.as_ref()
     }
 
-    pub(crate) fn get_variants(&self) -> &Option<Vec<BookVariant>> {
-        &self.variants
+    pub(crate) fn get_variants(&self) -> Option<&[BookVariant]> {
+        self.variants.as_deref()
     }
 
-    pub(crate) fn get_extended_columns(&self) -> &Option<HashMap<String, String>> {
-        &self.extended_tags
+    pub(crate) fn get_extended_columns(&self) -> Option<&HashMap<String, String>> {
+        self.extended_tags.as_ref()
     }
 
     pub(crate) fn get_column_or<S: AsRef<str>, T: AsRef<str>>(
@@ -199,7 +199,8 @@ impl Book {
             "title" => self
                 .get_title()
                 .clone()
-                .unwrap_or_else(|| default.as_ref().to_string()),
+                .unwrap_or_else(|| default.as_ref())
+                .to_string(),
             "author" | "authors" => match self.get_authors() {
                 None => default.as_ref().to_string(),
                 Some(authors) => authors.join(", "),
