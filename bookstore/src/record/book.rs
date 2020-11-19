@@ -1,12 +1,9 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::fs::File;
-use std::io::{BufReader, Error};
+use std::io::Error;
 use std::str::FromStr;
 use std::{fmt, path};
-
-use epub::doc::EpubDoc;
 
 use mobi::MobiMetadata;
 
@@ -69,50 +66,8 @@ impl BookType {
         S: AsRef<path::Path>,
     {
         match self {
-            BookType::EPUB => {
-                let file = File::open(file_path)?;
-                let buf = BufReader::new(file);
-                let metadata = match EpubDoc::from_reader(buf) {
-                    Ok(d) => d.metadata,
-                    Err(_) => return Err(BookError::FileError),
-                };
-
-                if book.local_title.is_none() {
-                    if let Some(title) = metadata.get("title") {
-                        book.local_title = Some(title[0].clone());
-                    }
-                }
-
-                if book.additional_authors.is_none() {
-                    for &key in &["author", "authors", "creator"] {
-                        if let Some(authors) = metadata.get(key) {
-                            book.additional_authors =
-                                Some(authors.iter().map(|a| unravel_author(a)).collect());
-                            break;
-                        }
-                    }
-                }
-                if book.language.is_none() {
-                    for &key in &["language", "languages"] {
-                        if let Some(language) = metadata.get(key) {
-                            book.language = Some(language[0].clone());
-                            break;
-                        }
-                    }
-                }
-
-                if book.isbn.is_none() {
-                    if let Some(isbn) = metadata.get("isbn") {
-                        if let Ok(isbn) = ISBN::from_str(&isbn[0]) {
-                            book.isbn = Some(isbn);
-                        }
-                    }
-                }
-
-                Ok(())
-            }
             BookType::MOBI => {
-                let doc = MobiMetadata::from_path(file_path)?;
+                let doc = MobiMetadata::from_path(&file_path)?;
 
                 if book.local_title.is_none() {
                     if let Some(title) = doc.title() {
@@ -122,7 +77,7 @@ impl BookType {
 
                 if book.additional_authors.is_none() {
                     if let Some(author) = doc.author() {
-                        book.additional_authors = Some(vec![unravel_author(author)]);
+                        book.additional_authors = Some(vec![unravel_author(&author)]);
                     }
                 }
 
@@ -134,7 +89,7 @@ impl BookType {
 
                 if book.isbn.is_none() {
                     if let Some(isbn) = doc.isbn() {
-                        if let Ok(isbn) = ISBN::from_str(isbn) {
+                        if let Ok(isbn) = ISBN::from_str(&isbn) {
                             book.isbn = Some(isbn);
                         }
                     }
@@ -359,7 +314,7 @@ impl Book {
             "series" => {
                 if value.ends_with(']') {
                     // Replace with rsplit_once when stable.
-                    let mut words = value.rsplitn(2, |c: char| c.is_whitespace());
+                    let mut words = value.rsplitn(2, char::is_whitespace);
                     if let Some(id) = words.next() {
                         if let Some(series) = words.next() {
                             if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str())
