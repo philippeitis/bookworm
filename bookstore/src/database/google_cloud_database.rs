@@ -6,7 +6,9 @@ use yup_oauth2::{
     ApplicationSecret, Authenticator, DefaultAuthenticatorDelegate, FlowType, MemoryStorage,
 };
 
-pub(crate) struct CloudDatabase {}
+pub(crate) struct CloudDatabase {
+    // hub: DriveHub;
+}
 
 impl CloudDatabase {
     pub(crate) fn open_database() {

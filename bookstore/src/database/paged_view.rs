@@ -6,6 +6,7 @@ pub struct PageView<T> {
 }
 
 // TODO: Make selection relative to values inside, and add select_in_window
+//  Add pages, callback to source to fetch more values. Make this part of BasicDatabase.
 impl<T> PageView<T> {
     /// Creates a new PageView, with the window starting at the first element of data,
     /// and no selection active
