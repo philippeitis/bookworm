@@ -19,13 +19,12 @@ use tui::{Frame, Terminal};
 
 use unicase::UniCase;
 
-use crate::database::{AppDatabase, DatabaseError};
+use crate::database::{AppDatabase, DatabaseError, PageView};
 use crate::parser::command_parser;
 use crate::parser::{parse_args, BookIndex};
 use crate::record::Book;
 use crate::ui::settings::{InterfaceStyle, Settings, SortSettings};
 use crate::ui::user_input::{CommandString, EditState};
-use crate::ui::PageView;
 
 // TODO: Add MoveUp / MoveDown for stepping up and down so we don't
 //      regenerate everything from scratch.
