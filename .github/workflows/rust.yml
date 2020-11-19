@@ -5,10 +5,12 @@ on:
     paths:
     - "**/*.rs"
     - "**/*.yml"
+    - "**/*.toml"
   pull_request:
     paths:
     - "**/*.rs"
     - "**/*.yml"
+    - "**/*.toml"
 
 env:
   CARGO_TERM_COLOR: always
