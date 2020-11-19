@@ -149,7 +149,8 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                         }
                     }
                     Flag::FlagWithArgument(c, args) => {
-                        if c == "d" || d {
+                        d |= c == "d";
+                        if d {
                             return Command::AddBooksFromDir(PathBuf::from(&args[0]));
                         }
                     }
@@ -177,7 +178,7 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             return if let Some(flag) = flags.first() {
                 match flag {
                     Flag::Flag(a) => {
-                        if a.eq("a") {
+                        if a == "a" {
                             Command::DeleteAll
                         } else {
                             Command::InvalidCommand
@@ -234,7 +235,8 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                         }
                     }
                     Flag::FlagWithArgument(f, args) => {
-                        if f == "d" || d {
+                        d |= f == "d";
+                        if d {
                             return Command::SortColumn(args[0].clone(), d);
                         }
                     }
