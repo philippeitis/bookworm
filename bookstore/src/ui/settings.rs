@@ -121,7 +121,7 @@ impl From<TomlColors> for InterfaceStyle {
 impl TomlColors {
     fn selected_bg(&self) -> Color {
         if let Some(color) = &self.selected_bg {
-            str_to_color(color).unwrap_or_else(|| Color::LightBlue)
+            str_to_color(color).unwrap_or(Color::LightBlue)
         } else {
             Color::LightBlue
         }
@@ -129,7 +129,7 @@ impl TomlColors {
 
     fn selected_fg(&self) -> Color {
         if let Some(color) = &self.selected_fg {
-            str_to_color(color).unwrap_or_else(|| Color::White)
+            str_to_color(color).unwrap_or(Color::White)
         } else {
             Color::White
         }
@@ -137,7 +137,7 @@ impl TomlColors {
 
     fn edit_bg(&self) -> Color {
         if let Some(color) = &self.edit_bg {
-            str_to_color(color).unwrap_or_else(|| Color::Blue)
+            str_to_color(color).unwrap_or(Color::Blue)
         } else {
             Color::Blue
         }
@@ -145,7 +145,7 @@ impl TomlColors {
 
     fn edit_fg(&self) -> Color {
         if let Some(color) = &self.edit_fg {
-            str_to_color(color).unwrap_or_else(|| Color::White)
+            str_to_color(color).unwrap_or(Color::White)
         } else {
             Color::White
         }

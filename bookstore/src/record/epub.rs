@@ -1,14 +1,12 @@
-use zip;
-use std::path::Path;
-use std::io::{Error, BufReader, Read};
 use std::fs::File;
+use std::io::{BufReader, Error, Read};
+use std::path::Path;
 
-#[macro_use]
-use lazy_static;
+use zip::{result::ZipError, ZipArchive};
 
 use regex::Regex;
 
-use quick_xml::{Reader, events::Event};
+use quick_xml::{events::Event, Reader};
 
 // Not robust if string is escaped, but at the same time, who would do such a terrible thing in the
 // root file?
@@ -84,8 +82,8 @@ impl From<std::io::Error> for EpubError {
     }
 }
 
-impl From<zip::result::ZipError> for EpubError {
-    fn from(_: zip::result::ZipError) -> Self {
+impl From<ZipError> for EpubError {
+    fn from(_: ZipError) -> Self {
         EpubError::BadZip
     }
 }
@@ -93,7 +91,7 @@ impl From<zip::result::ZipError> for EpubError {
 impl EpubMetadata {
     pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self, EpubError> {
         let mut buf = BufReader::new(File::open(path)?);
-        let mut archive = zip::ZipArchive::new(&mut buf)?;
+        let mut archive = ZipArchive::new(&mut buf)?;
         // let mut file_names: Vec<_> = archive.file_names().map(|s| s.to_string()).collect();
         // println!("{}", file_names.join(", "));
 
@@ -115,7 +113,7 @@ impl EpubMetadata {
             let s = String::from_utf8_lossy(&buf);
             match get_root_file(s.as_ref()) {
                 Some(root_file) => root_file,
-                None => return Err(EpubError::NoRootFile)
+                None => return Err(EpubError::NoRootFile),
             }
         } else {
             return Err(EpubError::NoContainer);
@@ -127,7 +125,7 @@ impl EpubMetadata {
             let s = String::from_utf8_lossy(&buf);
             match get_metadata(s.as_ref()) {
                 Some(metadata) => metadata,
-                None => return Err(EpubError::NoMetadata)
+                None => return Err(EpubError::NoMetadata),
             }
         } else {
             return Err(EpubError::NoContainer);
@@ -151,16 +149,20 @@ impl EpubMetadata {
             loop {
                 match reader.read_event(&mut buf) {
                     Ok(Event::Start(ref e)) => {
-                        println!("{} attributes values: {:?}", String::from_utf8_lossy(e.name()),
-                                                e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>());
+                        println!(
+                            "{} attributes values: {:?}",
+                            String::from_utf8_lossy(e.name()),
+                            e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
+                        );
                         seen = match e.name() {
                             b"dc:creator" => FieldSeen::Author,
                             b"dc:title" => FieldSeen::Title,
                             b"dc:identifier" => FieldSeen::ISBN,
                             b"dc:language" => FieldSeen::Language,
+                            b"dc:publisher" => FieldSeen::Publisher,
                             _ => FieldSeen::None,
                         }
-                    },
+                    }
                     Ok(Event::Text(e)) => {
                         let val = e.unescape_and_decode(&reader).unwrap();
                         println!("{}", val);
@@ -180,7 +182,7 @@ impl EpubMetadata {
                             }
                             FieldSeen::None => {}
                         }
-                    },
+                    }
                     Ok(Event::Eof) => break, // exits the loop when reaching end of file
                     Err(e) => panic!("Error at position {}: {:?}", reader.buffer_position(), e),
                     _ => (), // There are several other `Event`s we do not consider here
