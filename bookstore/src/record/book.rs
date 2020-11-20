@@ -9,8 +9,8 @@ use mobi::MobiMetadata;
 
 use serde::{Deserialize, Serialize};
 
+use crate::record::epub::{EpubError, EpubMetadata};
 use crate::record::ISBN;
-use crate::record::epub::{EpubMetadata, EpubError};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BookType {
@@ -77,7 +77,7 @@ impl BookType {
                 let metadata = EpubMetadata::open(file_path)?;
 
                 if book.local_title.is_none() {
-                    book.local_title = metadata.title.clone();
+                    book.local_title = metadata.title;
                 }
 
                 if book.additional_authors.is_none() {
@@ -87,9 +87,7 @@ impl BookType {
                 }
 
                 if book.language.is_none() {
-                    if let Some(language) = metadata.language {
-                        book.language = Some(language);
-                    }
+                    book.language = metadata.language;
                 }
 
                 if book.isbn.is_none() {
@@ -106,9 +104,7 @@ impl BookType {
                 let doc = MobiMetadata::from_path(&file_path)?;
 
                 if book.local_title.is_none() {
-                    if let Some(title) = doc.title() {
-                        book.local_title = Some(title.clone());
-                    }
+                    book.local_title = doc.title();
                 }
 
                 if book.additional_authors.is_none() {
@@ -118,9 +114,7 @@ impl BookType {
                 }
 
                 if book.language.is_none() {
-                    if let Some(language) = doc.language() {
-                        book.language = Some(language);
-                    }
+                    book.language = doc.language();
                 }
 
                 if book.isbn.is_none() {
@@ -405,7 +399,7 @@ impl Book {
                                 Ordering::Equal
                             } else if let Some(s_ind) = s_ind {
                                 if let Some(o_ind) = o_ind {
-                                    s_ind.partial_cmp(&o_ind).unwrap_or_else(|| Ordering::Equal)
+                                    s_ind.partial_cmp(&o_ind).unwrap_or(Ordering::Equal)
                                 } else {
                                     Ordering::Greater
                                 }
