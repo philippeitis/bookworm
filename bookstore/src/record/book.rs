@@ -10,6 +10,7 @@ use mobi::MobiMetadata;
 use serde::{Deserialize, Serialize};
 
 use crate::record::ISBN;
+use crate::record::epub::{EpubMetadata, EpubError};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BookType {
@@ -28,6 +29,12 @@ pub(crate) enum BookError {
 
 impl From<std::io::Error> for BookError {
     fn from(_: Error) -> Self {
+        BookError::FileError
+    }
+}
+
+impl From<EpubError> for BookError {
+    fn from(_: EpubError) -> Self {
         BookError::FileError
     }
 }
@@ -66,6 +73,35 @@ impl BookType {
         S: AsRef<path::Path>,
     {
         match self {
+            BookType::EPUB => {
+                let metadata = EpubMetadata::open(file_path)?;
+
+                if book.local_title.is_none() {
+                    book.local_title = metadata.title.clone();
+                }
+
+                if book.additional_authors.is_none() {
+                    if let Some(author) = metadata.author {
+                        book.additional_authors = Some(vec![unravel_author(&author)]);
+                    }
+                }
+
+                if book.language.is_none() {
+                    if let Some(language) = metadata.language {
+                        book.language = Some(language);
+                    }
+                }
+
+                if book.isbn.is_none() {
+                    if let Some(isbn) = metadata.isbn {
+                        if let Ok(isbn) = ISBN::from_str(&isbn) {
+                            book.isbn = Some(isbn);
+                        }
+                    }
+                }
+
+                Ok(())
+            }
             BookType::MOBI => {
                 let doc = MobiMetadata::from_path(&file_path)?;
 
