@@ -291,7 +291,10 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                                 if let Ok(bi) = u32::from_str(ind_book.as_str()) {
                                     if let Some(ind_var) = args.get(1) {
                                         if let Ok(vi) = usize::from_str(ind_var.as_str()) {
-                                            return Command::OpenBookInExplorer(BookIndex::BookID(bi), vi);
+                                            return Command::OpenBookInExplorer(
+                                                BookIndex::BookID(bi),
+                                                vi,
+                                            );
                                         }
                                     }
 
@@ -313,7 +316,6 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                         }
                     }
                 }
-
             }
             if loc_exists {
                 if let Ok(loc) = u32::from_str(loc.as_str()) {
@@ -325,12 +327,10 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                                 return Command::OpenBookInApp(BookIndex::BookID(loc), index);
                             }
                         }
+                    } else if f {
+                        return Command::OpenBookInExplorer(BookIndex::BookID(loc), 0);
                     } else {
-                        if f {
-                            return Command::OpenBookInExplorer(BookIndex::BookID(loc), 0);
-                        } else {
-                            return Command::OpenBookInApp(BookIndex::BookID(loc), 0);
-                        }
+                        return Command::OpenBookInApp(BookIndex::BookID(loc), 0);
                     }
                 }
             }

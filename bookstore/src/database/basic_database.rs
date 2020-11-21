@@ -158,7 +158,7 @@ impl AppDatabase for BasicDatabase {
     {
         Ok(BasicDatabase {
             backend: FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)?,
-            title_author_map: HashMap::default(),
+            // title_author_map: HashMap::default(),
         })
     }
 
@@ -276,33 +276,33 @@ impl AppDatabase for BasicDatabase {
 
     fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError> {
         Ok(self.backend.write(|db| {
-                let mut ref_map: HashMap<(String, String), u32> = HashMap::new();
-                let mut merges = vec![];
-                let mut merged = vec![];
-                for book in db.books.values() {
-                    if let Some(title) = book.get_title() {
-                        if let Some(authors) = book.get_authors() {
-                            let a: String = authors.join(", ");
-                            let val = (title.to_string(), a);
-                            if let Some(id) = ref_map.get(&val) {
-                                merges.push((*id, book.get_id()));
-                            } else {
-                                ref_map.insert(val, book.get_id());
-                            }
+            let mut ref_map: HashMap<(String, String), u32> = HashMap::new();
+            let mut merges = vec![];
+            let mut merged = vec![];
+            for book in db.books.values() {
+                if let Some(title) = book.get_title() {
+                    if let Some(authors) = book.get_authors() {
+                        let a: String = authors.join(", ");
+                        let val = (title.to_string(), a);
+                        if let Some(id) = ref_map.get(&val) {
+                            merges.push((*id, book.get_id()));
+                        } else {
+                            ref_map.insert(val, book.get_id());
                         }
                     }
                 }
+            }
 
-                for (b1, b2_id) in merges.iter() {
-                    let b2 = db.books.remove(b2_id);
-                    if let Some(b1) = db.books.get_mut(b1) {
-                        if let Some(b2) = b2 {
-                            b1.merge_mut(b2);
-                        }
+            for (b1, b2_id) in merges.iter() {
+                let b2 = db.books.remove(b2_id);
+                if let Some(b1) = db.books.get_mut(b1) {
+                    if let Some(b2) = b2 {
+                        b1.merge_mut(b2);
                     }
-                    merged.push(*b2_id);
                 }
-                merged
-            })?)
+                merged.push(*b2_id);
+            }
+            merged
+        })?)
     }
 }

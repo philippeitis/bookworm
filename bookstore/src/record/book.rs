@@ -424,10 +424,7 @@ impl Book {
 }
 
 impl Book {
-    pub(crate) fn merge_mut(
-        &mut self,
-        other: Self,
-    ) {
+    pub(crate) fn merge_mut(&mut self, other: Self) {
         if self.title.is_none() {
             self.title = other.title;
         }
@@ -441,7 +438,7 @@ impl Book {
             None => self.variants = other.variants,
             Some(v) => {
                 if let Some(vars) = other.variants {
-                     v.extend(vars);
+                    v.extend(vars);
                 }
             }
         }
