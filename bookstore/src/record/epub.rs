@@ -88,6 +88,9 @@ impl From<ZipError> for EpubError {
     }
 }
 
+// TODO: Can have multi-part titles.
+//
+
 impl EpubMetadata {
     pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self, EpubError> {
         let mut buf = BufReader::new(File::open(path)?);
@@ -149,11 +152,11 @@ impl EpubMetadata {
             loop {
                 match reader.read_event(&mut buf) {
                     Ok(Event::Start(ref e)) => {
-                        println!(
-                            "{} attributes values: {:?}",
-                            String::from_utf8_lossy(e.name()),
-                            e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
-                        );
+                        // println!(
+                        //     "{} attributes values: {:?}",
+                        //     String::from_utf8_lossy(e.name()),
+                        //     e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
+                        // );
                         seen = match e.name() {
                             b"dc:creator" => FieldSeen::Author,
                             b"dc:title" => FieldSeen::Title,
@@ -165,7 +168,7 @@ impl EpubMetadata {
                     }
                     Ok(Event::Text(e)) => {
                         let val = e.unescape_and_decode(&reader).unwrap();
-                        println!("{}", val);
+                        // println!("{}", val);
                         match seen {
                             FieldSeen::Author => {
                                 new_obj.author = Some(val);
@@ -196,3 +199,5 @@ impl EpubMetadata {
         Ok(new_obj)
     }
 }
+
+// TODO: https://www.oreilly.com/library/view/epub-3-best/9781449329129/ch01.html

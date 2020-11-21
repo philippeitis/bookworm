@@ -423,6 +423,39 @@ impl Book {
     }
 }
 
+impl Book {
+    pub(crate) fn merge_mut(
+        &mut self,
+        other: Self,
+    ) {
+        if self.title.is_none() {
+            self.title = other.title;
+        }
+        if self.authors.is_none() {
+            self.authors = other.authors;
+        }
+        if self.series.is_none() {
+            self.series = other.series;
+        }
+        match self.variants.as_mut() {
+            None => self.variants = other.variants,
+            Some(v) => {
+                if let Some(vars) = other.variants {
+                     v.extend(vars);
+                }
+            }
+        }
+        match self.extended_tags.as_mut() {
+            None => self.extended_tags = other.extended_tags,
+            Some(e) => {
+                if let Some(map) = other.extended_tags {
+                    e.extend(map);
+                }
+            }
+        }
+    }
+}
+
 impl fmt::Display for Book {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(title) = &self.title {
@@ -432,3 +465,5 @@ impl fmt::Display for Book {
         }
     }
 }
+
+// TODO: Add support for various identifiers (eg. DOI, ISBN, raw links)
