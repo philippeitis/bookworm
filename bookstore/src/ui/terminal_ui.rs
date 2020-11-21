@@ -545,9 +545,13 @@ impl<D: AppDatabase> App<D> {
         }
 
         if let Some(variants) = book.get_variants() {
+            let mut added_section = false;
             for variant in variants {
                 if let Some(paths) = variant.get_paths() {
-                    data.extend(Text::raw("\nVariant paths:"));
+                    if !added_section {
+                        added_section = true;
+                        data.extend(Text::raw("\nVariant paths:"));
+                    }
                     for (booktype, path) in paths {
                         let s = format!("{:?}: {}", booktype, path.display().to_string());
                         data.extend(Text::styled(s, field_exists));
@@ -770,13 +774,15 @@ impl<D: AppDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` book ` - The book to find a path for.
-    fn get_first_book_path(book: &Book) -> Option<PathBuf> {
+    fn get_book_path(book: &Book, index: usize) -> Option<PathBuf> {
+        let mut seen = 0;
         if let Some(variants) = book.get_variants() {
             for variant in variants {
                 if let Some(paths) = variant.get_paths() {
-                    if let Some((_, path)) = paths.first() {
+                    if let Some((_, path)) = paths.get(index - seen) {
                         return Some(path.to_owned());
                     }
+                    seen += paths.len();
                 }
             }
         }
@@ -794,8 +800,8 @@ impl<D: AppDatabase> App<D> {
     /// # Errors
     /// This function may error if the book's variants do not exist,
     /// or if the command itself fails.
-    fn open_book(&self, book: &Book) -> Result<(), ApplicationError> {
-        if let Some(path) = Self::get_first_book_path(book) {
+    fn open_book(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
+        if let Some(path) = Self::get_book_path(book, index) {
             Command::new("cmd.exe")
                 .args(&["/C", "start", "sumatrapdf"][..])
                 .arg(path)
@@ -815,8 +821,9 @@ impl<D: AppDatabase> App<D> {
     /// # Errors
     /// This function may error if the book's variants do not exist,
     /// or if the command itself fails.
-    fn open_book_in_dir(&self, book: &Book) -> Result<(), ApplicationError> {
-        if let Some(path) = Self::get_first_book_path(book) {
+    fn open_book_in_dir(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
+        // TODO: This doesn't work when run with install due to relative paths.
+        if let Some(path) = Self::get_book_path(book, index) {
             let open_book_path = PathBuf::from(".\\src\\open_book.py").canonicalize()?;
             // TODO: Find a way to do this entirely in Rust
             Command::new("python")
@@ -906,15 +913,15 @@ impl<D: AppDatabase> App<D> {
                 self.update_selected_column(UniCase::new(column), rev);
             }
             #[cfg(windows)]
-            command_parser::Command::OpenBookInApp(b) => {
+            command_parser::Command::OpenBookInApp(b, index) => {
                 if let Some(b) = self.get_book(b) {
-                    self.open_book(b)?;
+                    self.open_book(b, index)?;
                 }
             }
             #[cfg(windows)]
-            command_parser::Command::OpenBookInExplorer(b) => {
+            command_parser::Command::OpenBookInExplorer(b, index) => {
                 if let Some(b) = self.get_book(b) {
-                    self.open_book_in_dir(b)?;
+                    self.open_book_in_dir(b, index)?;
                 }
             }
             command_parser::Command::Write => {
@@ -926,6 +933,18 @@ impl<D: AppDatabase> App<D> {
             command_parser::Command::WriteAndQuit => {
                 self.db.save()?;
                 return Ok(false);
+            }
+            command_parser::Command::TryMergeAllBooks => {
+                let merged: HashSet<_> = self.db.merge_similar()?.into_iter().collect();
+                let mut new_books = vec![];
+                for book in self.books.data_mut().drain(..) {
+                    if !merged.contains(&book.get_id()) {
+                        new_books.push(book);
+                    }
+                }
+
+                self.books.refresh_data(new_books);
+                self.update_columns = ColumnUpdate::Regenerate;
             }
             _ => {
                 return Ok(true);

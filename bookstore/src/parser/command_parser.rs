@@ -30,8 +30,9 @@ pub enum Command {
     AddColumn(String),
     RemoveColumn(String),
     SortColumn(String, bool),
-    OpenBookInApp(BookIndex),
-    OpenBookInExplorer(BookIndex),
+    OpenBookInApp(BookIndex, usize),
+    OpenBookInExplorer(BookIndex, usize),
+    TryMergeAllBooks,
     Quit,
     Write,
     WriteAndQuit,
@@ -49,12 +50,13 @@ impl Command {
             Command::AddColumn(_) => true,
             Command::RemoveColumn(_) => true,
             Command::SortColumn(_, _) => true,
-            Command::OpenBookInApp(b) => b == &BookIndex::Selected,
-            Command::OpenBookInExplorer(b) => b == &BookIndex::Selected,
+            Command::OpenBookInApp(b, _) => b == &BookIndex::Selected,
+            Command::OpenBookInExplorer(b, _) => b == &BookIndex::Selected,
             Command::Quit => true,
             Command::Write => true,
             Command::WriteAndQuit => true,
             Command::DeleteAll => false,
+            Command::TryMergeAllBooks => false,
         }
     }
 }
@@ -198,8 +200,6 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             };
         }
         "!e" => {
-            // TODO: Decide column format? Numerical strings banned? Spaces banned?
-            //  Allow if quoted?
             return match flags.first() {
                 Some(Flag::PositionalArg(args)) => {
                     if args.len() >= 3 {
@@ -214,6 +214,18 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                         }
                     } else {
                         Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
+                    }
+                }
+                _ => Command::InvalidCommand,
+            };
+        }
+        "!m" => {
+            return match flags.first() {
+                Some(Flag::Flag(a)) => {
+                    if a == "a" {
+                        Command::TryMergeAllBooks
+                    } else {
+                        Command::InvalidCommand
                     }
                 }
                 _ => Command::InvalidCommand,
@@ -266,6 +278,8 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             let mut f = false;
             let mut loc_exists = false;
             let mut loc = String::new();
+            let mut index_exists = false;
+            let mut index = String::new();
             for flag in flags {
                 match flag {
                     Flag::Flag(c) => {
@@ -273,37 +287,54 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                     }
                     Flag::FlagWithArgument(c, args) => {
                         if c == "f" {
-                            if let Ok(i) = u32::from_str(args[0].as_str()) {
-                                return Command::OpenBookInExplorer(BookIndex::BookID(i));
+                            if let Some(ind_book) = args.get(0) {
+                                if let Ok(bi) = u32::from_str(ind_book.as_str()) {
+                                    if let Some(ind_var) = args.get(1) {
+                                        if let Ok(vi) = usize::from_str(ind_var.as_str()) {
+                                            return Command::OpenBookInExplorer(
+                                                BookIndex::BookID(bi),
+                                                vi,
+                                            );
+                                        }
+                                    }
+
+                                    return Command::OpenBookInExplorer(BookIndex::BookID(bi), 0);
+                                }
                             }
-                            return Command::OpenBookInExplorer(BookIndex::Selected);
                         }
                         return Command::InvalidCommand;
                     }
                     Flag::PositionalArg(args) => {
-                        loc_exists = true;
-                        loc = args[0].clone();
+                        if let Some(i) = args.get(1).cloned() {
+                            index_exists = true;
+                            index = i;
+                        }
+
+                        if let Some(l) = args.get(0).cloned() {
+                            loc_exists = true;
+                            loc = l;
+                        }
                     }
                 }
-                if f && loc_exists {
-                    return if let Ok(i) = u32::from_str(loc.as_str()) {
-                        Command::OpenBookInExplorer(BookIndex::BookID(i))
+            }
+            if loc_exists {
+                if let Ok(loc) = u32::from_str(loc.as_str()) {
+                    if index_exists {
+                        if let Ok(index) = usize::from_str(index.as_str()) {
+                            if f {
+                                return Command::OpenBookInExplorer(BookIndex::BookID(loc), index);
+                            } else {
+                                return Command::OpenBookInApp(BookIndex::BookID(loc), index);
+                            }
+                        }
+                    } else if f {
+                        return Command::OpenBookInExplorer(BookIndex::BookID(loc), 0);
                     } else {
-                        return Command::OpenBookInExplorer(BookIndex::Selected);
-                    };
+                        return Command::OpenBookInApp(BookIndex::BookID(loc), 0);
+                    }
                 }
             }
-            return if loc_exists {
-                if let Ok(i) = u32::from_str(loc.as_str()) {
-                    Command::OpenBookInApp(BookIndex::BookID(i))
-                } else {
-                    Command::OpenBookInApp(BookIndex::Selected)
-                }
-            } else if f {
-                Command::OpenBookInExplorer(BookIndex::Selected)
-            } else {
-                Command::OpenBookInApp(BookIndex::Selected)
-            };
+            return Command::OpenBookInApp(BookIndex::Selected, 0);
         }
         _ => return Command::UnknownCommand,
     };
