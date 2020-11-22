@@ -658,6 +658,30 @@ impl<D: AppDatabase> App<D> {
                         self.edit.visible().to_string();
                 } else {
                     match read()? {
+                        // Event::Mouse(m) => {
+                        //     match m {
+                        //         MouseEvent::Down(_, _, _, _) => {
+                        //             println!("MouseEvent::Down");
+                        //         }
+                        //         MouseEvent::Up(_, _, _, _) => {
+                        //             println!("MouseEvent::Up");
+                        //         }
+                        //         MouseEvent::Drag(_, _, _, _) => {}
+                        //         MouseEvent::ScrollDown(_, _, c) => {
+                        //             println!("MouseEvent::ScrollDown");
+                        //             if self.books.scroll_down(1) {
+                        //                 self.update_columns = ColumnUpdate::Regenerate;
+                        //             }
+                        //         }
+                        //         MouseEvent::ScrollUp(_, _, _) => {
+                        //             println!("MouseEvent::ScrollUp");
+                        //             if self.books.scroll_down(1) {
+                        //                 self.update_columns = ColumnUpdate::Regenerate;
+                        //             }
+                        //
+                        //         }
+                        //     }
+                        // }
                         Event::Resize(_, _) => {}
                         Event::Key(event) => {
                             // Text input
@@ -956,6 +980,7 @@ impl<D: AppDatabase> App<D> {
     /// Sorts the books internally, using the current sort settings.
     fn sort_books_by_col(&mut self) {
         let col_string = self.sort_settings.column.as_str();
+        // TODO: Use par_sort from rayon - takes 2s for 1mil books.
         if self.sort_settings.reverse {
             self.books
                 .data_mut()
@@ -1064,4 +1089,3 @@ impl<D: AppDatabase> App<D> {
 //  Pop-up notifications
 //  Documentation
 //  Testing
-//  Organize code into specific modules

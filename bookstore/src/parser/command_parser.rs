@@ -297,7 +297,6 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                                             );
                                         }
                                     }
-
                                     return Command::OpenBookInExplorer(BookIndex::BookID(bi), 0);
                                 }
                             }
@@ -334,7 +333,11 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                     }
                 }
             }
-            return Command::OpenBookInApp(BookIndex::Selected, 0);
+            return if f {
+                Command::OpenBookInExplorer(BookIndex::Selected, 0)
+            } else {
+                Command::OpenBookInApp(BookIndex::Selected, 0)
+            };
         }
         _ => return Command::UnknownCommand,
     };
