@@ -17,9 +17,12 @@ use tui::{Frame, Terminal};
 
 use unicase::UniCase;
 
+use rayon::prelude::*;
+
 use crate::database::{AppDatabase, DatabaseError, PageView};
 use crate::parser::command_parser;
 use crate::parser::{parse_args, BookIndex};
+use crate::record::book::ColumnIdentifier;
 use crate::record::Book;
 use crate::ui::settings::{InterfaceStyle, Settings, SortSettings};
 use crate::ui::user_input::{CommandString, EditState};
@@ -248,7 +251,7 @@ impl<D: AppDatabase> App<D> {
         if let Some(mut book) = self.get_book_with_id(id).cloned() {
             self.available_cols
                 .insert(UniCase::new(column.as_ref().to_string()));
-            let _ = book.set_column(column, new_value);
+            let _ = book.set_column(&column.as_ref().into(), new_value);
             self.update_book(&book)
         } else {
             Err(ApplicationError::BookNotFound(id))
@@ -272,7 +275,7 @@ impl<D: AppDatabase> App<D> {
         if let Some(mut book) = self.books.selected_item().cloned() {
             self.available_cols
                 .insert(UniCase::new(column.as_ref().to_string()));
-            let _ = book.set_column(column, new_value);
+            let _ = book.set_column(&column.into(), new_value);
             self.update_book(&book)
         } else {
             Err(ApplicationError::NoBookSelected)
@@ -356,11 +359,14 @@ impl<D: AppDatabase> App<D> {
                     self.books.selected()
                 ));
 
+                let cols = self
+                    .selected_cols
+                    .iter()
+                    .map(|col| ColumnIdentifier::from(col.as_str()))
+                    .collect::<Vec<_>>();
                 for b in self.books.window_slice() {
-                    for (column_string, column) in
-                        self.selected_cols.iter().zip(self.column_data.iter_mut())
-                    {
-                        column.push(b.get_column_or(column_string.as_str(), ""));
+                    for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
+                        column.push(b.get_column_or(&col, ""));
                     }
                 }
             }
@@ -368,12 +374,12 @@ impl<D: AppDatabase> App<D> {
                 self.updated = true;
                 if self.available_cols.contains(&word) && !self.selected_cols.contains(&word) {
                     self.selected_cols.push(word.clone());
-                    let column_string = word.as_str();
+                    let column_string = ColumnIdentifier::from(word.as_str());
                     self.column_data.push(
                         self.books
                             .window_slice()
                             .iter()
-                            .map(|book| book.get_column_or(column_string, ""))
+                            .map(|book| book.get_column_or(&column_string, ""))
                             .collect(),
                     );
                 }
@@ -659,6 +665,7 @@ impl<D: AppDatabase> App<D> {
                         Event::Mouse(m) => {
                             match m {
                                 // TODO: Might need to adjust this for mac users to be inverted?
+                                // TODO: Add options in settings to specify scroll size.
                                 MouseEvent::ScrollDown(_, _, _) => {
                                     if self.books.scroll_down(5) {
                                         self.update_columns = ColumnUpdate::Regenerate;
@@ -971,16 +978,23 @@ impl<D: AppDatabase> App<D> {
     /// Sorts the books internally, using the current sort settings.
     fn sort_books_by_col(&mut self) {
         let col_string = self.sort_settings.column.as_str();
-        // TODO: Use par_sort from rayon - takes 2s for 1mil books.
-        if self.sort_settings.reverse {
+        let col = ColumnIdentifier::from(col_string);
+        if self.books.data().len() < 2500 {
+            if self.sort_settings.reverse {
+                self.books.data_mut().sort_by(|a, b| b.cmp_column(a, &col))
+            } else {
+                self.books.data_mut().sort_by(|a, b| a.cmp_column(b, &col))
+            }
+        } else if self.sort_settings.reverse {
             self.books
                 .data_mut()
-                .sort_by(|a, b| b.cmp_column(a, col_string))
+                .par_sort_unstable_by(|a, b| b.cmp_column(a, &col))
         } else {
             self.books
                 .data_mut()
-                .sort_by(|a, b| a.cmp_column(b, col_string))
-        };
+                .par_sort_unstable_by(|a, b| a.cmp_column(b, &col))
+        }
+
         self.sort_settings.is_sorted = true;
     }
 
