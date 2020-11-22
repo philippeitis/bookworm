@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::{fs, path};
 
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::record::{Book, BookError};
@@ -176,14 +177,16 @@ impl AppDatabase for BasicDatabase {
     {
         let mut ids = vec![];
         let mut errs = vec![];
-        fs::read_dir(dir)?
+        let results = fs::read_dir(dir)?
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, std::io::Error>>()?
-            .iter()
-            .for_each(|path| match self.read_book_from_file(path) {
-                Ok(id) => ids.push(id),
-                Err(e) => errs.push(e),
-            });
+            .par_iter()
+            .map(|path| self.read_book_from_file(path))
+            .collect::<Vec<_>>();
+        results.into_iter().for_each(|result| match result {
+            Ok(id) => ids.push(id),
+            Err(e) => errs.push(e),
+        });
         Ok((ids, errs))
     }
 
