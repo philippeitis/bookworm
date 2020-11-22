@@ -41,4 +41,4 @@ cd bookstore
 cargo install --path bookstore
 ```
 
-The minimum supported Rust version is 1.44.0.
+The minimum supported Rust version is current stable.
