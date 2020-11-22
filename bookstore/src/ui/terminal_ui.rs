@@ -42,8 +42,6 @@ pub(crate) struct App<D> {
     db: D,
 
     selected_cols: Vec<UniCase<String>>,
-    available_cols: HashSet<UniCase<String>>,
-
     curr_command: CommandString,
     books: PageView<Book>,
     sort_settings: SortSettings,
@@ -147,13 +145,6 @@ impl<D: AppDatabase> App<D> {
             .map(|s| UniCase::new(s.clone()))
             .collect();
 
-        let available_cols = db
-            .get_available_columns()
-            .into_iter()
-            .flatten()
-            .map(UniCase::new)
-            .collect();
-
         let books = db.get_all_books().into_iter().flatten().collect();
         let column_data = (0..selected_cols.len())
             .into_iter()
@@ -164,7 +155,6 @@ impl<D: AppDatabase> App<D> {
             name: name.as_ref().to_string(),
             db,
             selected_cols,
-            available_cols,
             curr_command: CommandString::new(),
             books: PageView::new(0, books),
             sort_settings: settings.sort_settings,
@@ -249,8 +239,8 @@ impl<D: AppDatabase> App<D> {
         new_value: T,
     ) -> Result<(), ApplicationError> {
         if let Some(mut book) = self.get_book_with_id(id).cloned() {
-            self.available_cols
-                .insert(UniCase::new(column.as_ref().to_string()));
+            self.db
+                .add_column(UniCase::new(column.as_ref().to_string()));
             let _ = book.set_column(&column.as_ref().into(), new_value);
             self.update_book(&book)
         } else {
@@ -273,8 +263,8 @@ impl<D: AppDatabase> App<D> {
         new_value: T,
     ) -> Result<(), ApplicationError> {
         if let Some(mut book) = self.books.selected_item().cloned() {
-            self.available_cols
-                .insert(UniCase::new(column.as_ref().to_string()));
+            self.db
+                .add_column(UniCase::new(column.as_ref().to_string()));
             let _ = book.set_column(&column.into(), new_value);
             self.update_book(&book)
         } else {
@@ -372,7 +362,7 @@ impl<D: AppDatabase> App<D> {
             }
             ColumnUpdate::AddColumn(word) => {
                 self.updated = true;
-                if self.available_cols.contains(&word) && !self.selected_cols.contains(&word) {
+                if self.db.has_column(&word) && !self.selected_cols.contains(&word) {
                     self.selected_cols.push(word.clone());
                     let column_string = ColumnIdentifier::from(word.as_str());
                     self.column_data.push(

@@ -6,12 +6,14 @@ use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 
 use crate::record::{Book, BookError};
+use unicase::UniCase;
 
 #[derive(Debug)]
 pub(crate) enum DatabaseError {
     Io(std::io::Error),
     BookReading(BookError),
     Backend(RustbreakError),
+    // BookNotFound(u32),
 }
 
 impl From<std::io::Error> for DatabaseError {
@@ -48,6 +50,7 @@ impl BookMap {
 
 pub(crate) struct BasicDatabase {
     backend: FileDatabase<BookMap, Ron>,
+    cols: HashSet<UniCase<String>>,
     // title_author_map: HashMap<(String, String), u32>
 }
 
@@ -150,6 +153,10 @@ pub(crate) trait AppDatabase {
     fn get_new_id(&self) -> Result<u32, DatabaseError>;
 
     fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError>;
+
+    fn has_column(&self, col: &UniCase<String>) -> bool;
+
+    fn add_column(&mut self, col: UniCase<String>);
 }
 
 impl AppDatabase for BasicDatabase {
@@ -157,14 +164,30 @@ impl AppDatabase for BasicDatabase {
     where
         S: AsRef<path::Path>,
     {
-        Ok(BasicDatabase {
+        let mut db = BasicDatabase {
             backend: FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)?,
+            cols: HashSet::new(),
             // title_author_map: HashMap::default(),
-        })
+        };
+        db.cols = db
+            .get_available_columns()
+            .unwrap_or_else(Vec::new)
+            .into_iter()
+            .map(UniCase::new)
+            .collect();
+        Ok(db)
     }
 
     fn save(&self) -> Result<(), DatabaseError> {
         Ok(self.backend.save()?)
+    }
+
+    fn has_column(&self, col: &UniCase<String>) -> bool {
+        self.cols.contains(col)
+    }
+
+    fn add_column(&mut self, col: UniCase<String>) {
+        self.cols.insert(col);
     }
 
     fn read_books_from_dir<S>(
