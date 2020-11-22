@@ -1,10 +1,12 @@
-use std::env;
-use std::io;
-
 mod database;
 mod parser;
 mod record;
 mod ui;
+
+use std::env;
+use std::io::{stdout, Write};
+
+use crossterm::{event::DisableMouseCapture, event::EnableMouseCapture, execute};
 
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
@@ -79,9 +81,12 @@ fn main() -> Result<(), ApplicationError> {
         println!("Current backend may not offer best results on current operating system.");
     };
 
-    let stdout = io::stdout();
-    let backend = CrosstermBackend::new(stdout);
+    let stdout = stdout();
+    let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
-    app.run(&mut terminal)
+    execute!(&stdout, EnableMouseCapture)?;
+    let r = app.run(&mut terminal);
+    execute!(&stdout, DisableMouseCapture)?;
+    r
 }
