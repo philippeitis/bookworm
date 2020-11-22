@@ -142,6 +142,28 @@ pub(crate) struct Book {
     extended_tags: Option<HashMap<String, String>>,
 }
 
+pub(crate) enum ColumnIdentifier {
+    Title,
+    Author,
+    Series,
+    ID,
+    Variants,
+    ExtendedTag(String),
+}
+
+impl<S: AsRef<str>> From<S> for ColumnIdentifier {
+    fn from(val: S) -> Self {
+        match val.as_ref().to_ascii_lowercase().as_str() {
+            "author" | "authors" => Self::Author,
+            "title" => Self::Title,
+            "series" => Self::Series,
+            "id" => Self::ID,
+            "variant" | "variants" => Self::Variants,
+            _ => Self::ExtendedTag(val.as_ref().to_string()),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct BookVariant {
     local_title: Option<String>,
@@ -175,22 +197,22 @@ impl Book {
         self.extended_tags.as_ref()
     }
 
-    pub(crate) fn get_column_or<S: AsRef<str>, T: AsRef<str>>(
+    pub(crate) fn get_column_or<T: AsRef<str>>(
         &self,
-        column: S,
+        column: &ColumnIdentifier,
         default: T,
     ) -> String {
-        match column.as_ref().to_ascii_lowercase().as_str() {
-            "title" => self
+        match column {
+            ColumnIdentifier::Title => self
                 .get_title()
                 .clone()
                 .unwrap_or_else(|| default.as_ref())
                 .to_string(),
-            "author" | "authors" => match self.get_authors() {
+            ColumnIdentifier::Author => match self.get_authors() {
                 None => default.as_ref().to_string(),
                 Some(authors) => authors.join(", "),
             },
-            "series" => {
+            ColumnIdentifier::Series => {
                 if let Some((series_name, nth_in_series)) = self.get_series() {
                     if let Some(nth_in_series) = nth_in_series {
                         format!("{} [{}]", series_name, nth_in_series)
@@ -201,8 +223,8 @@ impl Book {
                     default.as_ref().to_string()
                 }
             }
-            "id" => self.id.to_string(),
-            x => {
+            ColumnIdentifier::ID => self.id.to_string(),
+            ColumnIdentifier::ExtendedTag(x) => {
                 if let Some(d) = &self.extended_tags {
                     match d.get(x) {
                         None => default.as_ref().to_string(),
@@ -212,6 +234,7 @@ impl Book {
                     default.as_ref().to_string()
                 }
             }
+            ColumnIdentifier::Variants => default.as_ref().to_string(),
         }
     }
 }
@@ -324,24 +347,23 @@ impl Book {
 }
 
 impl Book {
-    pub(crate) fn set_column<S: AsRef<str>, T: AsRef<str>>(
+    pub(crate) fn set_column<T: AsRef<str>>(
         &mut self,
-        column: S,
+        column: &ColumnIdentifier,
         value: T,
     ) -> Result<(), BookError> {
-        let column = column.as_ref();
         let value = value.as_ref();
-        match column.to_lowercase().as_str() {
-            "title" => {
+        match column {
+            ColumnIdentifier::Title => {
                 self.title = Some(value.to_string());
             }
-            "author" | "authors" => {
+            ColumnIdentifier::Author => {
                 self.authors = Some(vec![value.to_string()]);
             }
-            "id" | "variants" => {
+            ColumnIdentifier::ID | ColumnIdentifier::Variants => {
                 return Err(BookError::ImmutableColumnError);
             }
-            "series" => {
+            ColumnIdentifier::Series => {
                 if value.ends_with(']') {
                     // Replace with rsplit_once when stable.
                     let mut words = value.rsplitn(2, char::is_whitespace);
@@ -357,12 +379,12 @@ impl Book {
                     self.series = Some((value.to_string(), None));
                 }
             }
-            _ => {
+            ColumnIdentifier::ExtendedTag(column) => {
                 if let Some(d) = self.extended_tags.as_mut() {
-                    d.insert(column.to_string(), value.to_string());
+                    d.insert(column.clone(), value.to_string());
                 } else {
                     let mut d = HashMap::new();
-                    d.insert(column.to_string(), value.to_string());
+                    d.insert(column.clone(), value.to_string());
                     self.extended_tags = Some(d);
                 }
             }
@@ -370,7 +392,7 @@ impl Book {
         Ok(())
     }
 
-    pub(crate) fn cmp_column<S: AsRef<str>>(&self, other: &Self, column: S) -> Ordering {
+    pub(crate) fn cmp_column(&self, other: &Self, column: &ColumnIdentifier) -> Ordering {
         // fn cmp_opt<T: std::cmp::Ord>(a: Option<T>, b: Option<T>) -> Ordering {
         //     if a == b {
         //         Ordering::Equal
@@ -385,9 +407,9 @@ impl Book {
         //     }
         // }
 
-        match column.as_ref().to_lowercase().as_str() {
-            "id" => self.get_id().cmp(&other.get_id()),
-            "series" => {
+        match column {
+            ColumnIdentifier::ID => self.get_id().cmp(&other.get_id()),
+            ColumnIdentifier::Series => {
                 let s_series = self.get_series();
                 let o_series = other.get_series();
                 if s_series.eq(&o_series) {
@@ -416,9 +438,7 @@ impl Book {
                     Ordering::Less
                 }
             }
-            _ => self
-                .get_column_or(&column, "")
-                .cmp(&other.get_column_or(&column, "")),
+            c => self.get_column_or(c, "").cmp(&other.get_column_or(c, "")),
         }
     }
 }

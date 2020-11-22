@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::{fs, path};
 
-use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use rayon::prelude::*;
+use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 
 use crate::record::{Book, BookError};
@@ -167,7 +167,6 @@ impl AppDatabase for BasicDatabase {
         Ok(self.backend.save()?)
     }
 
-    // TODO: Add possibility of doing this accross multiple threads.
     fn read_books_from_dir<S>(
         &self,
         dir: S,
