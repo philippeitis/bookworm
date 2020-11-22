@@ -11,6 +11,7 @@ pub(crate) struct Settings {
     pub interface_style: InterfaceStyle,
     pub columns: Vec<String>,
     pub sort_settings: SortSettings,
+    pub navigation_settings: NavigationSettings,
 }
 
 impl Default for Settings {
@@ -19,6 +20,7 @@ impl Default for Settings {
             interface_style: InterfaceStyle::default(),
             columns: vec!["Title".to_string(), "Authors".to_string()],
             sort_settings: SortSettings::default(),
+            navigation_settings: NavigationSettings::default(),
         }
     }
 }
@@ -59,6 +61,21 @@ impl Default for SortSettings {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct NavigationSettings {
+    pub scroll: usize,
+    pub inverted: bool,
+}
+
+impl Default for NavigationSettings {
+    fn default() -> Self {
+        NavigationSettings {
+            scroll: 0,
+            inverted: false,
+        }
+    }
+}
+
 fn str_to_color<S: AsRef<str>>(s: S) -> Option<Color> {
     match s.as_ref().to_ascii_lowercase().as_str() {
         "black" => Some(Color::Black),
@@ -86,6 +103,7 @@ struct TomlSettings {
     colors: Option<TomlColors>,
     layout: Option<TomlColumns>,
     sorting: Option<TomlSort>,
+    navigation: Option<TomlNavigation>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,6 +216,30 @@ impl From<TomlSort> for SortSettings {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct TomlNavigation {
+    scroll: Option<usize>,
+    inverted: Option<bool>,
+}
+
+impl Default for TomlNavigation {
+    fn default() -> Self {
+        TomlNavigation {
+            scroll: Some(5),
+            inverted: Some(cfg!(macos)),
+        }
+    }
+}
+
+impl From<TomlNavigation> for NavigationSettings {
+    fn from(t: TomlNavigation) -> Self {
+        NavigationSettings {
+            scroll: t.scroll.unwrap_or(5),
+            inverted: t.inverted.unwrap_or(cfg!(macos)),
+        }
+    }
+}
+
 impl Settings {
     /// Opens the settings at the provided location, and fills in missing settings from default
     /// values.
@@ -215,6 +257,7 @@ impl Settings {
             interface_style: value.colors.unwrap_or_default().into(),
             columns: value.layout.unwrap_or_default().into(),
             sort_settings: value.sorting.unwrap_or_default().into(),
+            navigation_settings: value.navigation.unwrap_or_default().into(),
         })
     }
 }
