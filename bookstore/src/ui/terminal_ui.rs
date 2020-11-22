@@ -665,6 +665,7 @@ impl<D: AppDatabase> App<D> {
                         Event::Mouse(m) => {
                             match m {
                                 // TODO: Might need to adjust this for mac users to be inverted?
+                                // TODO: Add options in settings to specify scroll size.
                                 MouseEvent::ScrollDown(_, _, _) => {
                                     if self.books.scroll_down(5) {
                                         self.update_columns = ColumnUpdate::Regenerate;
