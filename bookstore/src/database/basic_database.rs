@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::{fs, path};
 
-use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use rayon::prelude::*;
+use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 
 use crate::record::{Book, BookError};
