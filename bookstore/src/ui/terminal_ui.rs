@@ -2,13 +2,11 @@ use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::iter::FromIterator;
-#[cfg(windows)]
-use std::path::PathBuf;
-#[cfg(windows)]
-use std::process::Command;
 use std::time::Duration;
+#[cfg(windows)]
+use std::{path::PathBuf, process::Command};
 
-use crossterm::event::{poll, read, Event, KeyCode};
+use crossterm::event::{poll, read, Event, KeyCode, MouseEvent};
 
 use tui::backend::Backend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -658,30 +656,24 @@ impl<D: AppDatabase> App<D> {
                         self.edit.visible().to_string();
                 } else {
                     match read()? {
-                        // Event::Mouse(m) => {
-                        //     match m {
-                        //         MouseEvent::Down(_, _, _, _) => {
-                        //             println!("MouseEvent::Down");
-                        //         }
-                        //         MouseEvent::Up(_, _, _, _) => {
-                        //             println!("MouseEvent::Up");
-                        //         }
-                        //         MouseEvent::Drag(_, _, _, _) => {}
-                        //         MouseEvent::ScrollDown(_, _, c) => {
-                        //             println!("MouseEvent::ScrollDown");
-                        //             if self.books.scroll_down(1) {
-                        //                 self.update_columns = ColumnUpdate::Regenerate;
-                        //             }
-                        //         }
-                        //         MouseEvent::ScrollUp(_, _, _) => {
-                        //             println!("MouseEvent::ScrollUp");
-                        //             if self.books.scroll_down(1) {
-                        //                 self.update_columns = ColumnUpdate::Regenerate;
-                        //             }
-                        //
-                        //         }
-                        //     }
-                        // }
+                        Event::Mouse(m) => {
+                            match m {
+                                // TODO: Might need to adjust this for mac users to be inverted?
+                                MouseEvent::ScrollDown(_, _, _) => {
+                                    if self.books.scroll_down(5) {
+                                        self.update_columns = ColumnUpdate::Regenerate;
+                                    }
+                                }
+                                MouseEvent::ScrollUp(_, _, _) => {
+                                    if self.books.scroll_up(5) {
+                                        self.update_columns = ColumnUpdate::Regenerate;
+                                    }
+                                }
+                                _ => {
+                                    return Ok(false);
+                                }
+                            }
+                        }
                         Event::Resize(_, _) => {}
                         Event::Key(event) => {
                             // Text input
@@ -781,7 +773,6 @@ impl<D: AppDatabase> App<D> {
                                 _ => return Ok(false),
                             }
                         }
-                        _ => return Ok(false),
                     }
                 }
                 break;
