@@ -24,7 +24,7 @@ use crate::parser::command_parser;
 use crate::parser::{parse_args, BookIndex};
 use crate::record::book::ColumnIdentifier;
 use crate::record::Book;
-use crate::ui::settings::{InterfaceStyle, Settings, SortSettings};
+use crate::ui::settings::{InterfaceStyle, NavigationSettings, Settings, SortSettings};
 use crate::ui::user_input::{CommandString, EditState};
 
 // TODO: Add MoveUp / MoveDown for stepping up and down so we don't
@@ -48,6 +48,9 @@ pub(crate) struct App<D> {
     edit: EditState,
     selected_column: usize,
     updated: bool,
+
+    // Navigation
+    nav_settings: NavigationSettings,
 
     // Database
     update_columns: ColumnUpdate,
@@ -165,6 +168,7 @@ impl<D: AppDatabase> App<D> {
             terminal_size: None,
             edit: EditState::default(),
             selected_column: 0,
+            nav_settings: settings.navigation_settings,
         })
     }
 
@@ -652,25 +656,31 @@ impl<D: AppDatabase> App<D> {
                         self.edit.visible().to_string();
                 } else {
                     match read()? {
-                        Event::Mouse(m) => {
-                            match m {
-                                // TODO: Might need to adjust this for mac users to be inverted?
-                                // TODO: Add options in settings to specify scroll size.
-                                MouseEvent::ScrollDown(_, _, _) => {
-                                    if self.books.scroll_down(5) {
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    }
-                                }
-                                MouseEvent::ScrollUp(_, _, _) => {
-                                    if self.books.scroll_up(5) {
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    }
-                                }
-                                _ => {
-                                    return Ok(false);
+                        Event::Mouse(m) => match m {
+                            MouseEvent::ScrollDown(_, _, _) => {
+                                let updated = if self.nav_settings.inverted {
+                                    self.books.scroll_up(self.nav_settings.scroll)
+                                } else {
+                                    self.books.scroll_down(self.nav_settings.scroll)
+                                };
+                                if updated {
+                                    self.update_columns = ColumnUpdate::Regenerate;
                                 }
                             }
-                        }
+                            MouseEvent::ScrollUp(_, _, _) => {
+                                let updated = if self.nav_settings.inverted {
+                                    self.books.scroll_down(self.nav_settings.scroll)
+                                } else {
+                                    self.books.scroll_up(self.nav_settings.scroll)
+                                };
+                                if updated {
+                                    self.update_columns = ColumnUpdate::Regenerate;
+                                }
+                            }
+                            _ => {
+                                return Ok(false);
+                            }
+                        },
                         Event::Resize(_, _) => {}
                         Event::Key(event) => {
                             // Text input
