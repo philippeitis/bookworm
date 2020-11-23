@@ -4,16 +4,16 @@ use std::{fs, path};
 use rayon::prelude::*;
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
+use unicase::UniCase;
 
 use crate::record::{Book, BookError};
-use unicase::UniCase;
 
 #[derive(Debug)]
 pub(crate) enum DatabaseError {
     Io(std::io::Error),
-    BookReading(BookError),
+    Book(BookError),
     Backend(RustbreakError),
-    // BookNotFound(u32),
+    BookNotFound(u32),
 }
 
 impl From<std::io::Error> for DatabaseError {
@@ -30,7 +30,7 @@ impl From<RustbreakError> for DatabaseError {
 
 impl From<BookError> for DatabaseError {
     fn from(e: BookError) -> Self {
-        DatabaseError::BookReading(e)
+        DatabaseError::Book(e)
     }
 }
 
@@ -156,7 +156,12 @@ pub(crate) trait AppDatabase {
 
     fn has_column(&self, col: &UniCase<String>) -> bool;
 
-    fn add_column(&mut self, col: UniCase<String>);
+    fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
+        &mut self,
+        id: u32,
+        column: S,
+        new_value: T,
+    ) -> Result<Book, DatabaseError>;
 }
 
 impl AppDatabase for BasicDatabase {
@@ -186,8 +191,21 @@ impl AppDatabase for BasicDatabase {
         self.cols.contains(col)
     }
 
-    fn add_column(&mut self, col: UniCase<String>) {
-        self.cols.insert(col);
+    fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
+        &mut self,
+        id: u32,
+        column: S,
+        new_value: T,
+    ) -> Result<Book, DatabaseError> {
+        let book = self.backend.write(|db| match db.books.get_mut(&id) {
+            None => Err(DatabaseError::BookNotFound(id)),
+            Some(book) => {
+                book.set_column(&column.as_ref().into(), new_value)?;
+                Ok(book.clone())
+            }
+        })??;
+        self.cols.insert(UniCase::new(column.as_ref().to_string()));
+        Ok(book)
     }
 
     fn read_books_from_dir<S>(
