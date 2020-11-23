@@ -75,6 +75,31 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database can not be saved correctly.
     fn save(&self) -> Result<(), DatabaseError>;
 
+    /// Returns a new ID which is larger than all previous IDs.
+    fn get_new_id(&self) -> Result<u32, DatabaseError>;
+
+    /// Inserts the given book into the database. If the book does not have an ID, it is given
+    /// an ID equal to the largest ID in the database so far, plus one.
+    ///
+    /// # Arguments
+    /// * ` book ` - A book to be stored.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
+    fn insert_book(&self, book: Book) -> Result<u32, DatabaseError>;
+
+    /// Reads the book at the given location into the database, and returns the book's ID.
+    ///
+    /// # Arguments
+    /// * ` file_path ` - The path to the book to be read.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails,
+    /// the file does not exist, or can not be read.
+    fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
+    where
+        S: AsRef<path::Path>;
+
     /// Reads each book in the directory into the database, and returns a
     /// Vec of corresponding IDs as well as a Vec of paths and errors which occured while trying to
     /// read them.
@@ -91,28 +116,6 @@ pub(crate) trait AppDatabase {
     ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
     where
         S: AsRef<path::Path>;
-
-    /// Reads the book at the given location into the database, and returns the book's ID.
-    ///
-    /// # Arguments
-    /// * ` file_path ` - The path to the book to be read.
-    ///
-    /// # Errors
-    /// This function will return an error if the database fails,
-    /// the file does not exist, or can not be read.
-    fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
-    where
-        S: AsRef<path::Path>;
-
-    /// Inserts the given book into the database. If the book does not have an ID, it is given
-    /// an ID equal to the largest ID in the database so far, plus one.
-    ///
-    /// # Arguments
-    /// * ` book ` - A book to be stored.
-    ///
-    /// # Errors
-    /// This function will return an error if the database fails.
-    fn insert_book(&self, book: Book) -> Result<u32, DatabaseError>;
 
     /// Removes the book with the given ID. If no book with the given ID exists, no change occurs.
     ///
@@ -133,9 +136,6 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database fails.
     fn remove_books(&self, ids: Vec<u32>) -> Result<(), DatabaseError>;
 
-    /// Returns a copy of every book in the database. If reading fails, None is returned.
-    fn get_all_books(&self) -> Option<Vec<Book>>;
-
     /// Finds and returns the book with the given ID. If no book is found, nothing is returned.
     ///
     /// # Arguments
@@ -146,13 +146,11 @@ pub(crate) trait AppDatabase {
     /// nothing is returned for that particular book.
     fn get_books(&self, ids: Vec<u32>) -> Vec<Option<Book>>;
 
+    /// Returns a copy of every book in the database. If reading fails, None is returned.
+    fn get_all_books(&self) -> Option<Vec<Book>>;
+
     /// Returns a list of columns that exist for at least one book in the database.
     fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError>;
-
-    /// Returns a new ID which is larger than all previous IDs.
-    fn get_new_id(&self) -> Result<u32, DatabaseError>;
-
-    fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError>;
 
     fn has_column(&self, col: &UniCase<String>) -> bool;
 
@@ -162,6 +160,8 @@ pub(crate) trait AppDatabase {
         column: S,
         new_value: T,
     ) -> Result<Book, DatabaseError>;
+
+    fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError>;
 }
 
 impl AppDatabase for BasicDatabase {
@@ -184,25 +184,23 @@ impl AppDatabase for BasicDatabase {
         Ok(self.backend.save()?)
     }
 
-    fn has_column(&self, col: &UniCase<String>) -> bool {
-        self.cols.contains(col)
+    fn get_new_id(&self) -> Result<u32, DatabaseError> {
+        Ok(self.backend.write(|db| db.new_id())?)
     }
 
-    fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
-        &mut self,
-        id: u32,
-        column: S,
-        new_value: T,
-    ) -> Result<Book, DatabaseError> {
-        let book = self.backend.write(|db| match db.books.get_mut(&id) {
-            None => Err(DatabaseError::BookNotFound(id)),
-            Some(book) => {
-                book.set_column(&column.as_ref().into(), new_value)?;
-                Ok(book.clone())
-            }
-        })??;
-        self.cols.insert(UniCase::new(column.as_ref().to_string()));
-        Ok(book)
+    fn insert_book(&self, book: Book) -> Result<u32, DatabaseError> {
+        Ok(self.backend.write(|db| {
+            let id = book.get_id();
+            db.books.insert(id, book);
+            id
+        })?)
+    }
+
+    fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
+    where
+        S: AsRef<path::Path>,
+    {
+        Ok(self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?)?)
     }
 
     fn read_books_from_dir<S>(
@@ -227,25 +225,6 @@ impl AppDatabase for BasicDatabase {
         Ok((ids, errs))
     }
 
-    fn get_new_id(&self) -> Result<u32, DatabaseError> {
-        Ok(self.backend.write(|db| db.new_id())?)
-    }
-
-    fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
-    where
-        S: AsRef<path::Path>,
-    {
-        Ok(self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?)?)
-    }
-
-    fn insert_book(&self, book: Book) -> Result<u32, DatabaseError> {
-        Ok(self.backend.write(|db| {
-            let id = book.get_id();
-            db.books.insert(id, book);
-            id
-        })?)
-    }
-
     fn remove_book(&self, id: u32) -> Result<(), DatabaseError> {
         Ok(self.backend.write(|db| {
             db.books.remove(&id);
@@ -260,14 +239,6 @@ impl AppDatabase for BasicDatabase {
         })?)
     }
 
-    // TODO: Make this return a Vec of references?
-    fn get_all_books(&self) -> Option<Vec<Book>> {
-        match self.backend.read(|db| db.books.values().cloned().collect()) {
-            Ok(books) => Some(books),
-            Err(_) => None,
-        }
-    }
-
     fn get_book(&self, id: u32) -> Option<Book> {
         match self.backend.read(|db| db.books.get(&id).cloned()) {
             Ok(book) => book,
@@ -277,6 +248,14 @@ impl AppDatabase for BasicDatabase {
 
     fn get_books(&self, ids: Vec<u32>) -> Vec<Option<Book>> {
         ids.iter().map(|&id| self.get_book(id)).collect()
+    }
+
+    // TODO: Make this return a Vec of references?
+    fn get_all_books(&self) -> Option<Vec<Book>> {
+        match self.backend.read(|db| db.books.values().cloned().collect()) {
+            Ok(books) => Some(books),
+            Err(_) => None,
+        }
     }
 
     fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError> {
@@ -296,6 +275,27 @@ impl AppDatabase for BasicDatabase {
             }
             c
         })?)
+    }
+
+    fn has_column(&self, col: &UniCase<String>) -> bool {
+        self.cols.contains(col)
+    }
+
+    fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
+        &mut self,
+        id: u32,
+        column: S,
+        new_value: T,
+    ) -> Result<Book, DatabaseError> {
+        let book = self.backend.write(|db| match db.books.get_mut(&id) {
+            None => Err(DatabaseError::BookNotFound(id)),
+            Some(book) => {
+                book.set_column(&column.as_ref().into(), new_value)?;
+                Ok(book.clone())
+            }
+        })??;
+        self.cols.insert(UniCase::new(column.as_ref().to_string()));
+        Ok(book)
     }
 
     fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError> {
