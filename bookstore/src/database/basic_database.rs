@@ -51,7 +51,6 @@ impl BookMap {
 pub(crate) struct BasicDatabase {
     backend: FileDatabase<BookMap, Ron>,
     cols: HashSet<UniCase<String>>,
-    // title_author_map: HashMap<(String, String), u32>
 }
 
 pub(crate) trait AppDatabase {
@@ -140,14 +139,14 @@ pub(crate) trait AppDatabase {
     ///
     /// # Arguments
     /// * ` id ` - The ID of the book to be returned.
-    fn get_book(&self, id: u32) -> Option<Book>;
+    fn get_book(&self, id: u32) -> Result<Book, DatabaseError>;
 
     /// Finds and returns the books with the given IDs, and if a particular book is not found,
     /// nothing is returned for that particular book.
-    fn get_books(&self, ids: Vec<u32>) -> Vec<Option<Book>>;
+    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Book>>, DatabaseError>;
 
     /// Returns a copy of every book in the database. If reading fails, None is returned.
-    fn get_all_books(&self) -> Option<Vec<Book>>;
+    fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError>;
 
     /// Returns a list of columns that exist for at least one book in the database.
     fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError>;
@@ -172,7 +171,6 @@ impl AppDatabase for BasicDatabase {
         let mut db = BasicDatabase {
             backend: FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)?,
             cols: HashSet::new(),
-            // title_author_map: HashMap::default(),
         };
         if let Ok(cols) = db.get_available_columns() {
             db.cols = cols;
@@ -239,23 +237,25 @@ impl AppDatabase for BasicDatabase {
         })?)
     }
 
-    fn get_book(&self, id: u32) -> Option<Book> {
-        match self.backend.read(|db| db.books.get(&id).cloned()) {
-            Ok(book) => book,
-            Err(_) => None,
-        }
+    // TODO: Is Option really the right choice here?
+    fn get_book(&self, id: u32) -> Result<Book, DatabaseError> {
+        self.backend.read(|db| match db.books.get(&id) {
+            None => Err(DatabaseError::BookNotFound(id)),
+            Some(book) => Ok(book.clone()),
+        })?
     }
 
-    fn get_books(&self, ids: Vec<u32>) -> Vec<Option<Book>> {
-        ids.iter().map(|&id| self.get_book(id)).collect()
+    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Book>>, DatabaseError> {
+        Ok(self
+            .backend
+            .read(|db| ids.iter().map(|id| db.books.get(&id).cloned()).collect())?)
     }
 
     // TODO: Make this return a Vec of references?
-    fn get_all_books(&self) -> Option<Vec<Book>> {
-        match self.backend.read(|db| db.books.values().cloned().collect()) {
-            Ok(books) => Some(books),
-            Err(_) => None,
-        }
+    fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError> {
+        Ok(self
+            .backend
+            .read(|db| db.books.values().cloned().collect())?)
     }
 
     fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError> {
