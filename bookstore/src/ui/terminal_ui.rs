@@ -893,7 +893,7 @@ impl<D: AppDatabase> App<D> {
             command_parser::Command::AddBookFromFile(f) => {
                 let id = self.db.read_book_from_file(f);
                 if let Ok(id) = id {
-                    if let Some(book) = self.db.get_book(id) {
+                    if let Ok(book) = self.db.get_book(id) {
                         self.add_books(std::iter::once(book));
                     }
                 }
@@ -901,7 +901,9 @@ impl<D: AppDatabase> App<D> {
             command_parser::Command::AddBooksFromDir(dir) => {
                 // TODO: Handle fails.
                 if let Ok((ids, _fails)) = self.db.read_books_from_dir(dir) {
-                    self.add_books(self.db.get_books(ids).into_iter().flatten());
+                    if let Ok(books) = self.db.get_books(ids) {
+                        self.add_books(books.into_iter().flatten());
+                    }
                 }
             }
             command_parser::Command::AddColumn(column) => {
