@@ -61,7 +61,11 @@ impl Command {
     }
 }
 
-// Get flags and corresponding values
+/// Read flags of the forms
+/// - -f1 arg1 arg2 ... -f2?
+/// - arg1 arg2 arg3 ... -f1?
+/// - -f1 -f2
+/// And return a Vec with all flags collected.
 fn read_flags(vec: &[String]) -> Vec<Flag> {
     if vec.is_empty() {
         return vec![];
@@ -109,6 +113,8 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
 }
 
 #[allow(dead_code)]
+/// Reads a string which acts as a command, splits into into its component words,
+/// and then parses the result into a command which can be run.
 pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
     let s = s.to_string();
     match shellwords::split(s.as_str()) {
@@ -117,6 +123,9 @@ pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
     }
 }
 
+/// Reads args and returns the appropriate command. If the command format is incorrect,
+/// returns Command::InvalidCommand, or Command::InvalidCommand if the first argument is not
+/// a recognized command.
 pub(crate) fn parse_args(args: &[String]) -> Command {
     let c = if let Some(c) = args.first() {
         c

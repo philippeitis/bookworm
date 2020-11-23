@@ -41,15 +41,29 @@ pub(crate) struct BookMap {
 }
 
 impl BookMap {
+    /// Return a monotonically increasing ID to use for a new
+    /// book.
+    ///
+    /// # Errors
+    /// Will panic if the ID can no longer be correctly increased.
     fn new_id(&mut self) -> u32 {
         let id = self.max_id;
+        if self.max_id == u32::MAX {
+            panic!(format!(
+                "Current ID is at maximum value of {} and can not be increased.",
+                u32::MAX
+            ));
+        }
         self.max_id += 1;
         id
     }
 }
 
+/// A database which fully implements the functionality of the AppDatabase trait,
+/// but does not guarantee that data is successfully written to disk.
 pub(crate) struct BasicDatabase {
     backend: FileDatabase<BookMap, Ron>,
+    /// All available columns. Case-insensitive.
     cols: HashSet<UniCase<String>>,
 }
 
@@ -135,24 +149,54 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database fails.
     fn remove_books(&self, ids: Vec<u32>) -> Result<(), DatabaseError>;
 
-    /// Finds and returns the book with the given ID. If no book is found, nothing is returned.
+    /// Finds and returns the book with the given ID. If no book is found, a BookNotFound error is
+    /// returned.
     ///
     /// # Arguments
     /// * ` id ` - The ID of the book to be returned.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails or no book is found
+    /// with the given ID.
     fn get_book(&self, id: u32) -> Result<Book, DatabaseError>;
 
-    /// Finds and returns the books with the given IDs, and if a particular book is not found,
-    /// nothing is returned for that particular book.
+    /// Finds and returns all books with the given IDs. If a book with a given ID does not exist,
+    /// None is returned for that particular ID.
+    ///
+    /// # Arguments
+    /// * ` ids ` - The IDs of the book to be removed.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Book>>, DatabaseError>;
 
-    /// Returns a copy of every book in the database. If reading fails, None is returned.
+    /// Returns a copy of every book in the database. If a database error occurs while reading,
+    /// the error is returned.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError>;
 
     /// Returns a list of columns that exist for at least one book in the database.
     fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError>;
 
+    /// Returns whether the provided column exists in at least one book in the database.
+    ///
+    /// # Arguments
+    /// * ` col ` - The column to check.
     fn has_column(&self, col: &UniCase<String>) -> bool;
 
+    /// Finds the book with the given ID, then sets the given value for the book to `new_value`.
+    /// If all steps are successful, returns a copy of the book to use, otherwise returning
+    /// the appropriate error.
+    ///
+    /// # Arguments
+    /// * ` id ` - The ID of the book to be edited.
+    /// * ` column ` - The field in the book to modify.
+    /// * ` new_value ` - The value to set the field to.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
         &mut self,
         id: u32,
@@ -160,6 +204,12 @@ pub(crate) trait AppDatabase {
         new_value: T,
     ) -> Result<Book, DatabaseError>;
 
+    /// Merges all books with matching titles and authors, skipping everything else, with no
+    /// particular order. Books that are merged will not free IDs no longer in use.
+    /// If successful, returns a list of IDs which no longer point to a book.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError>;
 }
 
@@ -237,7 +287,6 @@ impl AppDatabase for BasicDatabase {
         })?)
     }
 
-    // TODO: Is Option really the right choice here?
     fn get_book(&self, id: u32) -> Result<Book, DatabaseError> {
         self.backend.read(|db| match db.books.get(&id) {
             None => Err(DatabaseError::BookNotFound(id)),
