@@ -13,6 +13,7 @@ use crate::record::epub::{EpubError, EpubMetadata};
 use crate::record::ISBN;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+/// Enumerates all supported book types.
 pub(crate) enum BookType {
     EPUB,
     MOBI,
@@ -21,6 +22,7 @@ pub(crate) enum BookType {
 }
 
 #[derive(Debug)]
+/// Enumerates all potential errors that can occur when using a Book.
 pub(crate) enum BookError {
     FileError,
     ImmutableColumnError,
@@ -49,8 +51,9 @@ fn unravel_author(author: &str) -> String {
     }
 }
 
-// TODO: Implement time out to prevent crashing if reading explodes.
+// TODO: Implement timeout to prevent crashing if reading explodes.
 impl BookType {
+    /// Returns a new BookType from the provided string - this should be a file extension.
     fn new<S>(s: S) -> BookType
     where
         S: AsRef<OsStr>,
@@ -68,6 +71,8 @@ impl BookType {
         }
     }
 
+    /// Fills in the metadata for book, using self to determine which file format file_path is
+    /// in.
     fn fill_in_metadata<S>(&self, book: &mut BookVariant, file_path: S) -> Result<(), BookError>
     where
         S: AsRef<path::Path>,
@@ -133,6 +138,10 @@ impl BookType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+/// The struct which contains the major fields a book will have, a set of variants,
+/// which corresponds to particular file formats of this book (eg. a EPUB and MOBI version),
+/// or even differing realizations of the book (eg. a French and English of the same book).
+/// Contains an unique ID, and provides storage for additional tags which are not specified here.
 pub(crate) struct Book {
     pub(crate) title: Option<String>,
     pub(crate) authors: Option<Vec<String>>,
@@ -142,6 +151,7 @@ pub(crate) struct Book {
     extended_tags: Option<HashMap<String, String>>,
 }
 
+/// Identifies the columns a Book provides.
 pub(crate) enum ColumnIdentifier {
     Title,
     Author,
