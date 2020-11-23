@@ -147,7 +147,7 @@ pub(crate) trait AppDatabase {
     fn get_books(&self, ids: Vec<u32>) -> Vec<Option<Book>>;
 
     /// Returns a list of columns that exist for at least one book in the database.
-    fn get_available_columns(&self) -> Option<Vec<String>>;
+    fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError>;
 
     /// Returns a new ID which is larger than all previous IDs.
     fn get_new_id(&self) -> Result<u32, DatabaseError>;
@@ -174,12 +174,9 @@ impl AppDatabase for BasicDatabase {
             cols: HashSet::new(),
             // title_author_map: HashMap::default(),
         };
-        db.cols = db
-            .get_available_columns()
-            .unwrap_or_else(Vec::new)
-            .into_iter()
-            .map(UniCase::new)
-            .collect();
+        if let Ok(cols) = db.get_available_columns() {
+            db.cols = cols;
+        }
         Ok(db)
     }
 
@@ -287,34 +284,23 @@ impl AppDatabase for BasicDatabase {
         ids.iter().map(|&id| self.get_book(id)).collect()
     }
 
-    fn get_available_columns(&self) -> Option<Vec<String>> {
-        match self
-            .backend
-            .read(|db| -> Result<Option<HashSet<String>>, ()> {
-                let mut c = HashSet::new();
-                c.insert("title".to_string());
-                c.insert("authors".to_string());
-                c.insert("series".to_string());
-                c.insert("id".to_string());
-                for book in db.books.values() {
-                    if let Some(e) = book.get_extended_columns() {
-                        for key in e.keys() {
-                            c.insert(key.clone());
-                        }
+    fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError> {
+        Ok(self.backend.read(|db| {
+            let mut c = HashSet::new();
+            c.insert(UniCase::new("title".to_string()));
+            c.insert(UniCase::new("authors".to_string()));
+            c.insert(UniCase::new("series".to_string()));
+            c.insert(UniCase::new("id".to_string()));
+            for book in db.books.values() {
+                if let Some(e) = book.get_extended_columns() {
+                    for key in e.keys() {
+                        // TODO: Profile this for large database.
+                        c.insert(UniCase::new(key.clone()));
                     }
                 }
-                Ok(Some(c))
-            }) {
-            Ok(book) => {
-                if let Ok(x) = book {
-                    if let Some(hset) = x {
-                        return Some(hset.iter().cloned().collect());
-                    }
-                }
-                None
             }
-            Err(_) => None,
-        }
+            c
+        })?)
     }
 
     fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError> {
