@@ -16,7 +16,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -30,10 +30,22 @@ jobs:
         toolchain: ${{ matrix.rust }}
         override: true
     - name: Build
-      run: cd bookstore && cargo build --verbose
-    - name: Run tests
       run: cd bookstore && cargo test --verbose
-    - name: Run clippy
-      run: rustup component add clippy && cd bookstore && cargo clippy
+  fmt:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
     - name: Formatting
       run: rustup component add rustfmt && cd bookstore && cargo fmt -- --check
+  clippy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+    - name: Run clippy
+      run: rustup component add clippy && cd bookstore && cargo clippy
