@@ -38,6 +38,9 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
     - name: Formatting
       run: rustup component add rustfmt && cd bookstore && cargo fmt -- --check
   clippy:
@@ -47,5 +50,8 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
     - name: Run clippy
       run: rustup component add clippy && cd bookstore && cargo clippy
