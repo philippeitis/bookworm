@@ -606,8 +606,9 @@ dependencies = [
 
 [[package]]
 name = "mobi"
-version = "0.4.3"
-source = "git+https://github.com/wojciechkepka/mobi-rs#b307674276c9f41a18a439645b1f23e08c870770"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d040771d763f217334e09ed9d79b3bf9f4902f49364fce2b53183b8b5c625ad2"
 dependencies = [
  "byteorder",
  "encoding",
