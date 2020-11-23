@@ -64,7 +64,6 @@ pub(crate) enum ApplicationError {
     IoError(std::io::Error),
     TerminalError(crossterm::ErrorKind),
     DatabaseError(DatabaseError),
-    BookNotFound(u32),
     NoBookSelected,
     Err(()),
 }
@@ -242,14 +241,18 @@ impl<D: AppDatabase> App<D> {
         column: S,
         new_value: T,
     ) -> Result<(), ApplicationError> {
-        if let Some(mut book) = self.get_book_with_id(id).cloned() {
-            self.db
-                .add_column(UniCase::new(column.as_ref().to_string()));
-            let _ = book.set_column(&column.as_ref().into(), new_value);
-            self.update_book(&book)
+        let book = self.db.edit_book_with_id(id, column, new_value)?;
+
+        let id = book.get_id();
+        if let Some(index) = self.get_book_index(id) {
+            self.books.data_mut()[index] = book;
         } else {
-            Err(ApplicationError::BookNotFound(id))
+            self.books.data_mut().push(book);
         }
+
+        self.sort_settings.is_sorted = false;
+        self.update_columns = ColumnUpdate::Regenerate;
+        Ok(())
     }
 
     /// Edits the selected book, updating the selected column to the new value.
@@ -266,36 +269,12 @@ impl<D: AppDatabase> App<D> {
         column: S,
         new_value: T,
     ) -> Result<(), ApplicationError> {
-        if let Some(mut book) = self.books.selected_item().cloned() {
-            self.db
-                .add_column(UniCase::new(column.as_ref().to_string()));
-            let _ = book.set_column(&column.into(), new_value);
-            self.update_book(&book)
+        let id = if let Some(book) = self.books.selected_item() {
+            Ok(book.get_id())
         } else {
             Err(ApplicationError::NoBookSelected)
-        }
-    }
-
-    /// Adds the book to the internal database if a book with the same ID does not exist,
-    /// otherwise overwrites the existing book with the same id.
-    ///
-    /// # Arguments
-    ///
-    /// * ` book ` - The book to add.
-    fn update_book(&mut self, book: &Book) -> Result<(), ApplicationError> {
-        let id = book.get_id();
-        self.db.remove_book(id)?;
-        self.db.insert_book(book.clone())?;
-
-        if let Some(index) = self.get_book_index(id) {
-            self.books.data_mut()[index] = book.clone();
-        } else {
-            self.books.data_mut().push(book.clone());
-        }
-
-        self.sort_settings.is_sorted = false;
-        self.update_columns = ColumnUpdate::Regenerate;
-        Ok(())
+        }?;
+        self.edit_book_with_id(id, column, new_value)
     }
 
     /// Updates the required sorting settings if the column changes.
