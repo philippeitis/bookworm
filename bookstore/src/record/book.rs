@@ -137,7 +137,7 @@ impl BookType {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 /// The struct which contains the major fields a book will have, a set of variants,
 /// which corresponds to particular file formats of this book (eg. a EPUB and MOBI version),
 /// or even differing realizations of the book (eg. a French and English of the same book).
@@ -174,7 +174,7 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub(crate) struct BookVariant {
     local_title: Option<String>,
     isbn: Option<ISBN>,
@@ -304,6 +304,18 @@ impl BookVariant {
 }
 
 impl Book {
+    #[cfg(test)]
+    pub(crate) fn with_id(id: u32) -> Book {
+        Book {
+            title: None,
+            authors: None,
+            series: None,
+            variants: None,
+            id,
+            extended_tags: None,
+        }
+    }
+
     pub(crate) fn generate_from_file<S>(file_path: S, id: u32) -> Result<Book, BookError>
     where
         S: AsRef<path::Path>,
