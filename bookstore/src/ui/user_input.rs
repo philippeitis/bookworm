@@ -154,13 +154,13 @@ impl CommandString {
         let val = if let Some(val) = values.last() {
             if !val.0 && val.1.starts_with('-') && self.char_buf.last().eq(&Some(&' ')) {
                 self.keep_last = true;
-                "".to_string()
+                ""
             } else {
                 self.keep_last = false;
-                val.1.clone()
+                &val.1
             }
         } else {
-            "".to_string()
+            ""
         };
 
         self.auto_fill = Some(AutoCompleter::new(val)?);
