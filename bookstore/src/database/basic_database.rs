@@ -472,4 +472,10 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn test_rustbreak() {
+        let db = FileDatabase::<BookMap, Ron>::load_from_path_or_default("not_a_real_database.db");
+        assert!(db.is_ok());
+    }
 }
