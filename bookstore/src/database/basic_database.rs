@@ -379,3 +379,97 @@ impl AppDatabase for BasicDatabase {
         })?)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_open() {
+        let db = BasicDatabase::open("not_a_real_database.db");
+        assert!(db.is_ok());
+        let db = db.unwrap();
+        let base_cols = ["title", "authors", "id", "series"];
+        assert!(db.cols.eq(&base_cols
+            .iter()
+            .map(|c| UniCase::new(c.to_string()))
+            .collect()));
+    }
+
+    #[test]
+    fn test_adding_book() {
+        let db = BasicDatabase::open("not_a_real_database.db").unwrap();
+
+        let id = db.get_new_id();
+        assert!(id.is_ok());
+        let id = id.unwrap();
+        assert_eq!(id, 0);
+
+        let book = Book::with_id(id);
+        let res = db.insert_book(book.clone());
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), id);
+        let fetched = db.get_book(id);
+        assert!(fetched.is_ok());
+        assert_eq!(fetched.unwrap(), book);
+    }
+
+    #[test]
+    fn test_adding_2_books() {
+        let db = BasicDatabase::open("not_a_real_database.db").unwrap();
+
+        let id0 = db.get_new_id();
+        assert!(id0.is_ok());
+        let id0 = id0.unwrap();
+        assert_eq!(id0, 0);
+        let book0 = Book::with_id(id0);
+
+        let id1 = db.get_new_id();
+        assert!(id1.is_ok());
+        let id1 = id1.unwrap();
+        assert_eq!(id1, 1);
+        let book1 = Book::with_id(id1);
+
+        assert_ne!(book0, book1);
+
+        let res = db.insert_book(book1.clone());
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), id1);
+
+        let res = db.insert_book(book0.clone());
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), id0);
+
+        let fetched1 = db.get_book(id1);
+        assert!(fetched1.is_ok());
+        let fetched1 = fetched1.unwrap();
+        assert_eq!(fetched1, book1);
+
+        let fetched0 = db.get_book(id0);
+        assert!(fetched0.is_ok());
+        let fetched0 = fetched0.unwrap();
+        assert_eq!(fetched0, book0);
+
+        assert_ne!(fetched0, fetched1);
+        assert_ne!(fetched0, book1);
+        assert_ne!(fetched1, book0);
+    }
+
+    #[test]
+    fn test_book_does_not_exist() {
+        let db = BasicDatabase::open("not_a_real_database.db").unwrap();
+
+        for i in 0..1000 {
+            let get_book = db.get_book(i);
+            assert!(get_book.is_err());
+            match get_book.unwrap_err() {
+                DatabaseError::Io(_) => panic!("Expected BookNotFoundError"),
+                DatabaseError::Book(_) => panic!("Expected BookNotFoundError"),
+                DatabaseError::Backend(_) => panic!("Expected BookNotFoundError"),
+                DatabaseError::BookNotFound(id) => {
+                    assert_eq!(i, id);
+                }
+            }
+        }
+    }
+}
