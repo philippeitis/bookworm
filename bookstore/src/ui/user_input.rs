@@ -173,7 +173,7 @@ impl CommandString {
 
         if let Some(af) = self.auto_fill.as_mut() {
             let path = if dir {
-                af.get_next_word_by(&|x| x.is_dir())
+                af.get_next_word_by(|x| x.is_dir())
             } else {
                 af.get_next_word()
             };

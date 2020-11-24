@@ -887,8 +887,7 @@ impl<D: SelectableDatabase> App<D> {
                 self.updated = false;
             }
             if self.get_input()? {
-                terminal.clear()?;
-                return Ok(());
+                return Ok(terminal.clear()?);
             }
         }
     }
