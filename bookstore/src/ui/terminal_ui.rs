@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::iter::FromIterator;
@@ -17,9 +16,7 @@ use tui::{Frame, Terminal};
 
 use unicase::UniCase;
 
-use rayon::prelude::*;
-
-use crate::database::{AppDatabase, DatabaseError, PageView};
+use crate::database::{AppDatabase, DatabaseError};
 use crate::parser::command_parser;
 use crate::parser::{parse_args, BookIndex};
 use crate::record::book::ColumnIdentifier;
@@ -43,7 +40,6 @@ pub(crate) struct App<D> {
 
     selected_cols: Vec<UniCase<String>>,
     curr_command: CommandString,
-    books: PageView<Book>,
     sort_settings: SortSettings,
     edit: EditState,
     selected_column: usize,
@@ -147,7 +143,6 @@ impl<D: AppDatabase> App<D> {
             .map(|s| UniCase::new(s.clone()))
             .collect();
 
-        let books = db.get_all_books().into_iter().flatten().collect();
         let column_data = (0..selected_cols.len())
             .into_iter()
             .map(|_| vec![])
@@ -158,7 +153,6 @@ impl<D: AppDatabase> App<D> {
             db,
             selected_cols,
             curr_command: CommandString::new(),
-            books: PageView::new(0, books),
             sort_settings: settings.sort_settings,
             updated: true,
             update_columns: ColumnUpdate::Regenerate,
@@ -169,16 +163,6 @@ impl<D: AppDatabase> App<D> {
             selected_column: 0,
             nav_settings: settings.navigation_settings,
         })
-    }
-
-    /// Gets the index of the book in the internal list, if it exists. May become invalidated
-    /// if changes to the list occur between reading this value and using this value.
-    ///
-    /// # Arguments
-    ///
-    /// * ` id ` - The book ID.
-    fn get_book_index(&mut self, id: u32) -> Option<usize> {
-        self.books.data().iter().position(|b| b.get_id() == id)
     }
 
     /// Deletes the book with the given ID. If deleting the book reduces the number of books such
@@ -194,15 +178,6 @@ impl<D: AppDatabase> App<D> {
     fn delete_book(&mut self, id: u32) -> Result<(), ApplicationError> {
         self.db.remove_book(id)?;
         self.update_columns = ColumnUpdate::Regenerate;
-        if let Some(index) = self.get_book_index(id) {
-            self.books.data_mut().remove(index);
-            self.books.refresh();
-            if let Some(s) = self.books.selected() {
-                if s == self.books.data().len() && s != 0 {
-                    self.books.select(Some(s - 1));
-                }
-            }
-        }
         Ok(())
     }
 
@@ -211,19 +186,11 @@ impl<D: AppDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` id ` - The book ID.
-    fn get_book_with_id(&self, id: u32) -> Option<&Book> {
-        self.books.data().iter().find(|b| b.get_id() == id)
-    }
-
-    /// Adds the provided books to the internal database and adjusts sorting settings.
-    ///
-    /// # Arguments
-    ///
-    /// * ` books ` - A collection of books.
-    fn add_books(&mut self, books: impl IntoIterator<Item = Book>) {
-        self.books.data_mut().extend(books);
-        self.sort_settings.is_sorted = false;
-        self.update_columns = ColumnUpdate::Regenerate;
+    fn get_book_with_id(&self, id: u32) -> Option<Book> {
+        match self.db.get_book(id) {
+            Ok(b) => Some(b),
+            Err(_) => None,
+        }
     }
 
     /// Edits the book with the given ID, updating the selected column to the new value.
@@ -241,15 +208,7 @@ impl<D: AppDatabase> App<D> {
         column: S,
         new_value: T,
     ) -> Result<(), ApplicationError> {
-        let book = self.db.edit_book_with_id(id, column, new_value)?;
-
-        let id = book.get_id();
-        if let Some(index) = self.get_book_index(id) {
-            self.books.data_mut()[index] = book;
-        } else {
-            self.books.data_mut().push(book);
-        }
-
+        self.db.edit_book_with_id(id, column, new_value)?;
         self.sort_settings.is_sorted = false;
         self.update_columns = ColumnUpdate::Regenerate;
         Ok(())
@@ -269,7 +228,7 @@ impl<D: AppDatabase> App<D> {
         column: S,
         new_value: T,
     ) -> Result<(), ApplicationError> {
-        let id = if let Some(book) = self.books.selected_item() {
+        let id = if let Ok(book) = self.db.selected_item() {
             Ok(book.get_id())
         } else {
             Err(ApplicationError::NoBookSelected)
@@ -317,10 +276,10 @@ impl<D: AppDatabase> App<D> {
                 self.updated = true;
                 self.column_data = (0..self.selected_cols.len())
                     .into_iter()
-                    .map(|_| Vec::with_capacity(self.books.window_size()))
+                    .map(|_| Vec::with_capacity(self.db.cursor().window_size()))
                     .collect();
 
-                if self.books.window_size() == 0 {
+                if self.db.cursor().window_size() == 0 {
                     self.update_columns = ColumnUpdate::NoUpdate;
                     return false;
                 }
@@ -328,8 +287,8 @@ impl<D: AppDatabase> App<D> {
                 let _ = self.log(format!(
                     "update_column_data(ColumnUpdate::Regenerate): {} {} {:?}",
                     0,
-                    self.books.window_size(),
-                    self.books.selected()
+                    self.db.cursor().window_size(),
+                    self.db.selected()
                 ));
 
                 let cols = self
@@ -337,7 +296,8 @@ impl<D: AppDatabase> App<D> {
                     .iter()
                     .map(|col| ColumnIdentifier::from(col.as_str()))
                     .collect::<Vec<_>>();
-                for b in self.books.window_slice() {
+
+                for b in self.db.get_books_cursored().unwrap() {
                     for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
                         column.push(b.get_column_or(&col, ""));
                     }
@@ -349,8 +309,9 @@ impl<D: AppDatabase> App<D> {
                     self.selected_cols.push(word.clone());
                     let column_string = ColumnIdentifier::from(word.as_str());
                     self.column_data.push(
-                        self.books
-                            .window_slice()
+                        self.db
+                            .get_books_cursored()
+                            .unwrap()
                             .iter()
                             .map(|book| book.get_column_or(&column_string, ""))
                             .collect(),
@@ -367,17 +328,6 @@ impl<D: AppDatabase> App<D> {
             }
             ColumnUpdate::NoUpdate => {}
         }
-
-        assert!(
-            self.column_data[0].len() >= self.books.window_size()
-                || self.column_data[0].len() == self.books.data().len(),
-            format!(
-                "{:?} {} {}",
-                self.update_columns,
-                self.column_data[0].len(),
-                self.books.window_size()
-            )
-        );
 
         if self.update_columns != ColumnUpdate::NoUpdate {
             self.update_columns = ColumnUpdate::NoUpdate;
@@ -429,12 +379,13 @@ impl<D: AppDatabase> App<D> {
             )
             .split(chunk);
 
+        // TODO: Remove this assert.
         assert!(
-            self.books
+            self.db
                 .selected()
                 .map(|x| { x <= chunk.height as usize })
                 .unwrap_or(true),
-            format!("{:?}", self.books.selected())
+            format!("{:?}", self.db.selected())
         );
 
         let edit_style = Style::default()
@@ -466,7 +417,7 @@ impl<D: AppDatabase> App<D> {
             });
 
             let mut selected_row = ListState::default();
-            selected_row.select(self.books.selected());
+            selected_row.select(self.db.selected());
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
     }
@@ -638,9 +589,9 @@ impl<D: AppDatabase> App<D> {
                         Event::Mouse(m) => match m {
                             MouseEvent::ScrollDown(_, _, _) => {
                                 let updated = if self.nav_settings.inverted {
-                                    self.books.scroll_up(self.nav_settings.scroll)
+                                    self.db.cursor_mut().scroll_up(self.nav_settings.scroll)
                                 } else {
-                                    self.books.scroll_down(self.nav_settings.scroll)
+                                    self.db.cursor_mut().scroll_down(self.nav_settings.scroll)
                                 };
                                 if updated {
                                     self.update_columns = ColumnUpdate::Regenerate;
@@ -648,9 +599,9 @@ impl<D: AppDatabase> App<D> {
                             }
                             MouseEvent::ScrollUp(_, _, _) => {
                                 let updated = if self.nav_settings.inverted {
-                                    self.books.scroll_down(self.nav_settings.scroll)
+                                    self.db.cursor_mut().scroll_down(self.nav_settings.scroll)
                                 } else {
-                                    self.books.scroll_up(self.nav_settings.scroll)
+                                    self.db.cursor_mut().scroll_up(self.nav_settings.scroll)
                                 };
                                 if updated {
                                     self.update_columns = ColumnUpdate::Regenerate;
@@ -665,7 +616,7 @@ impl<D: AppDatabase> App<D> {
                             // Text input
                             match event.code {
                                 KeyCode::F(2) => {
-                                    if let Some(x) = self.books.selected() {
+                                    if let Some(x) = self.db.selected() {
                                         self.edit = EditState::new(
                                             &self.column_data[self.selected_column][x],
                                             x,
@@ -707,11 +658,11 @@ impl<D: AppDatabase> App<D> {
                                 }
                                 KeyCode::Esc => {
                                     self.curr_command.clear();
-                                    self.books.select(None);
+                                    self.db.cursor_mut().select(None);
                                 }
                                 KeyCode::Delete => {
                                     if self.curr_command.is_empty() {
-                                        let id = if let Some(b) = self.books.selected_item() {
+                                        let id = if let Ok(b) = self.db.selected_item() {
                                             Some(b.get_id())
                                         } else {
                                             None
@@ -727,32 +678,32 @@ impl<D: AppDatabase> App<D> {
                                 }
                                 // Scrolling
                                 KeyCode::Up => {
-                                    if self.books.select_up() {
+                                    if self.db.cursor_mut().select_up() {
                                         self.update_columns = ColumnUpdate::Regenerate;
                                     }
                                 }
                                 KeyCode::Down => {
-                                    if self.books.select_down() {
+                                    if self.db.cursor_mut().select_down() {
                                         self.update_columns = ColumnUpdate::Regenerate;
                                     }
                                 }
                                 KeyCode::PageDown => {
-                                    if self.books.page_down() {
+                                    if self.db.cursor_mut().page_down() {
                                         self.update_columns = ColumnUpdate::Regenerate;
                                     }
                                 }
                                 KeyCode::PageUp => {
-                                    if self.books.page_up() {
+                                    if self.db.cursor_mut().page_up() {
                                         self.update_columns = ColumnUpdate::Regenerate;
                                     }
                                 }
                                 KeyCode::Home => {
-                                    if self.books.home() {
+                                    if self.db.cursor_mut().home() {
                                         self.update_columns = ColumnUpdate::Regenerate;
                                     }
                                 }
                                 KeyCode::End => {
-                                    if self.books.end() {
+                                    if self.db.cursor_mut().end() {
                                         self.update_columns = ColumnUpdate::Regenerate;
                                     }
                                 }
@@ -843,9 +794,15 @@ impl<D: AppDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` b ` - A BookIndex which either represents an exact ID, or the selected book.
-    fn get_book(&self, b: BookIndex) -> Option<&Book> {
+    fn get_book(&self, b: BookIndex) -> Option<Book> {
         match b {
-            BookIndex::Selected => self.books.selected_item(),
+            BookIndex::Selected => {
+                if let Ok(book) = self.db.selected_item() {
+                    Some(book)
+                } else {
+                    None
+                }
+            }
             BookIndex::BookID(id) => self.get_book_with_id(id),
         }
     }
@@ -873,15 +830,8 @@ impl<D: AppDatabase> App<D> {
                 }
             }
             command_parser::Command::DeleteAll => {
-                let ids = self
-                    .books
-                    .data()
-                    .iter()
-                    .map(|b| b.get_id())
-                    .collect::<Vec<_>>();
-                self.db.remove_books(ids)?;
-                self.books.data_mut().clear();
-                self.books.refresh();
+                self.db.clear()?;
+                self.column_data.iter_mut().for_each(|c| c.clear());
                 self.update_columns = ColumnUpdate::Regenerate;
             }
             command_parser::Command::EditBook(b, field, new_value) => {
@@ -891,20 +841,15 @@ impl<D: AppDatabase> App<D> {
                 };
             }
             command_parser::Command::AddBookFromFile(f) => {
-                let id = self.db.read_book_from_file(f);
-                if let Ok(id) = id {
-                    if let Ok(book) = self.db.get_book(id) {
-                        self.add_books(std::iter::once(book));
-                    }
-                }
+                self.db.read_book_from_file(f)?;
+                self.sort_settings.is_sorted = false;
+                self.update_columns = ColumnUpdate::Regenerate;
             }
             command_parser::Command::AddBooksFromDir(dir) => {
-                // TODO: Handle fails.
-                if let Ok((ids, _fails)) = self.db.read_books_from_dir(dir) {
-                    if let Ok(books) = self.db.get_books(ids) {
-                        self.add_books(books.into_iter().flatten());
-                    }
-                }
+                // TODO: Handle failed reads.
+                self.db.read_books_from_dir(dir)?;
+                self.sort_settings.is_sorted = false;
+                self.update_columns = ColumnUpdate::Regenerate;
             }
             command_parser::Command::AddColumn(column) => {
                 self.update_columns = ColumnUpdate::AddColumn(UniCase::new(column));
@@ -918,13 +863,13 @@ impl<D: AppDatabase> App<D> {
             #[cfg(windows)]
             command_parser::Command::OpenBookInApp(b, index) => {
                 if let Some(b) = self.get_book(b) {
-                    self.open_book(b, index)?;
+                    self.open_book(&b, index)?;
                 }
             }
             #[cfg(windows)]
             command_parser::Command::OpenBookInExplorer(b, index) => {
                 if let Some(b) = self.get_book(b) {
-                    self.open_book_in_dir(b, index)?;
+                    self.open_book_in_dir(&b, index)?;
                 }
             }
             command_parser::Command::Write => {
@@ -938,15 +883,7 @@ impl<D: AppDatabase> App<D> {
                 return Ok(false);
             }
             command_parser::Command::TryMergeAllBooks => {
-                let merged: HashSet<_> = self.db.merge_similar()?.into_iter().collect();
-                let mut new_books = vec![];
-                for book in self.books.data_mut().drain(..) {
-                    if !merged.contains(&book.get_id()) {
-                        new_books.push(book);
-                    }
-                }
-
-                self.books.refresh_data(new_books);
+                self.db.merge_similar()?;
                 self.update_columns = ColumnUpdate::Regenerate;
             }
             _ => {
@@ -957,26 +894,13 @@ impl<D: AppDatabase> App<D> {
     }
 
     /// Sorts the books internally, using the current sort settings.
-    fn sort_books_by_col(&mut self) {
-        let col_string = self.sort_settings.column.as_str();
-        let col = ColumnIdentifier::from(col_string);
-        if self.books.data().len() < 2500 {
-            if self.sort_settings.reverse {
-                self.books.data_mut().sort_by(|a, b| b.cmp_column(a, &col))
-            } else {
-                self.books.data_mut().sort_by(|a, b| a.cmp_column(b, &col))
-            }
-        } else if self.sort_settings.reverse {
-            self.books
-                .data_mut()
-                .par_sort_unstable_by(|a, b| b.cmp_column(a, &col))
-        } else {
-            self.books
-                .data_mut()
-                .par_sort_unstable_by(|a, b| a.cmp_column(b, &col))
-        }
-
+    fn sort_books_by_col(&mut self) -> Result<(), ApplicationError> {
+        self.db.sort_books_by_col(
+            self.sort_settings.column.as_str(),
+            self.sort_settings.reverse,
+        )?;
         self.sort_settings.is_sorted = true;
+        Ok(())
     }
 
     /// Runs the application - including handling user inputs and refreshing the output.
@@ -991,13 +915,13 @@ impl<D: AppDatabase> App<D> {
         mut self,
         terminal: &mut Terminal<B>,
     ) -> Result<(), ApplicationError> {
-        // self.visible_rows = terminal.size()?.height as usize;
-        self.books
+        self.db
+            .cursor_mut()
             .refresh_window_size(terminal.size()?.height as usize);
 
         loop {
             if !self.sort_settings.is_sorted {
-                self.sort_books_by_col();
+                self.sort_books_by_col()?;
             }
 
             self.update_column_data();
@@ -1027,8 +951,9 @@ impl<D: AppDatabase> App<D> {
                         .split(hchunks[0]);
 
                     let curr_height = vchunks[0].height as usize;
-                    if curr_height != 0 && self.books.window_size() != curr_height - 1 {
-                        self.books
+                    if curr_height != 0 && self.db.cursor().window_size() != curr_height - 1 {
+                        self.db
+                            .cursor_mut()
                             .refresh_window_size(vchunks[0].height as usize - 1);
                         self.update_columns = ColumnUpdate::Regenerate;
 
@@ -1046,8 +971,8 @@ impl<D: AppDatabase> App<D> {
 
                     self.render_columns(f, vchunks[0]);
                     self.render_command_prompt(f, vchunks[1]);
-                    if let Some(b) = self.books.selected_item() {
-                        self.render_book_into_view(b, f, hchunks[1]);
+                    if let Ok(b) = self.db.selected_item() {
+                        self.render_book_into_view(&b, f, hchunks[1]);
                     }
                 })?;
                 self.updated = false;

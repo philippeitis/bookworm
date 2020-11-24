@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::{fs, path};
 
-use rayon::prelude::*;
+use indexmap::IndexMap;
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
+use crate::database::PageCursor;
+use crate::record::book::ColumnIdentifier;
 use crate::record::{Book, BookError};
 
 #[derive(Debug)]
@@ -14,6 +16,7 @@ pub(crate) enum DatabaseError {
     Book(BookError),
     Backend(RustbreakError),
     BookNotFound(u32),
+    NoBookSelected,
 }
 
 impl From<std::io::Error> for DatabaseError {
@@ -37,7 +40,7 @@ impl From<BookError> for DatabaseError {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub(crate) struct BookMap {
     max_id: u32,
-    books: HashMap<u32, Book>,
+    books: IndexMap<u32, Book>,
 }
 
 impl BookMap {
@@ -65,6 +68,7 @@ pub(crate) struct BasicDatabase {
     backend: FileDatabase<BookMap, Ron>,
     /// All available columns. Case-insensitive.
     cols: HashSet<UniCase<String>>,
+    cursor: PageCursor,
 }
 
 pub(crate) trait AppDatabase {
@@ -99,7 +103,7 @@ pub(crate) trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn insert_book(&self, book: Book) -> Result<u32, DatabaseError>;
+    fn insert_book(&mut self, book: Book) -> Result<u32, DatabaseError>;
 
     /// Reads the book at the given location into the database, and returns the book's ID.
     ///
@@ -109,7 +113,7 @@ pub(crate) trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails,
     /// the file does not exist, or can not be read.
-    fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
+    fn read_book_from_file<S>(&mut self, file_path: S) -> Result<u32, DatabaseError>
     where
         S: AsRef<path::Path>;
 
@@ -124,7 +128,7 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database fails,
     /// or the directory does not exist.
     fn read_books_from_dir<S>(
-        &self,
+        &mut self,
         dir: S,
     ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
     where
@@ -137,7 +141,7 @@ pub(crate) trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn remove_book(&self, id: u32) -> Result<(), DatabaseError>;
+    fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError>;
 
     /// Removes all books with the given IDs. If a book with a given ID does not exists, no change
     /// for that particular ID.
@@ -147,8 +151,9 @@ pub(crate) trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn remove_books(&self, ids: Vec<u32>) -> Result<(), DatabaseError>;
+    fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError>;
 
+    fn clear(&mut self) -> Result<(), DatabaseError>;
     /// Finds and returns the book with the given ID. If no book is found, a BookNotFound error is
     /// returned.
     ///
@@ -206,11 +211,22 @@ pub(crate) trait AppDatabase {
 
     /// Merges all books with matching titles and authors, skipping everything else, with no
     /// particular order. Books that are merged will not free IDs no longer in use.
-    /// If successful, returns a list of IDs which no longer point to a book.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError>;
+    fn merge_similar(&mut self) -> Result<(), DatabaseError>;
+
+    fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError>;
+
+    fn cursor(&self) -> &PageCursor;
+
+    fn cursor_mut(&mut self) -> &mut PageCursor;
+
+    fn get_books_cursored(&self) -> Result<Vec<Book>, DatabaseError>;
+
+    fn selected(&self) -> Option<usize>;
+
+    fn selected_item(&self) -> Result<Book, DatabaseError>;
 }
 
 impl AppDatabase for BasicDatabase {
@@ -218,14 +234,29 @@ impl AppDatabase for BasicDatabase {
     where
         S: AsRef<path::Path>,
     {
-        let mut db = BasicDatabase {
-            backend: FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)?,
-            cols: HashSet::new(),
-        };
-        if let Ok(cols) = db.get_available_columns() {
-            db.cols = cols;
-        }
-        Ok(db)
+        let backend = FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)?;
+        let (cols, cursor) = backend.read(|db| {
+            let mut c = HashSet::new();
+            c.insert(UniCase::new("title".to_string()));
+            c.insert(UniCase::new("authors".to_string()));
+            c.insert(UniCase::new("series".to_string()));
+            c.insert(UniCase::new("id".to_string()));
+            for book in db.books.values() {
+                if let Some(e) = book.get_extended_columns() {
+                    for key in e.keys() {
+                        // TODO: Profile this for large database.
+                        c.insert(UniCase::new(key.clone()));
+                    }
+                }
+            }
+            (c, PageCursor::new(0, db.books.len()))
+        })?;
+
+        Ok(BasicDatabase {
+            backend,
+            cols,
+            cursor,
+        })
     }
 
     fn save(&self) -> Result<(), DatabaseError> {
@@ -236,15 +267,18 @@ impl AppDatabase for BasicDatabase {
         Ok(self.backend.write(|db| db.new_id())?)
     }
 
-    fn insert_book(&self, book: Book) -> Result<u32, DatabaseError> {
-        Ok(self.backend.write(|db| {
+    fn insert_book(&mut self, book: Book) -> Result<u32, DatabaseError> {
+        let (id, len) = self.backend.write(|db| {
             let id = book.get_id();
             db.books.insert(id, book);
-            id
-        })?)
+            (id, db.books.len())
+        })?;
+
+        self.cursor.refresh_height(len);
+        Ok(id)
     }
 
-    fn read_book_from_file<S>(&self, file_path: S) -> Result<u32, DatabaseError>
+    fn read_book_from_file<S>(&mut self, file_path: S) -> Result<u32, DatabaseError>
     where
         S: AsRef<path::Path>,
     {
@@ -252,7 +286,7 @@ impl AppDatabase for BasicDatabase {
     }
 
     fn read_books_from_dir<S>(
-        &self,
+        &mut self,
         dir: S,
     ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
     where
@@ -260,31 +294,51 @@ impl AppDatabase for BasicDatabase {
     {
         let mut ids = vec![];
         let mut errs = vec![];
-        let results = fs::read_dir(dir)?
+        // TODO: Make this parallel again.
+        fs::read_dir(dir)?
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, std::io::Error>>()?
-            .par_iter()
-            .map(|path| self.read_book_from_file(path))
-            .collect::<Vec<_>>();
-        results.into_iter().for_each(|result| match result {
-            Ok(id) => ids.push(id),
-            Err(e) => errs.push(e),
-        });
+            .iter()
+            .for_each(|path| match self.read_book_from_file(path) {
+                Ok(id) => ids.push(id),
+                Err(e) => errs.push(e),
+            });
         Ok((ids, errs))
     }
 
-    fn remove_book(&self, id: u32) -> Result<(), DatabaseError> {
-        Ok(self.backend.write(|db| {
+    fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError> {
+        let len = self.backend.write(|db| {
             db.books.remove(&id);
-        })?)
+            db.books.len()
+        })?;
+        self.cursor.refresh_height(len);
+        if let Some(s) = self.cursor.selected() {
+            if s == self.cursor.window_size() && s != 0 {
+                self.cursor.select(Some(s - 1));
+            }
+        };
+        Ok(())
     }
 
-    fn remove_books(&self, ids: Vec<u32>) -> Result<(), DatabaseError> {
-        Ok(self.backend.write(|db| {
+    fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError> {
+        let len = self.backend.write(|db| {
             for id in ids {
                 db.books.remove(&id);
             }
-        })?)
+            db.books.len()
+        })?;
+        self.cursor.refresh_height(len);
+        Ok(())
+    }
+
+    fn clear(&mut self) -> Result<(), DatabaseError> {
+        let len = self.backend.write(|db| {
+            db.books.clear();
+            db.books.len()
+        })?;
+
+        self.cursor.refresh_height(len);
+        Ok(())
     }
 
     fn get_book(&self, id: u32) -> Result<Book, DatabaseError> {
@@ -297,7 +351,7 @@ impl AppDatabase for BasicDatabase {
     fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Book>>, DatabaseError> {
         Ok(self
             .backend
-            .read(|db| ids.iter().map(|id| db.books.get(&id).cloned()).collect())?)
+            .read(|db| ids.iter().map(|id| db.books.get(id).cloned()).collect())?)
     }
 
     // TODO: Make this return a Vec of references?
@@ -347,11 +401,10 @@ impl AppDatabase for BasicDatabase {
         Ok(book)
     }
 
-    fn merge_similar(&self) -> Result<Vec<u32>, DatabaseError> {
-        Ok(self.backend.write(|db| {
+    fn merge_similar(&mut self) -> Result<(), DatabaseError> {
+        let len = self.backend.write(|db| {
             let mut ref_map: HashMap<(String, String), u32> = HashMap::new();
             let mut merges = vec![];
-            let mut merged = vec![];
             for book in db.books.values() {
                 if let Some(title) = book.get_title() {
                     if let Some(authors) = book.get_authors() {
@@ -373,9 +426,67 @@ impl AppDatabase for BasicDatabase {
                         b1.merge_mut(b2);
                     }
                 }
-                merged.push(*b2_id);
             }
-            merged
+
+            db.books.len()
+        })?;
+
+        self.cursor.refresh_height(len);
+
+        Ok(())
+    }
+
+    fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError> {
+        Ok(self.backend.write(|db| {
+            let col = ColumnIdentifier::from(col);
+
+            if db.books.len() < 2500 {
+                if reverse {
+                    db.books.sort_by(|_, a, _, b| b.cmp_column(a, &col))
+                } else {
+                    db.books.sort_by(|_, a, _, b| a.cmp_column(b, &col))
+                }
+            } else if reverse {
+                db.books.par_sort_by(|_, a, _, b| b.cmp_column(a, &col))
+            } else {
+                db.books.par_sort_by(|_, a, _, b| a.cmp_column(b, &col))
+            }
+        })?)
+    }
+
+    fn cursor(&self) -> &PageCursor {
+        &self.cursor
+    }
+
+    fn cursor_mut(&mut self) -> &mut PageCursor {
+        &mut self.cursor
+    }
+
+    fn selected(&self) -> Option<usize> {
+        self.cursor.selected()
+    }
+
+    fn selected_item(&self) -> Result<Book, DatabaseError> {
+        self.backend.read(|db| match self.cursor.selected_index() {
+            None => Err(DatabaseError::NoBookSelected),
+            Some(i) => {
+                if let Some(b) = db.books.get_index(i) {
+                    Ok(b.1.clone())
+                } else {
+                    Err(DatabaseError::NoBookSelected)
+                }
+            }
+        })?
+    }
+
+    fn get_books_cursored(&self) -> Result<Vec<Book>, DatabaseError> {
+        Ok(self.backend.read(|db| {
+            self.cursor
+                .window_range()
+                .map(|i| db.books.get_index(i))
+                .filter_map(|b| b)
+                .map(|b| b.1.clone())
+                .collect()
         })?)
     }
 }
@@ -403,7 +514,7 @@ mod test {
 
     #[test]
     fn test_adding_book() {
-        let db = temp_db();
+        let mut db = temp_db();
 
         let id = db.get_new_id();
         assert!(id.is_ok());
@@ -421,7 +532,7 @@ mod test {
 
     #[test]
     fn test_adding_2_books() {
-        let db = temp_db();
+        let mut db = temp_db();
 
         let id0 = db.get_new_id();
         assert!(id0.is_ok());
@@ -467,12 +578,10 @@ mod test {
             let get_book = db.get_book(i);
             assert!(get_book.is_err());
             match get_book.unwrap_err() {
-                DatabaseError::Io(_) => panic!("Expected BookNotFoundError"),
-                DatabaseError::Book(_) => panic!("Expected BookNotFoundError"),
-                DatabaseError::Backend(_) => panic!("Expected BookNotFoundError"),
                 DatabaseError::BookNotFound(id) => {
                     assert_eq!(i, id);
                 }
+                _ => panic!("Expected BookNotFoundError"),
             }
         }
     }

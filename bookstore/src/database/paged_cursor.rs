@@ -1,28 +1,24 @@
-pub struct PageView<T> {
+pub struct PageCursor {
     top_index: usize,
     window_size: usize,
     selected: Option<usize>,
-    data: Vec<T>,
+    height: usize,
 }
 
-// TODO: Make selection relative to values inside, and add select_in_window
-//  Add pages, callback to source to fetch more values. Make this part of BasicDatabase.
-impl<T> PageView<T> {
-    /// Creates a new PageView, with the window starting at the first element of data,
-    /// and no selection active
-    pub(crate) fn new(window_size: usize, data: Vec<T>) -> Self {
-        PageView {
+impl PageCursor {
+    /// Creates a new Cursor at location 0, with no selection active.
+    pub(crate) fn new(window_size: usize, height: usize) -> Self {
+        PageCursor {
             top_index: 0,
             window_size,
             selected: None,
-            data,
+            height,
         }
     }
 
     /// Returns whether the last element of data is in the window.
     pub(crate) fn at_end(&self) -> bool {
-        self.window_size >= self.data.len()
-            || self.top_index >= self.data.len() - self.window_size - 1
+        self.window_size >= self.height || self.top_index >= self.height - self.window_size - 1
     }
 
     /// Returns whether the first element of data is in the window
@@ -33,8 +29,8 @@ impl<T> PageView<T> {
     /// Moves the view down by inc, but does not move the view past the last element
     /// of data if possible.
     pub(crate) fn scroll_down(&mut self, inc: usize) -> bool {
-        if self.top_index + inc + self.window_size > self.data.len() {
-            let new_val = self.data.len().saturating_sub(self.window_size);
+        if self.top_index + inc + self.window_size > self.height {
+            let new_val = self.height.saturating_sub(self.window_size);
             let c = self.top_index != new_val;
             self.top_index = new_val;
             c
@@ -61,7 +57,7 @@ impl<T> PageView<T> {
     pub(crate) fn select(&mut self, index: Option<usize>) -> bool {
         if let Some(ind) = index {
             let ind = {
-                let min = self.window_size.min(self.data.len());
+                let min = self.window_size.min(self.height);
                 if ind >= min {
                     if min > 0 {
                         Some(min - 1)
@@ -100,9 +96,9 @@ impl<T> PageView<T> {
     }
 
     /// Returns the selected value, if one is selected.
-    pub(crate) fn selected_item(&self) -> Option<&T> {
+    pub(crate) fn selected_index(&self) -> Option<usize> {
         if let Some(ind) = self.selected {
-            self.data.get(self.top_index + ind)
+            Some(self.top_index + ind)
         } else {
             None
         }
@@ -112,7 +108,7 @@ impl<T> PageView<T> {
     /// If the cursor moves past the end of the visible window, the window is moved down.
     pub(crate) fn select_down(&mut self) -> bool {
         if let Some(s) = self.selected {
-            if s + 1 < self.window_size && s + 1 < self.data.len() {
+            if s + 1 < self.window_size && s + 1 < self.height {
                 self.select(Some(s + 1))
             } else {
                 self.scroll_down(1)
@@ -176,7 +172,7 @@ impl<T> PageView<T> {
     /// Moves the view to the end of the data. If a selection exists, the selection is moved to
     /// the bottom.
     pub(crate) fn end(&mut self) -> bool {
-        let t_change = self.scroll_down(self.data.len());
+        let t_change = self.scroll_down(self.height);
         let s_change = if self.selected.is_some() {
             let old_selection = self.selected;
             self.select(Some(self.window_size));
@@ -206,21 +202,21 @@ impl<T> PageView<T> {
         t_change || s_change
     }
 
-    /// Returns a reference to the internal data.
-    pub(crate) fn data(&self) -> &Vec<T> {
-        &self.data
-    }
-
-    /// Returns a mutable reference to the internal data.
-    pub(crate) fn data_mut(&mut self) -> &mut Vec<T> {
-        self.data.as_mut()
-    }
+    // /// Returns a reference to the internal data.
+    // pub(crate) fn data(&self) -> &Vec<T> {
+    //     &self.data
+    // }
+    //
+    // /// Returns a mutable reference to the internal data.
+    // pub(crate) fn data_mut(&mut self) -> &mut Vec<T> {
+    //     self.data.as_mut()
+    // }
 
     /// Adjusts the start of the window so that it doesn't go past the end of the data, if possible.
     pub(crate) fn refresh(&mut self) {
-        if self.top_index + self.window_size > self.data.len() {
-            if self.data.len() > self.window_size {
-                self.top_index = self.data.len() - self.window_size;
+        if self.top_index + self.window_size > self.height {
+            if self.height > self.window_size {
+                self.top_index = self.height - self.window_size;
             } else {
                 self.top_index = 0;
             }
@@ -228,9 +224,9 @@ impl<T> PageView<T> {
     }
 
     #[allow(dead_code)]
-    /// Sets data internally and adjusts the window settings.
-    pub(crate) fn refresh_data(&mut self, data: Vec<T>) {
-        self.data = data;
+    /// Sets height internally and adjusts the window settings.
+    pub(crate) fn refresh_height(&mut self, height: usize) {
+        self.height = height;
         self.refresh();
     }
 
@@ -251,11 +247,11 @@ impl<T> PageView<T> {
                     } else {
                         Some(window_size - 1)
                     });
-                } else if ind >= self.data.len() {
-                    if self.data.is_empty() {
+                } else if ind >= self.height {
+                    if self.height == 0 {
                         self.select(None);
                     } else {
-                        self.select(Some(self.data.len() - 1));
+                        self.select(Some(self.height - 1));
                     }
                 }
             } else if window_size >= old_size {
@@ -277,9 +273,9 @@ impl<T> PageView<T> {
         self.window_size
     }
 
-    /// Return a slice of the elements in data that are inside the window.
-    pub(crate) fn window_slice(&self) -> &[T] {
-        &self.data[self.top_index..(self.top_index + self.window_size).min(self.data.len())]
+    /// Return a range of the elements in data that are inside the window.
+    pub(crate) fn window_range(&self) -> std::ops::Range<usize> {
+        self.top_index..(self.top_index + self.window_size).min(self.height)
     }
 
     // TODO: Add pop / insert / in_window
@@ -291,61 +287,60 @@ mod test {
 
     #[test]
     fn test_at_end() {
-        let view = PageView::new(25, vec![0; 20]);
-        assert!(view.at_end());
-        let mut view = PageView::new(20, vec![0; 40]);
-        assert!(!view.at_end());
-        view.scroll_down(10);
-        assert!(!view.at_end());
-        view.scroll_down(10);
-        assert!(view.at_end());
+        let cursor = PageCursor::new(25, 20);
+        assert!(cursor.at_end());
+        let mut cursor = PageCursor::new(20, 40);
+        assert!(!cursor.at_end());
+        cursor.scroll_down(10);
+        assert!(!cursor.at_end());
+        cursor.scroll_down(10);
+        assert!(cursor.at_end());
     }
 
     #[test]
     fn test_window_slice() {
-        let vals: Vec<_> = (0..50).into_iter().collect();
-        let mut view = PageView::new(25, vals.clone());
-        assert!(view.window_slice().eq(&vals[0..25]));
-        view.scroll_down(10);
-        assert!(view.window_slice().eq(&vals[10..35]));
-        view.scroll_down(20);
-        assert!(view.window_slice().eq(&vals[25..50]));
+        let mut cursor = PageCursor::new(25, 50);
+        assert!(cursor.window_range().eq(0..25));
+        cursor.scroll_down(10);
+        assert!(cursor.window_range().eq(10..35));
+        cursor.scroll_down(20);
+        assert!(cursor.window_range().eq(25..50));
     }
 
     #[test]
     fn test_scroll() {
-        let mut view = PageView::new(25, vec![0; 50]);
-        assert_eq!(view.window_slice().len(), 25);
-        view.scroll_down(10);
-        assert_eq!(view.window_slice().len(), 25);
-        view.scroll_down(20);
-        assert_eq!(view.window_slice().len(), 25);
-        view.scroll_down(100);
-        assert_eq!(view.window_slice().len(), 25);
-        view.scroll_up(10);
-        assert_eq!(view.window_slice().len(), 25);
-        view.scroll_up(20);
-        assert_eq!(view.window_slice().len(), 25);
-        view.scroll_up(100);
-        assert_eq!(view.window_slice().len(), 25);
+        let mut cursor = PageCursor::new(25, 50);
+        assert_eq!(cursor.window_range().len(), 25);
+        cursor.scroll_down(10);
+        assert_eq!(cursor.window_range().len(), 25);
+        cursor.scroll_down(20);
+        assert_eq!(cursor.window_range().len(), 25);
+        cursor.scroll_down(100);
+        assert_eq!(cursor.window_range().len(), 25);
+        cursor.scroll_up(10);
+        assert_eq!(cursor.window_range().len(), 25);
+        cursor.scroll_up(20);
+        assert_eq!(cursor.window_range().len(), 25);
+        cursor.scroll_up(100);
+        assert_eq!(cursor.window_range().len(), 25);
     }
 
     #[test]
     fn test_selected_never_out_of_bounds() {
-        let mut view = PageView::new(25, vec![0; 50]);
-        view.select(Some(15));
-        assert!(view.selected().unwrap() < 25);
-        view.end();
-        assert!(view.selected().unwrap() < 25);
-        view.home();
-        assert!(view.selected().unwrap() < 25);
-        view.scroll_down(40);
-        assert!(view.selected().unwrap() < 25);
-        view.scroll_down(15);
-        assert!(view.selected().unwrap() < 25);
-        view.scroll_up(15);
-        assert!(view.selected().unwrap() < 25);
-        view.scroll_up(40);
-        assert!(view.selected().unwrap() < 25);
+        let mut cursor = PageCursor::new(25, 50);
+        cursor.select(Some(15));
+        assert!(cursor.selected().unwrap() < 25);
+        cursor.end();
+        assert!(cursor.selected().unwrap() < 25);
+        cursor.home();
+        assert!(cursor.selected().unwrap() < 25);
+        cursor.scroll_down(40);
+        assert!(cursor.selected().unwrap() < 25);
+        cursor.scroll_down(15);
+        assert!(cursor.selected().unwrap() < 25);
+        cursor.scroll_up(15);
+        assert!(cursor.selected().unwrap() < 25);
+        cursor.scroll_up(40);
+        assert!(cursor.selected().unwrap() < 25);
     }
 }
