@@ -211,8 +211,8 @@ impl Default for TomlSort {
 impl From<TomlSort> for SortSettings {
     fn from(t: TomlSort) -> Self {
         SortSettings {
-            column: UniCase::new(t.column.clone().unwrap_or_else(|| "".to_string())),
             is_sorted: t.column.is_none(),
+            column: UniCase::new(t.column.unwrap_or_else(|| "".to_string())),
             reverse: t.reverse.unwrap_or(false),
         }
     }
