@@ -183,7 +183,7 @@ pub(crate) trait AppDatabase {
     fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError>;
 
     /// Returns a list of columns that exist for at least one book in the database.
-    fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError>;
+    fn get_available_columns(&self) -> &HashSet<UniCase<String>>;
 
     /// Returns whether the provided column exists in at least one book in the database.
     ///
@@ -207,7 +207,7 @@ pub(crate) trait AppDatabase {
         id: u32,
         column: S,
         new_value: T,
-    ) -> Result<Book, DatabaseError>;
+    ) -> Result<(), DatabaseError>;
 
     /// Merges all books with matching titles and authors, skipping everything else, with no
     /// particular order. Books that are merged will not free IDs no longer in use.
@@ -217,7 +217,9 @@ pub(crate) trait AppDatabase {
     fn merge_similar(&mut self) -> Result<(), DatabaseError>;
 
     fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError>;
+}
 
+pub(crate) trait SelectableDatabase: AppDatabase {
     fn cursor(&self) -> &PageCursor;
 
     fn cursor_mut(&mut self) -> &mut PageCursor;
@@ -227,6 +229,25 @@ pub(crate) trait AppDatabase {
     fn selected(&self) -> Option<usize>;
 
     fn selected_item(&self) -> Result<Book, DatabaseError>;
+
+    fn remove_selected_book(&mut self) -> Result<(), DatabaseError>;
+
+    fn edit_selected_book<S: AsRef<str>, T: AsRef<str>>(
+        &mut self,
+        column: S,
+        new_value: T,
+    ) -> Result<(), DatabaseError>;
+}
+
+impl BasicDatabase {
+    fn push_cursor_back(&mut self, len: usize) {
+        self.cursor.refresh_height(len);
+        if let Some(s) = self.cursor.selected() {
+            if s == self.cursor.window_size() && s != 0 {
+                self.cursor.select(Some(s - 1));
+            }
+        };
+    }
 }
 
 impl AppDatabase for BasicDatabase {
@@ -308,22 +329,17 @@ impl AppDatabase for BasicDatabase {
 
     fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError> {
         let len = self.backend.write(|db| {
-            db.books.remove(&id);
+            db.books.shift_remove(&id);
             db.books.len()
         })?;
-        self.cursor.refresh_height(len);
-        if let Some(s) = self.cursor.selected() {
-            if s == self.cursor.window_size() && s != 0 {
-                self.cursor.select(Some(s - 1));
-            }
-        };
+        self.push_cursor_back(len);
         Ok(())
     }
 
     fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError> {
         let len = self.backend.write(|db| {
             for id in ids {
-                db.books.remove(&id);
+                db.books.shift_remove(&id);
             }
             db.books.len()
         })?;
@@ -361,23 +377,8 @@ impl AppDatabase for BasicDatabase {
             .read(|db| db.books.values().cloned().collect())?)
     }
 
-    fn get_available_columns(&self) -> Result<HashSet<UniCase<String>>, DatabaseError> {
-        Ok(self.backend.read(|db| {
-            let mut c = HashSet::new();
-            c.insert(UniCase::new("title".to_string()));
-            c.insert(UniCase::new("authors".to_string()));
-            c.insert(UniCase::new("series".to_string()));
-            c.insert(UniCase::new("id".to_string()));
-            for book in db.books.values() {
-                if let Some(e) = book.get_extended_columns() {
-                    for key in e.keys() {
-                        // TODO: Profile this for large database.
-                        c.insert(UniCase::new(key.clone()));
-                    }
-                }
-            }
-            c
-        })?)
+    fn get_available_columns(&self) -> &HashSet<UniCase<String>> {
+        &self.cols
     }
 
     fn has_column(&self, col: &UniCase<String>) -> bool {
@@ -389,16 +390,13 @@ impl AppDatabase for BasicDatabase {
         id: u32,
         column: S,
         new_value: T,
-    ) -> Result<Book, DatabaseError> {
-        let book = self.backend.write(|db| match db.books.get_mut(&id) {
+    ) -> Result<(), DatabaseError> {
+        self.backend.write(|db| match db.books.get_mut(&id) {
             None => Err(DatabaseError::BookNotFound(id)),
-            Some(book) => {
-                book.set_column(&column.as_ref().into(), new_value)?;
-                Ok(book.clone())
-            }
+            Some(book) => Ok(book.set_column(&column.as_ref().into(), new_value)?),
         })??;
         self.cols.insert(UniCase::new(column.as_ref().to_string()));
-        Ok(book)
+        Ok(())
     }
 
     fn merge_similar(&mut self) -> Result<(), DatabaseError> {
@@ -420,7 +418,7 @@ impl AppDatabase for BasicDatabase {
             }
 
             for (b1, b2_id) in merges.iter() {
-                let b2 = db.books.remove(b2_id);
+                let b2 = db.books.shift_remove(b2_id);
                 if let Some(b1) = db.books.get_mut(b1) {
                     if let Some(b2) = b2 {
                         b1.merge_mut(b2);
@@ -453,13 +451,26 @@ impl AppDatabase for BasicDatabase {
             }
         })?)
     }
+}
 
+impl SelectableDatabase for BasicDatabase {
     fn cursor(&self) -> &PageCursor {
         &self.cursor
     }
 
     fn cursor_mut(&mut self) -> &mut PageCursor {
         &mut self.cursor
+    }
+
+    fn get_books_cursored(&self) -> Result<Vec<Book>, DatabaseError> {
+        Ok(self.backend.read(|db| {
+            self.cursor
+                .window_range()
+                .map(|i| db.books.get_index(i))
+                .filter_map(|b| b)
+                .map(|b| b.1.clone())
+                .collect()
+        })?)
     }
 
     fn selected(&self) -> Option<usize> {
@@ -479,15 +490,47 @@ impl AppDatabase for BasicDatabase {
         })?
     }
 
-    fn get_books_cursored(&self) -> Result<Vec<Book>, DatabaseError> {
-        Ok(self.backend.read(|db| {
-            self.cursor
-                .window_range()
-                .map(|i| db.books.get_index(i))
-                .filter_map(|b| b)
-                .map(|b| b.1.clone())
-                .collect()
-        })?)
+    fn remove_selected_book(&mut self) -> Result<(), DatabaseError> {
+        if let Some(index) = self.cursor.selected_index() {
+            let len = self.backend.write(|db| {
+                let id = if let Some((id, _)) = db.books.get_index(index) {
+                    Some(*id)
+                } else {
+                    None
+                };
+                if let Some(id) = id {
+                    db.books.shift_remove(&id);
+                }
+                db.books.len()
+            })?;
+
+            self.push_cursor_back(len);
+            Ok(())
+        } else {
+            Err(DatabaseError::NoBookSelected)
+        }
+    }
+
+    fn edit_selected_book<S: AsRef<str>, T: AsRef<str>>(
+        &mut self,
+        column: S,
+        new_value: T,
+    ) -> Result<(), DatabaseError> {
+        if let Some(index) = self.cursor.selected_index() {
+            self.backend.write(|db| {
+                if let Some((_, book)) = db.books.get_index_mut(index) {
+                    book.set_column(&column.as_ref().into(), new_value)?;
+                    Ok(())
+                } else {
+                    Err(DatabaseError::NoBookSelected)
+                }
+            })??;
+
+            self.cols.insert(UniCase::new(column.as_ref().to_string()));
+            Ok(())
+        } else {
+            Err(DatabaseError::NoBookSelected)
+        }
     }
 }
 

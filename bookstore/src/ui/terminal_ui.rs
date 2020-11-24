@@ -16,7 +16,7 @@ use tui::{Frame, Terminal};
 
 use unicase::UniCase;
 
-use crate::database::{AppDatabase, DatabaseError};
+use crate::database::{DatabaseError, SelectableDatabase};
 use crate::parser::command_parser;
 use crate::parser::{parse_args, BookIndex};
 use crate::record::book::ColumnIdentifier;
@@ -78,7 +78,10 @@ impl From<()> for ApplicationError {
 
 impl From<DatabaseError> for ApplicationError {
     fn from(e: DatabaseError) -> Self {
-        ApplicationError::DatabaseError(e)
+        match e {
+            DatabaseError::NoBookSelected => ApplicationError::NoBookSelected,
+            x => ApplicationError::DatabaseError(x),
+        }
     }
 }
 
@@ -94,7 +97,7 @@ impl From<crossterm::ErrorKind> for ApplicationError {
 //     }
 // }
 
-impl<D: AppDatabase> App<D> {
+impl<D: SelectableDatabase> App<D> {
     // pub(crate) fn splash(style: InterfaceStyle, terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<App<'a, D>, ApplicationError> {
     //     terminal.draw(|f| {
     //         let vchunks = Layout::default()
@@ -163,77 +166,6 @@ impl<D: AppDatabase> App<D> {
             selected_column: 0,
             nav_settings: settings.navigation_settings,
         })
-    }
-
-    /// Deletes the book with the given ID. If deleting the book reduces the number of books such
-    /// that the books no longer fill the frame, the selection is decreased so that the last book
-    /// is selected.
-    ///
-    /// # Arguments
-    ///
-    /// * ` id ` - The book ID.
-    ///
-    /// # Error
-    /// Errors if deleting the book fails for any reason.
-    fn delete_book(&mut self, id: u32) -> Result<(), ApplicationError> {
-        self.db.remove_book(id)?;
-        self.update_columns = ColumnUpdate::Regenerate;
-        Ok(())
-    }
-
-    /// Gets the book with the given ID, returning None if it does not exist.
-    ///
-    /// # Arguments
-    ///
-    /// * ` id ` - The book ID.
-    fn get_book_with_id(&self, id: u32) -> Option<Book> {
-        match self.db.get_book(id) {
-            Ok(b) => Some(b),
-            Err(_) => None,
-        }
-    }
-
-    /// Edits the book with the given ID, updating the selected column to the new value.
-    ///
-    /// # Arguments
-    ///
-    /// * ` column ` - The value in the book to update.
-    /// * ` new_value` - What to update the value to.
-    ///
-    /// # Errors
-    /// Errors if no book with the given ID exists.
-    fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
-        &mut self,
-        id: u32,
-        column: S,
-        new_value: T,
-    ) -> Result<(), ApplicationError> {
-        self.db.edit_book_with_id(id, column, new_value)?;
-        self.sort_settings.is_sorted = false;
-        self.update_columns = ColumnUpdate::Regenerate;
-        Ok(())
-    }
-
-    /// Edits the selected book, updating the selected column to the new value.
-    ///
-    /// # Arguments
-    ///
-    /// * ` column ` - The value in the book to update.
-    /// * ` new_value` - What to update the value to.
-    ///
-    /// # Errors
-    /// Errors if no book is selected.
-    fn edit_selected_book<S: AsRef<str>, T: AsRef<str>>(
-        &mut self,
-        column: S,
-        new_value: T,
-    ) -> Result<(), ApplicationError> {
-        let id = if let Ok(book) = self.db.selected_item() {
-            Ok(book.get_id())
-        } else {
-            Err(ApplicationError::NoBookSelected)
-        }?;
-        self.edit_book_with_id(id, column, new_value)
     }
 
     /// Updates the required sorting settings if the column changes.
@@ -525,7 +457,7 @@ impl<D: AppDatabase> App<D> {
                                             [self.edit.selected] = self.edit.orig_value.clone();
                                         return Ok(false);
                                     }
-                                    self.edit_selected_book(
+                                    self.db.edit_selected_book(
                                         self.selected_cols[self.selected_column].clone(),
                                         self.edit.new_value.clone(),
                                     )?;
@@ -550,7 +482,7 @@ impl<D: AppDatabase> App<D> {
                                 KeyCode::Down => {
                                     if self.selected_column < self.selected_cols.len() - 1 {
                                         if self.edit.started_edit {
-                                            self.edit_selected_book(
+                                            self.db.edit_selected_book(
                                                 self.selected_cols[self.selected_column].clone(),
                                                 self.edit.new_value.clone(),
                                             )?;
@@ -565,7 +497,7 @@ impl<D: AppDatabase> App<D> {
                                 KeyCode::Up => {
                                     if self.selected_column > 0 {
                                         if self.edit.started_edit {
-                                            self.edit_selected_book(
+                                            self.db.edit_selected_book(
                                                 self.selected_cols[self.selected_column].clone(),
                                                 self.edit.new_value.clone(),
                                             )?;
@@ -662,15 +594,8 @@ impl<D: AppDatabase> App<D> {
                                 }
                                 KeyCode::Delete => {
                                     if self.curr_command.is_empty() {
-                                        let id = if let Ok(b) = self.db.selected_item() {
-                                            Some(b.get_id())
-                                        } else {
-                                            None
-                                        };
-
-                                        if let Some(id) = id {
-                                            self.delete_book(id)?;
-                                        }
+                                        self.db.remove_selected_book()?;
+                                        self.update_columns = ColumnUpdate::Regenerate;
                                     } else {
                                         // TODO: Add code to delete forwards
                                         //  (requires implementing cursor logic)
@@ -794,16 +719,10 @@ impl<D: AppDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` b ` - A BookIndex which either represents an exact ID, or the selected book.
-    fn get_book(&self, b: BookIndex) -> Option<Book> {
+    fn get_book(&self, b: BookIndex) -> Result<Book, ApplicationError> {
         match b {
-            BookIndex::Selected => {
-                if let Ok(book) = self.db.selected_item() {
-                    Some(book)
-                } else {
-                    None
-                }
-            }
-            BookIndex::BookID(id) => self.get_book_with_id(id),
+            BookIndex::Selected => Ok(self.db.selected_item()?),
+            BookIndex::BookID(id) => Ok(self.db.get_book(id)?),
         }
     }
 
@@ -819,15 +738,11 @@ impl<D: AppDatabase> App<D> {
     ) -> Result<bool, ApplicationError> {
         match command {
             command_parser::Command::DeleteBook(b) => {
-                let id = if let Some(b) = self.get_book(b) {
-                    Some(b.get_id())
-                } else {
-                    None
+                match b {
+                    BookIndex::Selected => self.db.remove_selected_book()?,
+                    BookIndex::BookID(id) => self.db.remove_book(id)?,
                 };
-
-                if let Some(id) = id {
-                    self.delete_book(id)?;
-                }
+                self.update_columns = ColumnUpdate::Regenerate;
             }
             command_parser::Command::DeleteAll => {
                 self.db.clear()?;
@@ -836,8 +751,8 @@ impl<D: AppDatabase> App<D> {
             }
             command_parser::Command::EditBook(b, field, new_value) => {
                 match b {
-                    BookIndex::Selected => self.edit_selected_book(field, new_value)?,
-                    BookIndex::BookID(id) => self.edit_book_with_id(id, field, new_value)?,
+                    BookIndex::Selected => self.db.edit_selected_book(field, new_value)?,
+                    BookIndex::BookID(id) => self.db.edit_book_with_id(id, field, new_value)?,
                 };
             }
             command_parser::Command::AddBookFromFile(f) => {
@@ -862,13 +777,13 @@ impl<D: AppDatabase> App<D> {
             }
             #[cfg(windows)]
             command_parser::Command::OpenBookInApp(b, index) => {
-                if let Some(b) = self.get_book(b) {
+                if let Ok(b) = self.get_book(b) {
                     self.open_book(&b, index)?;
                 }
             }
             #[cfg(windows)]
             command_parser::Command::OpenBookInExplorer(b, index) => {
-                if let Some(b) = self.get_book(b) {
+                if let Ok(b) = self.get_book(b) {
                     self.open_book_in_dir(&b, index)?;
                 }
             }
@@ -893,16 +808,6 @@ impl<D: AppDatabase> App<D> {
         Ok(true)
     }
 
-    /// Sorts the books internally, using the current sort settings.
-    fn sort_books_by_col(&mut self) -> Result<(), ApplicationError> {
-        self.db.sort_books_by_col(
-            self.sort_settings.column.as_str(),
-            self.sort_settings.reverse,
-        )?;
-        self.sort_settings.is_sorted = true;
-        Ok(())
-    }
-
     /// Runs the application - including handling user inputs and refreshing the output.
     ///
     /// # Arguments
@@ -921,7 +826,11 @@ impl<D: AppDatabase> App<D> {
 
         loop {
             if !self.sort_settings.is_sorted {
-                self.sort_books_by_col()?;
+                self.db.sort_books_by_col(
+                    self.sort_settings.column.as_str(),
+                    self.sort_settings.reverse,
+                )?;
+                self.sort_settings.is_sorted = true;
             }
 
             self.update_column_data();
