@@ -537,10 +537,10 @@ impl SelectableDatabase for BasicDatabase {
 #[cfg(test)]
 mod test {
     use super::*;
-    use tempdir;
+    use tempfile;
 
     fn temp_db() -> BasicDatabase {
-        let temp_dir = tempdir::TempDir::new("not_a_real").unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("database.db");
         BasicDatabase::open(path).unwrap()
     }
