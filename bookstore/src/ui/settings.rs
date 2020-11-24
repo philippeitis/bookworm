@@ -44,6 +44,8 @@ impl Default for InterfaceStyle {
     }
 }
 
+// TODO: Remove sort settings entirely since the functionality is replicated
+// thanks to IndexMap.
 #[derive(Debug)]
 pub(crate) struct SortSettings {
     pub column: UniCase<String>,

@@ -130,7 +130,6 @@ impl ISBN {
 impl FromStr for ISBN {
     type Err = ISBNError;
 
-    // TODO: Check assumption that ISBN will have either 10 or 13 digits.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let digits: Vec<_> = s
             .chars()

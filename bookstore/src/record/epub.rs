@@ -167,6 +167,7 @@ impl EpubMetadata {
                         }
                     }
                     Ok(Event::Text(e)) => {
+                        // TODO: Remove unwrap
                         let val = e.unescape_and_decode(&reader).unwrap();
                         // println!("{}", val);
                         match seen {
