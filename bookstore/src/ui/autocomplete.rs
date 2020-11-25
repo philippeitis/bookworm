@@ -64,8 +64,7 @@ impl<S> GetRing<S> {
 
     pub(crate) fn get_next_item_by(&mut self, p: &dyn Fn(&S) -> bool) -> Option<&S> {
         self.curr_state %= self.possibilities.len();
-        let init_state = self.curr_state;
-        let (p2, p1) = self.possibilities.split_at(init_state);
+        let (p2, p1) = self.possibilities.split_at(self.curr_state);
         for item in p1.iter().chain(p2.iter()) {
             self.curr_state += 1;
             if p(item) {

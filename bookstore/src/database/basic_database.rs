@@ -338,9 +338,8 @@ impl AppDatabase for BasicDatabase {
 
     fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError> {
         let len = self.backend.write(|db| {
-            for id in ids {
-                db.books.shift_remove(&id);
-            }
+            let ids = ids.iter().collect::<HashSet<_>>();
+            db.books.retain(|id, _| !ids.contains(id));
             db.books.len()
         })?;
         self.cursor.refresh_height(len);
