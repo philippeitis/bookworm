@@ -226,7 +226,9 @@ impl CommandString {
     pub(crate) fn get_values_autofilled(&self) -> Vec<(bool, String)> {
         let mut values = self.get_values();
         if let Some(s) = &self.autofilled {
-            values.pop();
+            if !self.keep_last {
+                values.pop();
+            }
             values.push((s.contains(' '), s.clone()));
         }
         values

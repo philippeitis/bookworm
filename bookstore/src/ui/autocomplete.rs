@@ -45,7 +45,7 @@ impl AutoCompleter<PathBuf> {
     pub(crate) fn get_next_word_by(&mut self, p: impl Fn(&PathBuf) -> bool) -> Option<&PathBuf> {
         let word_len = self.word.len();
         self.possibilities
-            .get_next_item_by(&|path| path.as_os_str().len() >= word_len && p(path))
+            .get_next_item_by(|path| path.as_os_str().len() >= word_len && p(path))
     }
 }
 
@@ -62,7 +62,10 @@ impl<S> GetRing<S> {
         }
     }
 
-    pub(crate) fn get_next_item_by(&mut self, p: &dyn Fn(&S) -> bool) -> Option<&S> {
+    pub(crate) fn get_next_item_by(&mut self, p: impl Fn(&S) -> bool) -> Option<&S> {
+        if self.possibilities.is_empty() {
+            return None;
+        }
         self.curr_state %= self.possibilities.len();
         let (p2, p1) = self.possibilities.split_at(self.curr_state);
         for item in p1.iter().chain(p2.iter()) {
@@ -80,23 +83,29 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_empty_ring_works_ok() {
+        let mut a: GetRing<u8> = GetRing::new(vec![]);
+        assert!(a.get_next_item_by(|_| true).is_none());
+    }
+
+    #[test]
     fn test_get_ring() {
         let mut a = GetRing::new(vec![0u8, 1, 2, 3, 4, 5]);
-        assert_eq!(a.get_next_item_by(&|&i| i % 2 == 0), Some(&0));
-        assert_eq!(a.get_next_item_by(&|&i| i % 2 == 0), Some(&2));
-        assert_eq!(a.get_next_item_by(&|&i| i % 2 == 0), Some(&4));
-        assert_eq!(a.get_next_item_by(&|&i| i % 2 == 0), Some(&0));
+        assert_eq!(a.get_next_item_by(|&i| i % 2 == 0), Some(&0));
+        assert_eq!(a.get_next_item_by(|&i| i % 2 == 0), Some(&2));
+        assert_eq!(a.get_next_item_by(|&i| i % 2 == 0), Some(&4));
+        assert_eq!(a.get_next_item_by(|&i| i % 2 == 0), Some(&0));
 
-        assert_eq!(a.get_next_item_by(&|&i| i == 6), None);
-        assert_eq!(a.get_next_item_by(&|&i| i == 6), None);
-        assert_eq!(a.get_next_item_by(&|&i| i == 6), None);
-        assert_eq!(a.get_next_item_by(&|&i| i == 6), None);
-        assert_eq!(a.get_next_item_by(&|&i| i == 6), None);
+        assert_eq!(a.get_next_item_by(|&i| i == 6), None);
+        assert_eq!(a.get_next_item_by(|&i| i == 6), None);
+        assert_eq!(a.get_next_item_by(|&i| i == 6), None);
+        assert_eq!(a.get_next_item_by(|&i| i == 6), None);
+        assert_eq!(a.get_next_item_by(|&i| i == 6), None);
 
-        assert_eq!(a.get_next_item_by(&|&i| i == 0), Some(&0));
-        assert_eq!(a.get_next_item_by(&|&i| i == 0), Some(&0));
-        assert_eq!(a.get_next_item_by(&|&i| i == 0), Some(&0));
-        assert_eq!(a.get_next_item_by(&|&i| i == 0), Some(&0));
-        assert_eq!(a.get_next_item_by(&|&i| i == 0), Some(&0));
+        assert_eq!(a.get_next_item_by(|&i| i == 0), Some(&0));
+        assert_eq!(a.get_next_item_by(|&i| i == 0), Some(&0));
+        assert_eq!(a.get_next_item_by(|&i| i == 0), Some(&0));
+        assert_eq!(a.get_next_item_by(|&i| i == 0), Some(&0));
+        assert_eq!(a.get_next_item_by(|&i| i == 0), Some(&0));
     }
 }
