@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::{fs, path};
 
 use indexmap::IndexMap;
+use rayon::prelude::*;
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
@@ -59,6 +60,12 @@ impl BookMap {
         }
         self.max_id += 1;
         id
+    }
+
+    fn allocate_id(&mut self, id: u32) {
+        if id > self.max_id {
+            self.max_id = id;
+        }
     }
 }
 
@@ -291,6 +298,7 @@ impl AppDatabase for BasicDatabase {
     fn insert_book(&mut self, book: Book) -> Result<u32, DatabaseError> {
         let (id, len) = self.backend.write(|db| {
             let id = book.get_id();
+            db.allocate_id(id);
             db.books.insert(id, book);
             (id, db.books.len())
         })?;
@@ -303,7 +311,7 @@ impl AppDatabase for BasicDatabase {
     where
         S: AsRef<path::Path>,
     {
-        Ok(self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?)?)
+        self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?)
     }
 
     fn read_books_from_dir<S>(
@@ -315,15 +323,23 @@ impl AppDatabase for BasicDatabase {
     {
         let mut ids = vec![];
         let mut errs = vec![];
-        // TODO: Make this parallel again.
-        fs::read_dir(dir)?
+        let start = self.get_new_id()?;
+        let results = fs::read_dir(dir)?
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, std::io::Error>>()?
-            .iter()
-            .for_each(|path| match self.read_book_from_file(path) {
+            .par_iter()
+            .enumerate()
+            .map(|(id, path)| Book::generate_from_file(path, start + (id as u32)))
+            .collect::<Vec<_>>();
+
+        results.into_iter().for_each(|result| match result {
+            Ok(book) => match self.insert_book(book) {
                 Ok(id) => ids.push(id),
                 Err(e) => errs.push(e),
-            });
+            },
+            Err(e) => errs.push(e.into()),
+        });
+
         Ok((ids, errs))
     }
 
