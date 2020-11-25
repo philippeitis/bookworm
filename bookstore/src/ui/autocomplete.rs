@@ -13,6 +13,10 @@ impl AutoCompleter<PathBuf> {
     /// # Arguments
     ///
     /// * ` word ` - The word to provide autofills for.
+    ///
+    /// # Errors
+    ///
+    /// If the glob fails, an error will be returned.
     pub(crate) fn new<S: AsRef<str>>(word: S) -> Result<Self, ()> {
         let word = word.as_ref().to_string();
         let glob_str = word.clone() + "*";
@@ -29,19 +33,26 @@ impl AutoCompleter<PathBuf> {
         }
     }
 
-    /// Returns the next path which is at least as long as the original, or None if none can be
-    /// found. If at least one such word exists, this function will always return a value.
+    /// Returns the next path which is at least as long as the original,
+    /// or None if no such path exists.
+    ///
+    /// If at least one such word exists, this function will always
+    /// return a value.
     pub(crate) fn get_next_word(&mut self) -> Option<&PathBuf> {
         self.get_next_word_by(|_| true)
     }
 
-    /// Returns the next path which is at least as long as the original, and matches the provided
-    /// predicate, or None if none can be found. If at least one such word exists,
-    /// this function will always return a value.
+    /// Returns the next path which is at least as long as the original
+    /// and satisfies the provided predicate, or None if no such path
+    /// exists.
+    ///
+    /// If at least one such word exists, this function will always
+    /// return a value.
     ///
     /// # Arguments
     ///
-    /// * ` p ` - A predicate to test the paths.
+    /// * ` p ` - A predicate which returns true if the given path should
+    ///             be returned, otherwise false.
     pub(crate) fn get_next_word_by(&mut self, p: impl Fn(&PathBuf) -> bool) -> Option<&PathBuf> {
         let word_len = self.word.len();
         self.possibilities
@@ -62,6 +73,19 @@ impl<S> GetRing<S> {
         }
     }
 
+    /// Returns the next item which satisfies the predicate, starting from the
+    /// the item immediately after the previous item returned (or at the first
+    /// item), in order of appearance, or if no item satisfying the predicate is
+    /// found after the previous item, the next item is selected from the items
+    /// between the first item and the previous value, inclusive.
+    ///
+    /// If at least one item exists that satisfies the predicate, a value will
+    /// always be returned.
+    ///
+    /// # Arguments
+    ///
+    /// * ` p ` - A predicate which returns true if the given item should
+    ///             be returned, otherwise false.
     pub(crate) fn get_next_item_by(&mut self, p: impl Fn(&S) -> bool) -> Option<&S> {
         if self.possibilities.is_empty() {
             return None;

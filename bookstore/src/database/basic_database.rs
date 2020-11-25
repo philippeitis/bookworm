@@ -125,8 +125,8 @@ pub(crate) trait AppDatabase {
         S: AsRef<path::Path>;
 
     /// Reads each book in the directory into the database, and returns a
-    /// Vec of corresponding IDs as well as a Vec of paths and errors which occured while trying to
-    /// read them.
+    /// Vec of corresponding IDs as well as a Vec of paths and errors which
+    /// occurred while trying to read them.
     ///
     /// # Arguments
     /// * ` dir ` - A path to directories containing books to load.
@@ -226,7 +226,7 @@ pub(crate) trait AppDatabase {
     fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError>;
 }
 
-pub(crate) trait SelectableDatabase: AppDatabase {
+pub(crate) trait SelectableDatabase: AppDatabase + Sized {
     fn cursor(&self) -> &PageCursor;
 
     fn cursor_mut(&mut self) -> &mut PageCursor;
