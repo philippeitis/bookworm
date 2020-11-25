@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use tui::style::Color;
+use tui::style::{Color, Style};
 
 use serde::Deserialize;
 
@@ -44,8 +44,18 @@ impl Default for InterfaceStyle {
     }
 }
 
+impl InterfaceStyle {
+    pub(crate) fn edit_style(&self) -> Style {
+        Style::default().fg(self.edit_fg).bg(self.edit_bg)
+    }
+
+    pub(crate) fn select_style(&self) -> Style {
+        Style::default().fg(self.selected_fg).bg(self.selected_bg)
+    }
+}
+
 // TODO: Remove sort settings entirely since the functionality is replicated
-// thanks to IndexMap.
+//  thanks to IndexMap.
 #[derive(Debug)]
 pub(crate) struct SortSettings {
     pub column: UniCase<String>,

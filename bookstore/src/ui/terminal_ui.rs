@@ -1,6 +1,5 @@
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::iter::FromIterator;
 use std::time::Duration;
 #[cfg(windows)]
 use std::{path::PathBuf, process::Command};
@@ -8,11 +7,8 @@ use std::{path::PathBuf, process::Command};
 use crossterm::event::{poll, read, Event, KeyCode, MouseEvent};
 
 use tui::backend::Backend;
-use tui::layout::{Constraint, Direction, Layout, Rect};
-use tui::style::{Modifier, Style};
-use tui::text::{Span, Text};
-use tui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
-use tui::{Frame, Terminal};
+use tui::layout::{Constraint, Direction, Layout};
+use tui::Terminal;
 
 use unicase::UniCase;
 
@@ -23,6 +19,7 @@ use crate::record::book::ColumnIdentifier;
 use crate::record::Book;
 use crate::ui::settings::{InterfaceStyle, NavigationSettings, Settings, SortSettings};
 use crate::ui::user_input::{CommandString, EditState};
+use crate::ui::{BookWidget, BorderWidget, ColumnWidget, CommandWidget, Widget};
 
 // TODO: Add MoveUp / MoveDown for stepping up and down so we don't
 //      regenerate everything from scratch.
@@ -35,24 +32,28 @@ enum ColumnUpdate {
 }
 
 pub(crate) struct App<D> {
-    name: String,
+    // Application data
     db: D,
-
     selected_cols: Vec<UniCase<String>>,
-    curr_command: CommandString,
+    column_data: Vec<Vec<String>>,
+
+    // Actions to run on data
     sort_settings: SortSettings,
+    update_columns: ColumnUpdate,
+    updated: bool,
+
+    // Visual elements
+    border_widget: BorderWidget,
+    style: InterfaceStyle,
+
+    // UI elements
+    curr_command: CommandString,
     edit: EditState,
     selected_column: usize,
-    updated: bool,
+    terminal_size: Option<(u16, u16)>,
 
     // Navigation
     nav_settings: NavigationSettings,
-
-    // Database
-    update_columns: ColumnUpdate,
-    column_data: Vec<Vec<String>>,
-    style: InterfaceStyle,
-    terminal_size: Option<(u16, u16)>,
 }
 
 #[derive(Debug)]
@@ -152,7 +153,7 @@ impl<D: SelectableDatabase> App<D> {
             .collect();
 
         Ok(App {
-            name: name.as_ref().to_string(),
+            border_widget: BorderWidget::new(name.as_ref().to_string()),
             db,
             selected_cols,
             curr_command: CommandString::new(),
@@ -267,162 +268,6 @@ impl<D: SelectableDatabase> App<D> {
         } else {
             false
         }
-    }
-
-    /// Renders the table, sized according to the chunk.
-    ///
-    /// # Arguments
-    ///
-    /// * ` f ` - A frame to render into.
-    /// * ` chunk ` - A chunk to specify the visible table size.
-    fn render_columns<B: Backend>(&mut self, f: &mut Frame<B>, chunk: Rect) {
-        fn cut_word_to_fit(word: &str, max_len: usize) -> String {
-            if word.len() > max_len {
-                let mut base_word = word.chars().into_iter().collect::<Vec<_>>();
-                base_word.truncate(max_len - 3);
-                String::from_iter(base_word.iter()) + "..."
-            } else {
-                word.to_string()
-            }
-        }
-
-        // fn columns_to_rows<T: Clone>(columns: &Vec<Vec<T>>) -> Vec<Vec<T>> {
-        //     let x = columns[0].len();
-        //     assert!(columns.iter().all(|v| v.len() == x));
-        //     (0..x).map(|i| columns.iter().map(|x| x[i].clone()).collect()).collect()
-        // }
-
-        let col_width = chunk.width / self.selected_cols.len() as u16;
-        let mut widths: Vec<_> = std::iter::repeat(col_width)
-            .take(self.selected_cols.len())
-            .collect();
-        let total_w: u16 = widths.iter().sum();
-        if total_w != chunk.width {
-            widths[0] += chunk.width - total_w;
-        }
-        let hchunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(
-                widths
-                    .into_iter()
-                    .map(Constraint::Length)
-                    .collect::<Vec<Constraint>>()
-                    .as_ref(),
-            )
-            .split(chunk);
-
-        // TODO: Remove this assert.
-        assert!(
-            self.db
-                .selected()
-                .map(|x| { x <= chunk.height as usize })
-                .unwrap_or(true),
-            format!("{:?}", self.db.selected())
-        );
-
-        let edit_style = Style::default()
-            .fg(self.style.edit_fg)
-            .bg(self.style.edit_bg);
-        let select_style = Style::default()
-            .fg(self.style.selected_fg)
-            .bg(self.style.selected_bg);
-
-        for (i, ((title, data), &chunk)) in self
-            .selected_cols
-            .iter()
-            .zip(self.column_data.iter())
-            .zip(hchunks.iter())
-            .enumerate()
-        {
-            let list = List::new(
-                data.iter()
-                    .map(|word| {
-                        ListItem::new(Span::from(cut_word_to_fit(word, chunk.width as usize - 3)))
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .block(Block::default().title(Span::from(title.to_string())))
-            .highlight_style(if self.edit.active && i == self.selected_column {
-                edit_style
-            } else {
-                select_style
-            });
-
-            let mut selected_row = ListState::default();
-            selected_row.select(self.db.selected());
-            f.render_stateful_widget(list, chunk, &mut selected_row);
-        }
-    }
-
-    /// Renders the command string into the frame, sized according to the chunk.
-    ///
-    /// # Arguments
-    ///
-    /// * ` f ` - A frame to render into.
-    /// * ` chunk ` - A chunk to specify the command string size.
-    fn render_command_prompt<B: Backend>(&mut self, f: &mut Frame<B>, chunk: Rect) {
-        let command_widget = if !self.curr_command.is_empty() {
-            // TODO: Slow blink looks wrong
-            let text = Text::styled(
-                self.curr_command.to_string(),
-                Style::default().add_modifier(Modifier::BOLD),
-            );
-            Paragraph::new(text)
-        } else {
-            Paragraph::new(Text::styled(
-                "Enter command or search",
-                Style::default().add_modifier(Modifier::BOLD),
-            ))
-        };
-        f.render_widget(command_widget, chunk);
-    }
-
-    fn render_book_into_view<B: Backend>(&self, book: &Book, f: &mut Frame<B>, chunk: Rect) {
-        let field_exists = Style::default().add_modifier(Modifier::BOLD);
-        let field_not_provided = Style::default();
-
-        let mut data = if let Some(t) = &book.title {
-            Text::styled(t, field_exists)
-        } else {
-            Text::styled("No title provided", field_not_provided)
-        };
-        if let Some(t) = &book.authors {
-            let mut s = "By: ".to_string();
-            s.push_str(&t.join(", "));
-            data.extend(Text::styled(s, field_exists));
-        } else {
-            data.extend(Text::styled("No author provided", field_not_provided))
-        };
-
-        if let Some(columns) = book.get_extended_columns() {
-            data.extend(Text::raw("\nTags provided:"));
-            for (key, value) in columns.iter() {
-                data.extend(Text::styled(
-                    [key.as_str(), value.as_str()].join(": "),
-                    field_exists,
-                ));
-            }
-        }
-
-        if let Some(variants) = book.get_variants() {
-            let mut added_section = false;
-            for variant in variants {
-                if let Some(paths) = variant.get_paths() {
-                    if !added_section {
-                        added_section = true;
-                        data.extend(Text::raw("\nVariant paths:"));
-                    }
-                    for (booktype, path) in paths {
-                        let s = format!("{:?}: {}", booktype, path.display().to_string());
-                        data.extend(Text::styled(s, field_exists));
-                    }
-                }
-            }
-        }
-
-        let p = Paragraph::new(data);
-
-        f.render_widget(p, chunk);
     }
 
     // TODO: Make this set an Action so that the handling is external.
@@ -873,15 +718,22 @@ impl<D: SelectableDatabase> App<D> {
                         }
                     }
 
-                    let block = Block::default()
-                        .title(format!(" bookshop || {} ", self.name))
-                        .borders(Borders::ALL);
-                    f.render_widget(block, f.size());
+                    self.border_widget.render_into_block(f, f.size());
 
-                    self.render_columns(f, vchunks[0]);
-                    self.render_command_prompt(f, vchunks[1]);
+                    let column_view = ColumnWidget {
+                        selected_cols: &self.selected_cols,
+                        column_data: &self.column_data,
+                        style: &self.style,
+                        edit_active: self.edit.active,
+                        selected_column: self.selected_column,
+                        selected: self.db.selected(),
+                    };
+                    column_view.render_into_block(f, vchunks[0]);
+
+                    let command_prompt = CommandWidget::new(&self.curr_command);
+                    command_prompt.render_into_block(f, vchunks[1]);
                     if let Ok(b) = self.db.selected_item() {
-                        self.render_book_into_view(&b, f, hchunks[1]);
+                        BookWidget::new(&b).render_into_block(f, hchunks[1]);
                     }
                 })?;
                 self.updated = false;
