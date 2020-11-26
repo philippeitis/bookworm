@@ -19,7 +19,7 @@ use crate::record::book::ColumnIdentifier;
 use crate::record::Book;
 use crate::ui::settings::{InterfaceStyle, NavigationSettings, Settings, SortSettings};
 use crate::ui::user_input::{CommandString, EditState};
-use crate::ui::{BookWidget, BorderWidget, ColumnWidget, CommandWidget, Widget};
+use crate::ui::{BookWidget, BorderWidget, ColumnWidget, CommandWidget, EditWidget, Widget};
 
 // TODO: Add MoveUp / MoveDown for stepping up and down so we don't
 //      regenerate everything from scratch.
@@ -166,6 +166,12 @@ impl<D: SelectableDatabase> App<D> {
             edit: EditState::default(),
             selected_column: 0,
             nav_settings: settings.navigation_settings,
+            // active_view: Box::new(ColumnWidget {
+            //     selected_cols: &selected_cols,
+            //     column_data: &column_data,
+            //     style: &Default::default(),
+            //     selected: None,
+            // }),
         })
     }
 
@@ -203,7 +209,7 @@ impl<D: SelectableDatabase> App<D> {
     }
 
     /// Updates the table data if a change occurs.
-    fn update_column_data(&mut self) -> bool {
+    fn update_column_data(&mut self) {
         match &self.update_columns {
             ColumnUpdate::Regenerate => {
                 self.updated = true;
@@ -214,7 +220,7 @@ impl<D: SelectableDatabase> App<D> {
 
                 if self.db.cursor().window_size() == 0 {
                     self.update_columns = ColumnUpdate::NoUpdate;
-                    return false;
+                    return;
                 }
 
                 let _ = self.log(format!(
@@ -262,12 +268,7 @@ impl<D: SelectableDatabase> App<D> {
             ColumnUpdate::NoUpdate => {}
         }
 
-        if self.update_columns != ColumnUpdate::NoUpdate {
-            self.update_columns = ColumnUpdate::NoUpdate;
-            true
-        } else {
-            false
-        }
+        self.update_columns = ColumnUpdate::NoUpdate;
     }
 
     // TODO: Make this set an Action so that the handling is external.
@@ -591,7 +592,6 @@ impl<D: SelectableDatabase> App<D> {
             }
             command_parser::Command::DeleteAll => {
                 self.db.clear()?;
-                self.column_data.iter_mut().for_each(|c| c.clear());
                 self.update_columns = ColumnUpdate::Regenerate;
             }
             command_parser::Command::EditBook(b, field, new_value) => {
@@ -599,6 +599,8 @@ impl<D: SelectableDatabase> App<D> {
                     BookIndex::Selected => self.db.edit_selected_book(field, new_value)?,
                     BookIndex::BookID(id) => self.db.edit_book_with_id(id, field, new_value)?,
                 };
+                self.sort_settings.is_sorted = false;
+                self.update_columns = ColumnUpdate::Regenerate;
             }
             command_parser::Command::AddBookFromFile(f) => {
                 self.db.read_book_from_file(f)?;
@@ -680,8 +682,10 @@ impl<D: SelectableDatabase> App<D> {
 
             self.update_column_data();
 
-            let frame_size = terminal.get_frame().size();
-            let size = Some((frame_size.width, frame_size.height));
+            let size = {
+                let frame_size = terminal.get_frame().size();
+                Some((frame_size.width, frame_size.height))
+            };
 
             if size != self.terminal_size {
                 self.terminal_size = size;
@@ -718,22 +722,31 @@ impl<D: SelectableDatabase> App<D> {
                         }
                     }
 
-                    self.border_widget.render_into_block(f, f.size());
+                    self.border_widget.render_into_frame(f, f.size());
 
-                    let column_view = ColumnWidget {
-                        selected_cols: &self.selected_cols,
-                        column_data: &self.column_data,
-                        style: &self.style,
-                        edit_active: self.edit.active,
-                        selected_column: self.selected_column,
-                        selected: self.db.selected(),
-                    };
-                    column_view.render_into_block(f, vchunks[0]);
+                    // self.active_view.render_into_frame(f, vchunks[0]);
+                    if self.edit.active {
+                        EditWidget {
+                            selected_cols: &self.selected_cols,
+                            column_data: &self.column_data,
+                            style: &self.style,
+                            selected_column: self.selected_column,
+                            selected: self.db.selected(),
+                        }
+                        .render_into_frame(f, vchunks[0]);
+                    } else {
+                        ColumnWidget {
+                            selected_cols: &self.selected_cols,
+                            column_data: &self.column_data,
+                            style: &self.style,
+                            selected: self.db.selected(),
+                        }
+                        .render_into_frame(f, vchunks[0]);
+                    }
 
-                    let command_prompt = CommandWidget::new(&self.curr_command);
-                    command_prompt.render_into_block(f, vchunks[1]);
+                    CommandWidget::new(&self.curr_command).render_into_frame(f, vchunks[1]);
                     if let Ok(b) = self.db.selected_item() {
-                        BookWidget::new(&b).render_into_block(f, hchunks[1]);
+                        BookWidget::new(&b).render_into_frame(f, hchunks[1]);
                     }
                 })?;
                 self.updated = false;
@@ -746,7 +759,7 @@ impl<D: SelectableDatabase> App<D> {
 }
 
 // TODO:
-//  Live search & search by tags - mysql? meillisearch?
+//  Live search & search by tags - sqllite? meillisearch?
 //  Cloud sync support (eg. upload database to Google Drive / read from Google Drive)
 //  File conversion (mainly using calibre?)
 //  Help menu

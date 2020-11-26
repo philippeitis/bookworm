@@ -20,48 +20,83 @@ pub(crate) trait Widget<B: Backend> {
     ///
     /// * ` f ` - A frame to render into.
     /// * ` chunk ` - A chunk to specify the size of the widget.
-    fn render_into_block(&self, f: &mut Frame<B>, chunk: Rect);
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect);
+}
+
+fn cut_word_to_fit(word: &str, max_len: usize) -> ListItem {
+    ListItem::new(Span::from(if word.len() > max_len {
+        let mut base_word = word.chars().into_iter().collect::<Vec<_>>();
+        base_word.truncate(max_len - 3);
+        String::from_iter(base_word.iter()) + "..."
+    } else {
+        word.to_string()
+    }))
+}
+
+fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
+    let col_width = chunk.width / num_cols;
+
+    let mut widths = vec![col_width; num_cols as usize];
+    let total_w: u16 = widths.iter().sum();
+    if total_w != chunk.width {
+        widths[0] += chunk.width - total_w;
+    }
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            widths
+                .into_iter()
+                .map(Constraint::Length)
+                .collect::<Vec<_>>(),
+        )
+        .split(chunk)
 }
 
 pub(crate) struct ColumnWidget<'a> {
     pub(crate) selected_cols: &'a Vec<UniCase<String>>,
     pub(crate) column_data: &'a Vec<Vec<String>>,
     pub(crate) style: &'a InterfaceStyle,
-    pub(crate) edit_active: bool,
-    pub(crate) selected_column: usize,
     pub(crate) selected: Option<usize>,
+    // pub(crate) command_string: CommandString,
 }
 
 impl<'a, B: Backend> Widget<B> for ColumnWidget<'a> {
-    fn render_into_block(&self, f: &mut Frame<B>, chunk: Rect) {
-        fn cut_word_to_fit(word: &str, max_len: usize) -> ListItem {
-            ListItem::new(Span::from(if word.len() > max_len {
-                let mut base_word = word.chars().into_iter().collect::<Vec<_>>();
-                base_word.truncate(max_len - 3);
-                String::from_iter(base_word.iter()) + "..."
-            } else {
-                word.to_string()
-            }))
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
+        let hchunks = split_chunk_into_columns(chunk, self.selected_cols.len() as u16);
+        let select_style = self.style.select_style();
+
+        for ((title, data), &chunk) in self
+            .selected_cols
+            .iter()
+            .zip(self.column_data.iter())
+            .zip(hchunks.iter())
+        {
+            let list = List::new(
+                data.iter()
+                    .map(|word| cut_word_to_fit(word, chunk.width as usize - 3))
+                    .collect::<Vec<_>>(),
+            )
+            .block(Block::default().title(Span::from(title.to_string())))
+            .highlight_style(select_style);
+
+            let mut selected_row = ListState::default();
+            selected_row.select(self.selected);
+            f.render_stateful_widget(list, chunk, &mut selected_row);
         }
+    }
+}
 
-        let col_width = chunk.width / self.selected_cols.len() as u16;
+pub(crate) struct EditWidget<'a> {
+    pub(crate) selected_cols: &'a Vec<UniCase<String>>,
+    pub(crate) column_data: &'a Vec<Vec<String>>,
+    pub(crate) style: &'a InterfaceStyle,
+    pub(crate) selected: Option<usize>,
+    pub(crate) selected_column: usize,
+}
 
-        let hchunks = {
-            let mut widths = vec![col_width; self.selected_cols.len()];
-            let total_w: u16 = widths.iter().sum();
-            if total_w != chunk.width {
-                widths[0] += chunk.width - total_w;
-            }
-            Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints(
-                    widths
-                        .into_iter()
-                        .map(Constraint::Length)
-                        .collect::<Vec<_>>(),
-                )
-                .split(chunk)
-        };
+impl<'a, B: Backend> Widget<B> for EditWidget<'a> {
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
+        let hchunks = split_chunk_into_columns(chunk, self.selected_cols.len() as u16);
 
         let edit_style = self.style.edit_style();
         let select_style = self.style.select_style();
@@ -79,7 +114,7 @@ impl<'a, B: Backend> Widget<B> for ColumnWidget<'a> {
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))
-            .highlight_style(if self.edit_active && i == self.selected_column {
+            .highlight_style(if i == self.selected_column {
                 edit_style
             } else {
                 select_style
@@ -109,7 +144,7 @@ impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
     ///
     /// * ` f ` - A frame to render into.
     /// * ` chunk ` - A chunk to specify the command string size.
-    fn render_into_block(&self, f: &mut Frame<B>, chunk: Rect) {
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
         let command_widget = if !self.command_string.is_empty() {
             // TODO: Slow blink looks wrong
             let text = Text::styled(
@@ -138,7 +173,7 @@ impl<'a> BookWidget<'a> {
 }
 
 impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
-    fn render_into_block(&self, f: &mut Frame<B>, chunk: Rect) {
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
         let field_exists = Style::default().add_modifier(Modifier::BOLD);
         let field_not_provided = Style::default();
 
@@ -198,7 +233,7 @@ impl BorderWidget {
 }
 
 impl<B: Backend> Widget<B> for BorderWidget {
-    fn render_into_block(&self, f: &mut Frame<B>, chunk: Rect) {
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
         let block = Block::default()
             .title(format!(" bookshop || {} ", self.name))
             .borders(Borders::ALL);

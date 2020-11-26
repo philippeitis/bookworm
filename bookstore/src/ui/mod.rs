@@ -7,4 +7,6 @@ pub mod widgets;
 pub(crate) use autocomplete::AutoCompleter;
 pub(crate) use settings::Settings;
 pub(crate) use terminal_ui::{App, ApplicationError};
-pub(crate) use widgets::{BookWidget, BorderWidget, ColumnWidget, CommandWidget, Widget};
+pub(crate) use widgets::{
+    BookWidget, BorderWidget, ColumnWidget, CommandWidget, EditWidget, Widget,
+};
