@@ -321,8 +321,6 @@ impl AppDatabase for BasicDatabase {
     where
         S: AsRef<path::Path>,
     {
-        let mut ids = vec![];
-        let mut errs = vec![];
         let start = self.get_new_id()?;
         let results = fs::read_dir(dir)?
             .map(|res| res.map(|e| e.path()))
@@ -332,14 +330,23 @@ impl AppDatabase for BasicDatabase {
             .map(|(id, path)| Book::generate_from_file(path, start + (id as u32)))
             .collect::<Vec<_>>();
 
-        results.into_iter().for_each(|result| match result {
-            Ok(book) => match self.insert_book(book) {
-                Ok(id) => ids.push(id),
-                Err(e) => errs.push(e),
-            },
-            Err(e) => errs.push(e.into()),
-        });
+        let mut ids = vec![];
+        let mut errs = vec![];
 
+        let len = self.backend.write(|db| {
+            results.into_iter().for_each(|result| match result {
+                Ok(book) => {
+                    let id = book.get_id();
+                    db.allocate_id(id);
+                    db.books.insert(id, book);
+                    ids.push(id);
+                }
+                Err(e) => errs.push(e.into()),
+            });
+            db.books.len()
+        })?;
+
+        self.cursor.refresh_height(len);
         Ok((ids, errs))
     }
 
