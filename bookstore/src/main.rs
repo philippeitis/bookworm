@@ -13,7 +13,7 @@ use tui::Terminal;
 
 use crate::database::{AppDatabase, BasicDatabase};
 use crate::parser::parse_args;
-use crate::ui::{App, ApplicationError, Settings};
+use crate::ui::{App, AppInterface, ApplicationError, Settings};
 
 fn main() -> Result<(), ApplicationError> {
     #[cfg(feature = "cloud")]
@@ -58,7 +58,8 @@ fn main() -> Result<(), ApplicationError> {
     }
     .unwrap_or_default();
 
-    let mut app = App::new("Really Cool Library", settings, db)?;
+    let mut app = App::new(db);
+    // let mut app = App::new("Really Cool Library", settings, db)?;
 
     if !command.is_empty() {
         let command = parse_args(&command);
@@ -82,6 +83,8 @@ fn main() -> Result<(), ApplicationError> {
     };
 
     let stdout = stdout();
+    let mut app = AppInterface::new("Really Cool Library", settings, app)?;
+
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;

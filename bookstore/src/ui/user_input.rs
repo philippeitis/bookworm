@@ -6,7 +6,6 @@ use itertools::Itertools;
 use crate::ui::AutoCompleter;
 
 pub(crate) struct EditState {
-    pub active: bool,
     pub selected: usize,
     pub started_edit: bool,
     pub orig_value: String,
@@ -16,7 +15,6 @@ pub(crate) struct EditState {
 impl Default for EditState {
     fn default() -> Self {
         EditState {
-            active: false,
             selected: 0,
             started_edit: false,
             orig_value: "".to_string(),
@@ -28,7 +26,6 @@ impl Default for EditState {
 impl EditState {
     pub(crate) fn new<S: AsRef<str>>(orig_value: S, selected: usize) -> Self {
         EditState {
-            active: true,
             selected,
             started_edit: false,
             orig_value: orig_value.as_ref().to_string(),
@@ -75,6 +72,7 @@ impl EditState {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct CommandString {
     char_buf: Vec<char>,
     auto_fill: Option<AutoCompleter<PathBuf>>,

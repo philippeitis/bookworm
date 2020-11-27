@@ -1,30 +1,27 @@
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::time::Duration;
 #[cfg(windows)]
 use std::{path::PathBuf, process::Command};
 
-use crossterm::event::{poll, read, Event, KeyCode, MouseEvent};
+use crossterm::event::{poll, read};
 
 use tui::backend::Backend;
-use tui::layout::{Constraint, Direction, Layout};
+use tui::layout::Rect;
 use tui::Terminal;
 
 use unicase::UniCase;
 
 use crate::database::{DatabaseError, SelectableDatabase};
 use crate::parser::command_parser;
-use crate::parser::{parse_args, BookIndex};
+use crate::parser::BookIndex;
 use crate::record::book::ColumnIdentifier;
 use crate::record::Book;
 use crate::ui::settings::{InterfaceStyle, NavigationSettings, Settings, SortSettings};
 use crate::ui::user_input::{CommandString, EditState};
-use crate::ui::{BookWidget, BorderWidget, ColumnWidget, CommandWidget, EditWidget, Widget};
+use crate::ui::views::{AppView, ApplicationTask, ColumnWidget, EditWidget, View};
+use crate::ui::widgets::{BorderWidget, Widget};
 
-// TODO: Add MoveUp / MoveDown for stepping up and down so we don't
-//      regenerate everything from scratch.
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum ColumnUpdate {
+pub(crate) enum ColumnUpdate {
     Regenerate,
     AddColumn(UniCase<String>),
     RemoveColumn(UniCase<String>),
@@ -39,524 +36,55 @@ pub(crate) struct App<D> {
 
     // Actions to run on data
     sort_settings: SortSettings,
-    update_columns: ColumnUpdate,
+    pub(crate) update_columns: ColumnUpdate,
     updated: bool,
-
-    // Visual elements
-    border_widget: BorderWidget,
-    style: InterfaceStyle,
-
-    // UI elements
-    curr_command: CommandString,
-    edit: EditState,
-    selected_column: usize,
-    terminal_size: Option<(u16, u16)>,
-
-    // Navigation
-    nav_settings: NavigationSettings,
 }
-
-#[derive(Debug)]
-pub(crate) enum ApplicationError {
-    IoError(std::io::Error),
-    TerminalError(crossterm::ErrorKind),
-    DatabaseError(DatabaseError),
-    NoBookSelected,
-    Err(()),
-}
-
-impl From<std::io::Error> for ApplicationError {
-    fn from(e: std::io::Error) -> Self {
-        ApplicationError::IoError(e)
-    }
-}
-
-impl From<()> for ApplicationError {
-    fn from(_: ()) -> Self {
-        ApplicationError::Err(())
-    }
-}
-
-impl From<DatabaseError> for ApplicationError {
-    fn from(e: DatabaseError) -> Self {
-        match e {
-            DatabaseError::NoBookSelected => ApplicationError::NoBookSelected,
-            x => ApplicationError::DatabaseError(x),
-        }
-    }
-}
-
-impl From<crossterm::ErrorKind> for ApplicationError {
-    fn from(e: crossterm::ErrorKind) -> Self {
-        ApplicationError::TerminalError(e)
-    }
-}
-
-// TODO: Currently unstable.
-// impl From<std::option::NoneError> for ApplicationError {
-//     fn from(e: std::option::NoneError) -> Self {
-//     }
-// }
 
 impl<D: SelectableDatabase> App<D> {
-    // pub(crate) fn splash(style: InterfaceStyle, terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<App<'a, D>, ApplicationError> {
-    //     terminal.draw(|f| {
-    //         let vchunks = Layout::default()
-    //             .margin(1)
-    //             .direction(Direction::Horizontal)
-    //             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
-    //             .split(f.size());
-    //
-    //         let block = Block::default()
-    //             .title(format!(" bookshop || Open or create new library "))
-    //             .borders(Borders::ALL);
-    //
-    //         f.render_widget(block, f.size());
-    //
-    //         let h = (f.size().height - 2)/2;
-    //
-    //         let hchunks = Layout::default()
-    //             .direction(Direction::Horizontal)
-    //             .constraints([Constraint::Length(h), Constraint::Length(1), Constraint::Length(1), Constraint::Length(h)])
-    //             .split(vchunks[0]);
-    //
-    //         let open = Span::from("Open existing database");
-    //         let close = Span::from("Open new database");
-    //
-    //         Self::new(file_name, style, D::open(file_name));
-    //     })?
-    // }
-    /// Returns a new database, instantiated with the provided settings and database.
-    ///
-    /// # Arguments
-    ///
-    /// * ` name ` - The application instance name. Not to confused with the file name.
-    /// * ` settings` - The application settings.
-    /// * ` db ` - The database which contains books to be read.
-    ///
-    /// # Errors
-    /// None.
-    pub(crate) fn new<S: AsRef<str>>(
-        name: S,
-        settings: Settings,
-        db: D,
-    ) -> Result<App<D>, ApplicationError> {
-        let selected_cols: Vec<_> = settings
-            .columns
-            .iter()
-            .map(|s| UniCase::new(s.clone()))
-            .collect();
-
-        let column_data = (0..selected_cols.len())
-            .into_iter()
-            .map(|_| vec![])
-            .collect();
-
-        Ok(App {
-            border_widget: BorderWidget::new(name.as_ref().to_string()),
+    pub(crate) fn new(db: D) -> Self {
+        App {
             db,
-            selected_cols,
-            curr_command: CommandString::new(),
-            sort_settings: settings.sort_settings,
+            selected_cols: vec![],
+            sort_settings: SortSettings::default(),
             updated: true,
             update_columns: ColumnUpdate::Regenerate,
-            column_data,
-            style: settings.interface_style,
-            terminal_size: None,
-            edit: EditState::default(),
-            selected_column: 0,
-            nav_settings: settings.navigation_settings,
-            // active_view: Box::new(ColumnWidget {
-            //     selected_cols: &selected_cols,
-            //     column_data: &column_data,
-            //     style: &Default::default(),
-            //     selected: None,
-            // }),
-        })
-    }
-
-    /// Updates the required sorting settings if the column changes.
-    ///
-    /// # Arguments
-    ///
-    /// * ` word ` - The column to sort the table on.
-    /// * ` reverse ` - Whether to reverse the sort.
-    fn update_selected_column(&mut self, word: UniCase<String>, reverse: bool) {
-        let word = UniCase::new(
-            match word.as_str() {
-                "author" => "authors",
-                x => x,
-            }
-            .to_string(),
-        );
-
-        if self.selected_cols.contains(&word) {
-            self.sort_settings.column = word;
-            self.sort_settings.is_sorted = false;
-            self.sort_settings.reverse = reverse;
-            self.update_columns = ColumnUpdate::Regenerate;
+            column_data: vec![],
         }
     }
 
-    fn log(&self, msg: impl AsRef<str>) -> Result<(), ApplicationError> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .open("log.txt")?;
-        writeln!(file, "{}", msg.as_ref())?;
-        Ok(())
-    }
-
-    /// Updates the table data if a change occurs.
-    fn update_column_data(&mut self) {
-        match &self.update_columns {
-            ColumnUpdate::Regenerate => {
-                self.updated = true;
-                self.column_data = (0..self.selected_cols.len())
-                    .into_iter()
-                    .map(|_| Vec::with_capacity(self.db.cursor().window_size()))
-                    .collect();
-
-                if self.db.cursor().window_size() == 0 {
-                    self.update_columns = ColumnUpdate::NoUpdate;
-                    return;
-                }
-
-                let _ = self.log(format!(
-                    "update_column_data(ColumnUpdate::Regenerate): {} {} {:?}",
-                    0,
-                    self.db.cursor().window_size(),
-                    self.db.selected()
-                ));
-
-                let cols = self
-                    .selected_cols
-                    .iter()
-                    .map(|col| ColumnIdentifier::from(col.as_str()))
-                    .collect::<Vec<_>>();
-
-                for b in self.db.get_books_cursored().unwrap() {
-                    for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
-                        column.push(b.get_column_or(&col, ""));
-                    }
-                }
-            }
-            ColumnUpdate::AddColumn(word) => {
-                self.updated = true;
-                if self.db.has_column(&word) && !self.selected_cols.contains(&word) {
-                    self.selected_cols.push(word.clone());
-                    let column_string = ColumnIdentifier::from(word.as_str());
-                    self.column_data.push(
-                        self.db
-                            .get_books_cursored()
-                            .unwrap()
-                            .iter()
-                            .map(|book| book.get_column_or(&column_string, ""))
-                            .collect(),
-                    );
-                }
-            }
-            ColumnUpdate::RemoveColumn(word) => {
-                self.updated = true;
-                let index = self.selected_cols.iter().position(|x| x.eq(&word));
-                if let Some(index) = index {
-                    self.selected_cols.remove(index);
-                    self.column_data.remove(index);
-                }
-            }
-            ColumnUpdate::NoUpdate => {}
-        }
-
-        self.update_columns = ColumnUpdate::NoUpdate;
-    }
-
-    // TODO: Make this set an Action so that the handling is external.
-    /// Reads and handles user input. On success, returns a bool
-    /// indicating whether to continue or not.
-    ///
-    /// # Arguments
-    ///
-    /// * ` terminal ` - The current terminal.
-    ///
-    /// # Errors
-    /// This function may error if executing a particular action fails.
-    fn get_input(&mut self) -> Result<bool, ApplicationError> {
-        loop {
-            if poll(Duration::from_millis(500))? {
-                if self.edit.active {
-                    match read()? {
-                        Event::Resize(_, _) => {}
-                        Event::Key(event) => {
-                            match event.code {
-                                KeyCode::Backspace => {
-                                    self.edit.del();
-                                }
-                                KeyCode::Char(c) => {
-                                    self.edit.push(c);
-                                }
-                                KeyCode::Enter => {
-                                    self.updated = true;
-                                    if !self.edit.started_edit {
-                                        self.edit.active = false;
-                                        self.column_data[self.selected_column]
-                                            [self.edit.selected] = self.edit.orig_value.clone();
-                                        return Ok(false);
-                                    }
-                                    self.db.edit_selected_book(
-                                        self.selected_cols[self.selected_column].clone(),
-                                        self.edit.new_value.clone(),
-                                    )?;
-                                    self.edit.active = false;
-                                    self.sort_settings.is_sorted = false;
-                                    return Ok(false);
-                                }
-                                KeyCode::Esc => {
-                                    self.edit.active = false;
-                                    self.updated = true;
-                                    self.column_data[self.selected_column][self.edit.selected] =
-                                        self.edit.orig_value.clone();
-                                    return Ok(false);
-                                }
-                                KeyCode::Delete => {
-                                    // TODO: Add code to delete forwards
-                                    //  (requires implementing cursor logic)
-                                }
-                                KeyCode::Right => {
-                                    self.edit.edit_orig();
-                                }
-                                KeyCode::Down => {
-                                    if self.selected_column < self.selected_cols.len() - 1 {
-                                        if self.edit.started_edit {
-                                            self.db.edit_selected_book(
-                                                self.selected_cols[self.selected_column].clone(),
-                                                self.edit.new_value.clone(),
-                                            )?;
-                                        }
-                                        self.selected_column += 1;
-                                    }
-                                    self.edit.reset_orig(
-                                        self.column_data[self.selected_column][self.edit.selected]
-                                            .clone(),
-                                    );
-                                }
-                                KeyCode::Up => {
-                                    if self.selected_column > 0 {
-                                        if self.edit.started_edit {
-                                            self.db.edit_selected_book(
-                                                self.selected_cols[self.selected_column].clone(),
-                                                self.edit.new_value.clone(),
-                                            )?;
-                                        }
-                                        self.selected_column -= 1;
-                                    }
-                                    self.edit.reset_orig(
-                                        self.column_data[self.selected_column][self.edit.selected]
-                                            .clone(),
-                                    );
-                                }
-                                _ => return Ok(false),
-                            }
-                        }
-                        _ => return Ok(false),
-                    }
-                    self.column_data[self.selected_column][self.edit.selected] =
-                        self.edit.visible().to_string();
-                } else {
-                    match read()? {
-                        Event::Mouse(m) => match m {
-                            MouseEvent::ScrollDown(_, _, _) => {
-                                let updated = if self.nav_settings.inverted {
-                                    self.db.cursor_mut().scroll_up(self.nav_settings.scroll)
-                                } else {
-                                    self.db.cursor_mut().scroll_down(self.nav_settings.scroll)
-                                };
-                                if updated {
-                                    self.update_columns = ColumnUpdate::Regenerate;
-                                }
-                            }
-                            MouseEvent::ScrollUp(_, _, _) => {
-                                let updated = if self.nav_settings.inverted {
-                                    self.db.cursor_mut().scroll_down(self.nav_settings.scroll)
-                                } else {
-                                    self.db.cursor_mut().scroll_up(self.nav_settings.scroll)
-                                };
-                                if updated {
-                                    self.update_columns = ColumnUpdate::Regenerate;
-                                }
-                            }
-                            _ => {
-                                return Ok(false);
-                            }
-                        },
-                        Event::Resize(_, _) => {}
-                        Event::Key(event) => {
-                            // Text input
-                            match event.code {
-                                KeyCode::F(2) => {
-                                    if let Some(x) = self.db.selected() {
-                                        self.edit = EditState::new(
-                                            &self.column_data[self.selected_column][x],
-                                            x,
-                                        );
-                                    }
-                                }
-                                KeyCode::Backspace => {
-                                    self.curr_command.pop();
-                                }
-                                KeyCode::Char(x) => {
-                                    self.curr_command.push(x);
-                                }
-                                KeyCode::Enter => {
-                                    let args: Vec<_> = self
-                                        .curr_command
-                                        .get_values_autofilled()
-                                        .into_iter()
-                                        .map(|(_, a)| a)
-                                        .collect();
-
-                                    if !self.run_command(parse_args(&args))? {
-                                        return Ok(true);
-                                    }
-                                    self.curr_command.clear();
-                                }
-                                KeyCode::Tab | KeyCode::BackTab => {
-                                    self.curr_command.refresh_autofill()?;
-                                    let vals = self.curr_command.get_values();
-                                    if let Some(val) = vals.get(0) {
-                                        if val.1 == "!a" {
-                                            let dir = if let Some(val) = vals.get(1) {
-                                                val.1 == "-d"
-                                            } else {
-                                                false
-                                            };
-                                            self.curr_command.auto_fill(dir);
-                                        }
-                                    };
-                                }
-                                KeyCode::Esc => {
-                                    self.curr_command.clear();
-                                    self.db.cursor_mut().select(None);
-                                }
-                                KeyCode::Delete => {
-                                    if self.curr_command.is_empty() {
-                                        self.db.remove_selected_book()?;
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    } else {
-                                        // TODO: Add code to delete forwards
-                                        //  (requires implementing cursor logic)
-                                    }
-                                }
-                                // Scrolling
-                                KeyCode::Up => {
-                                    if self.db.cursor_mut().select_up() {
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    }
-                                }
-                                KeyCode::Down => {
-                                    if self.db.cursor_mut().select_down() {
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    }
-                                }
-                                KeyCode::PageDown => {
-                                    if self.db.cursor_mut().page_down() {
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    }
-                                }
-                                KeyCode::PageUp => {
-                                    if self.db.cursor_mut().page_up() {
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    }
-                                }
-                                KeyCode::Home => {
-                                    if self.db.cursor_mut().home() {
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    }
-                                }
-                                KeyCode::End => {
-                                    if self.db.cursor_mut().end() {
-                                        self.update_columns = ColumnUpdate::Regenerate;
-                                    }
-                                }
-                                _ => return Ok(false),
-                            }
-                        }
-                    }
-                }
-                break;
-            }
-        }
+    pub(crate) fn update_value<S: AsRef<str>>(&mut self, col: usize, row: usize, new_value: S) {
         self.updated = true;
-        Ok(false)
+        self.column_data[col][row] = new_value.as_ref().to_string();
     }
 
-    #[cfg(windows)]
-    /// Returns the first available path amongst the variants of the book, or None if no such
-    /// path exists.
-    ///
-    /// # Arguments
-    ///
-    /// * ` book ` - The book to find a path for.
-    fn get_book_path(book: &Book, index: usize) -> Option<PathBuf> {
-        let mut seen = 0;
-        if let Some(variants) = book.get_variants() {
-            for variant in variants {
-                if let Some(paths) = variant.get_paths() {
-                    if let Some((_, path)) = paths.get(index - seen) {
-                        return Some(path.to_owned());
-                    }
-                    seen += paths.len();
-                }
-            }
-        }
-        None
+    pub(crate) fn get_value(&self, col: usize, row: usize) -> &str {
+        &self.column_data[col][row]
     }
 
-    #[cfg(windows)]
-    /// Opens the book in SumatraPDF on Windows.
-    /// Other operating systems not currently supported
-    ///
-    /// # Arguments
-    ///
-    /// * ` book ` - The book to open.
-    ///
-    /// # Errors
-    /// This function may error if the book's variants do not exist,
-    /// or if the command itself fails.
-    fn open_book(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
-        if let Some(path) = Self::get_book_path(book, index) {
-            Command::new("cmd.exe")
-                .args(&["/C", "start", "sumatrapdf"][..])
-                .arg(path)
-                .spawn()?;
-        }
+    pub(crate) fn selected_item(&self) -> Result<Book, DatabaseError> {
+        self.db.selected_item()
+    }
+
+    pub(crate) fn edit_selected_book_with_column<S: AsRef<str>>(
+        &mut self,
+        column: usize,
+        new_value: S,
+    ) -> Result<(), DatabaseError> {
+        self.db
+            .edit_selected_book(&self.selected_cols[column], new_value)?;
+        self.updated = true;
         Ok(())
     }
 
-    #[cfg(windows)]
-    /// Opens the book and selects it, in File Explorer on Windows.
-    /// Other operating systems not currently supported
-    ///
-    /// # Arguments
-    ///
-    /// * ` book ` - The book to open.
-    ///
-    /// # Errors
-    /// This function may error if the book's variants do not exist,
-    /// or if the command itself fails.
-    fn open_book_in_dir(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
-        // TODO: This doesn't work when run with install due to relative paths.
-        if let Some(path) = Self::get_book_path(book, index) {
-            let open_book_path = PathBuf::from(".\\src\\open_book.py").canonicalize()?;
-            // TODO: Find a way to do this entirely in Rust
-            Command::new("python")
-                .args(&[
-                    open_book_path.display().to_string().as_str(),
-                    path.display().to_string().as_str(),
-                ])
-                .spawn()?;
-        }
+    pub(crate) fn remove_selected_book(&mut self) -> Result<(), DatabaseError> {
+        self.db.remove_selected_book()?;
+        self.updated = true;
+        self.update_columns = ColumnUpdate::Regenerate;
         Ok(())
+    }
+
+    pub(crate) fn selected(&self) -> Option<usize> {
+        self.db.selected()
     }
 
     /// Gets the book that selected by the BookIndex,
@@ -565,7 +93,7 @@ impl<D: SelectableDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` b ` - A BookIndex which either represents an exact ID, or the selected book.
-    fn get_book(&self, b: BookIndex) -> Result<Book, ApplicationError> {
+    pub(crate) fn get_book(&self, b: BookIndex) -> Result<Book, ApplicationError> {
         match b {
             BookIndex::Selected => Ok(self.db.selected_item()?),
             BookIndex::BookID(id) => Ok(self.db.get_book(id)?),
@@ -585,7 +113,7 @@ impl<D: SelectableDatabase> App<D> {
         match command {
             command_parser::Command::DeleteBook(b) => {
                 match b {
-                    BookIndex::Selected => self.db.remove_selected_book()?,
+                    BookIndex::Selected => self.remove_selected_book()?,
                     BookIndex::BookID(id) => self.db.remove_book(id)?,
                 };
                 self.update_columns = ColumnUpdate::Regenerate;
@@ -655,6 +183,407 @@ impl<D: SelectableDatabase> App<D> {
         Ok(true)
     }
 
+    /// Updates the required sorting settings if the column changes.
+    ///
+    /// # Arguments
+    ///
+    /// * ` word ` - The column to sort the table on.
+    /// * ` reverse ` - Whether to reverse the sort.
+    fn update_selected_column(&mut self, word: UniCase<String>, reverse: bool) {
+        let word = UniCase::new(
+            match word.as_str() {
+                "author" => "authors",
+                x => x,
+            }
+            .to_string(),
+        );
+
+        if self.selected_cols.contains(&word) {
+            self.sort_settings.column = word;
+            self.sort_settings.is_sorted = false;
+            self.sort_settings.reverse = reverse;
+            self.update_columns = ColumnUpdate::Regenerate;
+        }
+    }
+
+    /// Updates the table data if a change occurs.
+    pub(crate) fn update_column_data(&mut self) {
+        match &self.update_columns {
+            ColumnUpdate::Regenerate => {
+                self.updated = true;
+                self.column_data = (0..self.selected_cols.len())
+                    .into_iter()
+                    .map(|_| Vec::with_capacity(self.db.cursor().window_size()))
+                    .collect();
+
+                if self.db.cursor().window_size() == 0 {
+                    self.update_columns = ColumnUpdate::NoUpdate;
+                    return;
+                }
+
+                let cols = self
+                    .selected_cols
+                    .iter()
+                    .map(|col| ColumnIdentifier::from(col.as_str()))
+                    .collect::<Vec<_>>();
+
+                for b in self.db.get_books_cursored().unwrap() {
+                    for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
+                        column.push(b.get_column_or(&col, ""));
+                    }
+                }
+            }
+            ColumnUpdate::AddColumn(word) => {
+                self.updated = true;
+                if self.db.has_column(&word) && !self.selected_cols.contains(&word) {
+                    self.selected_cols.push(word.clone());
+                    let column_string = ColumnIdentifier::from(word.as_str());
+                    self.column_data.push(
+                        self.db
+                            .get_books_cursored()
+                            .unwrap()
+                            .iter()
+                            .map(|book| book.get_column_or(&column_string, ""))
+                            .collect(),
+                    );
+                }
+            }
+            ColumnUpdate::RemoveColumn(word) => {
+                self.updated = true;
+                let index = self.selected_cols.iter().position(|x| x.eq(&word));
+                if let Some(index) = index {
+                    self.selected_cols.remove(index);
+                    self.column_data.remove(index);
+                }
+            }
+            ColumnUpdate::NoUpdate => {}
+        }
+
+        self.update_columns = ColumnUpdate::NoUpdate;
+    }
+
+    #[cfg(windows)]
+    /// Returns the first available path amongst the variants of the book, or None if no such
+    /// path exists.
+    ///
+    /// # Arguments
+    ///
+    /// * ` book ` - The book to find a path for.
+    fn get_book_path(book: &Book, index: usize) -> Option<PathBuf> {
+        let mut seen = 0;
+        if let Some(variants) = book.get_variants() {
+            for variant in variants {
+                if let Some(paths) = variant.get_paths() {
+                    if let Some((_, path)) = paths.get(index - seen) {
+                        return Some(path.to_owned());
+                    }
+                    seen += paths.len();
+                }
+            }
+        }
+        None
+    }
+
+    #[cfg(windows)]
+    /// Opens the book in SumatraPDF on Windows.
+    /// Other operating systems not currently supported
+    ///
+    /// # Arguments
+    ///
+    /// * ` book ` - The book to open.
+    ///
+    /// # Errors
+    /// This function may error if the book's variants do not exist,
+    /// or if the command itself fails.
+    fn open_book(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
+        if let Some(path) = Self::get_book_path(book, index) {
+            Command::new("cmd.exe")
+                .args(&["/C", "start", "sumatrapdf"][..])
+                .arg(path)
+                .spawn()?;
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    /// Opens the book and selects it, in File Explorer on Windows.
+    /// Other operating systems not currently supported
+    ///
+    /// # Arguments
+    ///
+    /// * ` book ` - The book to open.
+    ///
+    /// # Errors
+    /// This function may error if the book's variants do not exist,
+    /// or if the command itself fails.
+    fn open_book_in_dir(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
+        // TODO: This doesn't work when run with install due to relative paths.
+        if let Some(path) = App::<D>::get_book_path(book, index) {
+            let open_book_path = PathBuf::from(".\\src\\open_book.py").canonicalize()?;
+            // TODO: Find a way to do this entirely in Rust
+            Command::new("python")
+                .args(&[
+                    open_book_path.display().to_string().as_str(),
+                    path.display().to_string().as_str(),
+                ])
+                .spawn()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn scroll_up(&mut self, scroll: usize) -> bool {
+        if self.db.cursor_mut().scroll_up(scroll) {
+            self.updated = true;
+            self.update_columns = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn scroll_down(&mut self, scroll: usize) -> bool {
+        if self.db.cursor_mut().scroll_down(scroll) {
+            self.updated = true;
+            self.update_columns = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn deselect(&mut self) -> bool {
+        if self.db.cursor_mut().select(None) {
+            self.updated = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn select_down(&mut self) -> bool {
+        if self.db.cursor_mut().select_down() {
+            self.updated = true;
+            self.update_columns = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn select_up(&mut self) -> bool {
+        if self.db.cursor_mut().select_up() {
+            self.updated = true;
+            self.update_columns = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn page_up(&mut self) -> bool {
+        if self.db.cursor_mut().page_up() {
+            self.updated = true;
+            self.update_columns = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn page_down(&mut self) -> bool {
+        if self.db.cursor_mut().page_down() {
+            self.updated = true;
+            self.update_columns = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn end(&mut self) -> bool {
+        if self.db.cursor_mut().end() {
+            self.updated = true;
+            self.update_columns = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn home(&mut self) -> bool {
+        if self.db.cursor_mut().home() {
+            self.updated = true;
+            self.update_columns = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn apply_sort(&mut self) -> Result<(), DatabaseError> {
+        if !self.sort_settings.is_sorted {
+            self.db.sort_books_by_col(
+                self.sort_settings.column.as_str(),
+                self.sort_settings.reverse,
+            )?;
+            self.sort_settings.is_sorted = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn num_cols(&self) -> usize {
+        self.selected_cols.len()
+    }
+
+    pub(crate) fn refresh_window_size(&mut self, size: usize) -> bool {
+        if self.db.cursor().window_size() != size {
+            self.db.cursor_mut().refresh_window_size(size);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn header_col_iter(&self) -> impl Iterator<Item = (&UniCase<String>, &Vec<String>)> {
+        self.selected_cols.iter().zip(self.column_data.iter())
+    }
+}
+
+pub(crate) struct AppInterface<D, B> {
+    app: App<D>,
+    border_widget: BorderWidget,
+    active_view: Box<dyn View<D, B>>,
+}
+
+#[derive(Default)]
+pub(crate) struct UIState {
+    pub(crate) style: InterfaceStyle,
+    pub(crate) nav_settings: NavigationSettings,
+    pub(crate) curr_command: CommandString,
+    pub(crate) selected_column: usize,
+}
+
+#[derive(Debug)]
+pub(crate) enum ApplicationError {
+    IoError(std::io::Error),
+    TerminalError(crossterm::ErrorKind),
+    DatabaseError(DatabaseError),
+    NoBookSelected,
+    Err(()),
+}
+
+impl From<std::io::Error> for ApplicationError {
+    fn from(e: std::io::Error) -> Self {
+        ApplicationError::IoError(e)
+    }
+}
+
+impl From<()> for ApplicationError {
+    fn from(_: ()) -> Self {
+        ApplicationError::Err(())
+    }
+}
+
+impl From<DatabaseError> for ApplicationError {
+    fn from(e: DatabaseError) -> Self {
+        match e {
+            DatabaseError::NoBookSelected => ApplicationError::NoBookSelected,
+            x => ApplicationError::DatabaseError(x),
+        }
+    }
+}
+
+impl From<crossterm::ErrorKind> for ApplicationError {
+    fn from(e: crossterm::ErrorKind) -> Self {
+        ApplicationError::TerminalError(e)
+    }
+}
+
+impl<D: SelectableDatabase, B: Backend> AppInterface<D, B> {
+    /// Returns a new database, instantiated with the provided settings and database.
+    ///
+    /// # Arguments
+    ///
+    /// * ` name ` - The application instance name. Not to confused with the file name.
+    /// * ` settings` - The application settings.
+    /// * ` db ` - The database which contains books to be read.
+    ///
+    /// # Errors
+    /// None.
+    pub(crate) fn new<S: AsRef<str>>(
+        name: S,
+        settings: Settings,
+        mut app: App<D>,
+    ) -> Result<Self, ApplicationError> {
+        let selected_cols: Vec<_> = settings
+            .columns
+            .iter()
+            .map(|s| UniCase::new(s.clone()))
+            .collect();
+
+        let column_data = (0..selected_cols.len())
+            .into_iter()
+            .map(|_| vec![])
+            .collect();
+
+        app.selected_cols = selected_cols;
+        app.column_data = column_data;
+
+        Ok(AppInterface {
+            app,
+            border_widget: BorderWidget::new(name.as_ref().to_string()),
+            active_view: Box::new(ColumnWidget {
+                state: UIState {
+                    style: settings.interface_style,
+                    nav_settings: settings.navigation_settings,
+                    curr_command: CommandString::new(),
+                    selected_column: 0,
+                },
+            }),
+        })
+    }
+
+    // TODO: Make this set an Action so that the handling is external.
+    /// Reads and handles user input. On success, returns a bool
+    /// indicating whether to continue or not.
+    ///
+    /// # Arguments
+    ///
+    /// * ` terminal ` - The current terminal.
+    ///
+    /// # Errors
+    /// This function may error if executing a particular action fails.
+    fn get_input(&mut self) -> Result<bool, ApplicationError> {
+        loop {
+            if poll(Duration::from_millis(500))? {
+                match self.active_view.handle_input(read()?, &mut self.app)? {
+                    ApplicationTask::Quit => return Ok(true),
+                    ApplicationTask::DoNothing => {}
+                    ApplicationTask::Update => self.app.updated = true,
+                    ApplicationTask::SwitchView(view) => {
+                        self.app.updated = true;
+                        let state = self.active_view.get_owned_state();
+                        match view {
+                            AppView::ColumnView => {
+                                self.active_view = Box::new(ColumnWidget { state })
+                            }
+                            AppView::EditView => {
+                                if let Some(x) = self.app.selected() {
+                                    self.active_view = Box::new(EditWidget {
+                                        edit: EditState::new(&self.app.column_data[0][x], x),
+                                        state,
+                                    })
+                                }
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        Ok(false)
+    }
+
     /// Runs the application - including handling user inputs and refreshing the output.
     ///
     /// # Arguments
@@ -663,96 +592,36 @@ impl<D: SelectableDatabase> App<D> {
     ///
     /// # Errors
     /// This function will return an error if running the program fails for any reason.
-    pub(crate) fn run<B: Backend>(
-        mut self,
-        terminal: &mut Terminal<B>,
-    ) -> Result<(), ApplicationError> {
-        self.db
-            .cursor_mut()
-            .refresh_window_size(terminal.size()?.height as usize);
-
+    pub(crate) fn run(&mut self, terminal: &mut Terminal<B>) -> Result<(), ApplicationError> {
         loop {
-            if !self.sort_settings.is_sorted {
-                self.db.sort_books_by_col(
-                    self.sort_settings.column.as_str(),
-                    self.sort_settings.reverse,
-                )?;
-                self.sort_settings.is_sorted = true;
-            }
+            self.app.apply_sort()?;
+            self.app.update_column_data();
 
-            self.update_column_data();
-
-            let size = {
-                let frame_size = terminal.get_frame().size();
-                Some((frame_size.width, frame_size.height))
-            };
-
-            if size != self.terminal_size {
-                self.terminal_size = size;
-                self.updated = true;
-            }
-
-            if self.updated {
+            if self.app.updated {
                 terminal.draw(|f| {
-                    let hchunks = Layout::default()
-                        .margin(1)
-                        .direction(Direction::Horizontal)
-                        .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
-                        .split(f.size());
-
-                    let vchunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([
-                            Constraint::Length(f.size().height - 3),
-                            Constraint::Length(1),
-                        ])
-                        .split(hchunks[0]);
-
-                    let curr_height = vchunks[0].height as usize;
-                    if curr_height != 0 && self.db.cursor().window_size() != curr_height - 1 {
-                        self.db
-                            .cursor_mut()
-                            .refresh_window_size(vchunks[0].height as usize - 1);
-                        self.update_columns = ColumnUpdate::Regenerate;
-
-                        self.update_column_data();
-                        if self.edit.active {
-                            self.column_data[self.selected_column][self.edit.selected] =
-                                self.edit.visible().to_string();
-                        }
-                    }
-
                     self.border_widget.render_into_frame(f, f.size());
 
-                    // self.active_view.render_into_frame(f, vchunks[0]);
-                    if self.edit.active {
-                        EditWidget {
-                            selected_cols: &self.selected_cols,
-                            column_data: &self.column_data,
-                            style: &self.style,
-                            selected_column: self.selected_column,
-                            selected: self.db.selected(),
-                        }
-                        .render_into_frame(f, vchunks[0]);
-                    } else {
-                        ColumnWidget {
-                            selected_cols: &self.selected_cols,
-                            column_data: &self.column_data,
-                            style: &self.style,
-                            selected: self.db.selected(),
-                        }
-                        .render_into_frame(f, vchunks[0]);
-                    }
+                    let chunk = {
+                        let s = f.size();
+                        Rect::new(
+                            s.x + 1,
+                            s.y + 1,
+                            s.width.saturating_sub(2),
+                            s.height.saturating_sub(2),
+                        )
+                    };
 
-                    CommandWidget::new(&self.curr_command).render_into_frame(f, vchunks[1]);
-                    if let Ok(b) = self.db.selected_item() {
-                        BookWidget::new(&b).render_into_frame(f, hchunks[1]);
-                    }
+                    self.active_view.render_into_frame(&mut self.app, f, chunk);
                 })?;
-                self.updated = false;
+
+                self.app.updated = false;
             }
-            if self.get_input()? {
-                return Ok(terminal.clear()?);
+
+            match self.get_input() {
+                Ok(true) => return Ok(terminal.clear()?),
+                _ => {
+                    // TODO: Handle errors here.
+                }
             }
         }
     }

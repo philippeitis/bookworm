@@ -73,7 +73,7 @@ impl Default for SortSettings {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub(crate) struct NavigationSettings {
     pub scroll: usize,
     pub inverted: bool,
