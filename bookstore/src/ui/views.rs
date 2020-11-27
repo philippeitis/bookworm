@@ -26,6 +26,9 @@ pub(crate) enum ApplicationTask {
     SwitchView(AppView),
 }
 
+// TODO: when https://github.com/crossterm-rs/crossterm/issues/507 is resolved,
+//  use code to allow a Resizable trait for EditWidget and ColumnWidget.
+
 pub(crate) trait ResizableWidget<D, B: Backend> {
     /// Renders the widget into the frame, using the provided space.
     ///
