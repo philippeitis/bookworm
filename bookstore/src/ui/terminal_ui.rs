@@ -28,6 +28,42 @@ pub(crate) enum ColumnUpdate {
     NoUpdate,
 }
 
+#[derive(Debug)]
+pub(crate) enum ApplicationError {
+    IoError(std::io::Error),
+    TerminalError(crossterm::ErrorKind),
+    DatabaseError(DatabaseError),
+    NoBookSelected,
+    Err(()),
+}
+
+impl From<std::io::Error> for ApplicationError {
+    fn from(e: std::io::Error) -> Self {
+        ApplicationError::IoError(e)
+    }
+}
+
+impl From<()> for ApplicationError {
+    fn from(_: ()) -> Self {
+        ApplicationError::Err(())
+    }
+}
+
+impl From<DatabaseError> for ApplicationError {
+    fn from(e: DatabaseError) -> Self {
+        match e {
+            DatabaseError::NoBookSelected => ApplicationError::NoBookSelected,
+            x => ApplicationError::DatabaseError(x),
+        }
+    }
+}
+
+impl From<crossterm::ErrorKind> for ApplicationError {
+    fn from(e: crossterm::ErrorKind) -> Self {
+        ApplicationError::TerminalError(e)
+    }
+}
+
 pub(crate) struct App<D> {
     // Application data
     db: D,
@@ -447,12 +483,10 @@ impl<D: SelectableDatabase> App<D> {
     pub(crate) fn header_col_iter(&self) -> impl Iterator<Item = (&UniCase<String>, &Vec<String>)> {
         self.selected_cols.iter().zip(self.column_data.iter())
     }
-}
 
-pub(crate) struct AppInterface<D, B> {
-    app: App<D>,
-    border_widget: BorderWidget,
-    active_view: Box<dyn View<D, B>>,
+    pub(crate) fn take_update(&mut self) -> bool {
+        std::mem::replace(&mut self.updated, false)
+    }
 }
 
 #[derive(Default)]
@@ -463,40 +497,10 @@ pub(crate) struct UIState {
     pub(crate) selected_column: usize,
 }
 
-#[derive(Debug)]
-pub(crate) enum ApplicationError {
-    IoError(std::io::Error),
-    TerminalError(crossterm::ErrorKind),
-    DatabaseError(DatabaseError),
-    NoBookSelected,
-    Err(()),
-}
-
-impl From<std::io::Error> for ApplicationError {
-    fn from(e: std::io::Error) -> Self {
-        ApplicationError::IoError(e)
-    }
-}
-
-impl From<()> for ApplicationError {
-    fn from(_: ()) -> Self {
-        ApplicationError::Err(())
-    }
-}
-
-impl From<DatabaseError> for ApplicationError {
-    fn from(e: DatabaseError) -> Self {
-        match e {
-            DatabaseError::NoBookSelected => ApplicationError::NoBookSelected,
-            x => ApplicationError::DatabaseError(x),
-        }
-    }
-}
-
-impl From<crossterm::ErrorKind> for ApplicationError {
-    fn from(e: crossterm::ErrorKind) -> Self {
-        ApplicationError::TerminalError(e)
-    }
+pub(crate) struct AppInterface<D, B> {
+    app: App<D>,
+    border_widget: BorderWidget,
+    active_view: Box<dyn View<D, B>>,
 }
 
 impl<D: SelectableDatabase, B: Backend> AppInterface<D, B> {
@@ -543,7 +547,6 @@ impl<D: SelectableDatabase, B: Backend> AppInterface<D, B> {
         })
     }
 
-    // TODO: Make this set an Action so that the handling is external.
     /// Reads and handles user input. On success, returns a bool
     /// indicating whether to continue or not.
     ///
@@ -558,7 +561,6 @@ impl<D: SelectableDatabase, B: Backend> AppInterface<D, B> {
             if poll(Duration::from_millis(500))? {
                 match self.active_view.handle_input(read()?, &mut self.app)? {
                     ApplicationTask::Quit => return Ok(true),
-                    ApplicationTask::DoNothing => {}
                     ApplicationTask::Update => self.app.updated = true,
                     ApplicationTask::SwitchView(view) => {
                         self.app.updated = true;
@@ -577,6 +579,7 @@ impl<D: SelectableDatabase, B: Backend> AppInterface<D, B> {
                             }
                         }
                     }
+                    ApplicationTask::DoNothing => {}
                 }
                 break;
             }
@@ -597,7 +600,7 @@ impl<D: SelectableDatabase, B: Backend> AppInterface<D, B> {
             self.app.apply_sort()?;
             self.app.update_column_data();
 
-            if self.app.updated {
+            if self.app.take_update() {
                 terminal.draw(|f| {
                     self.border_widget.render_into_frame(f, f.size());
 
@@ -613,8 +616,6 @@ impl<D: SelectableDatabase, B: Backend> AppInterface<D, B> {
 
                     self.active_view.render_into_frame(&mut self.app, f, chunk);
                 })?;
-
-                self.app.updated = false;
             }
 
             match self.get_input() {

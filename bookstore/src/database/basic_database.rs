@@ -67,6 +67,22 @@ impl BookMap {
             self.max_id = id;
         }
     }
+
+    /// Return a monotonically increasing ID to use for a new
+    /// book.
+    ///
+    /// # Errors
+    /// Will panic if the ID can no longer be correctly increased.
+    fn borrow_id(&mut self) -> u32 {
+        let id = self.max_id;
+        if self.max_id == u32::MAX {
+            panic!(format!(
+                "Current ID is at maximum value of {} and can not be increased.",
+                u32::MAX
+            ));
+        }
+        id + 1
+    }
 }
 
 /// A database which fully implements the functionality of the AppDatabase trait,
@@ -303,7 +319,7 @@ impl AppDatabase for BasicDatabase {
             (id, db.books.len())
         })?;
 
-        self.cursor.refresh_height(len);
+        self.push_cursor_back(len);
         Ok(id)
     }
 
@@ -346,7 +362,7 @@ impl AppDatabase for BasicDatabase {
             db.books.len()
         })?;
 
-        self.cursor.refresh_height(len);
+        self.push_cursor_back(len);
         Ok((ids, errs))
     }
 
@@ -365,7 +381,7 @@ impl AppDatabase for BasicDatabase {
             db.books.retain(|id, _| !ids.contains(id));
             db.books.len()
         })?;
-        self.cursor.refresh_height(len);
+        self.push_cursor_back(len);
         Ok(())
     }
 
@@ -375,7 +391,7 @@ impl AppDatabase for BasicDatabase {
             db.books.len()
         })?;
 
-        self.cursor.refresh_height(len);
+        self.push_cursor_back(len);
         Ok(())
     }
 
@@ -425,11 +441,12 @@ impl AppDatabase for BasicDatabase {
         let len = self.backend.write(|db| {
             let mut ref_map: HashMap<(String, String), u32> = HashMap::new();
             let mut merges = vec![];
+            let dummy_id = db.borrow_id();
             for book in db.books.values() {
                 if let Some(title) = book.get_title() {
                     if let Some(authors) = book.get_authors() {
-                        let a: String = authors.join(", ");
-                        let val = (title.to_string(), a);
+                        let a: String = authors.join(", ").to_ascii_lowercase();
+                        let val = (title.to_ascii_lowercase(), a);
                         if let Some(id) = ref_map.get(&val) {
                             merges.push((*id, book.get_id()));
                         } else {
@@ -440,18 +457,21 @@ impl AppDatabase for BasicDatabase {
             }
 
             for (b1, b2_id) in merges.iter() {
-                let b2 = db.books.shift_remove(b2_id);
+                // Dummy allows for O(n) time book removal while maintaining sort
+                // and getting owned copy of book.
+                let dummy = Book::with_id(dummy_id);
+                let b2 = db.books.insert(*b2_id, dummy);
                 if let Some(b1) = db.books.get_mut(b1) {
                     if let Some(b2) = b2 {
                         b1.merge_mut(b2);
                     }
                 }
             }
-
+            db.books.retain(|_, book| book.get_id() != dummy_id);
             db.books.len()
         })?;
 
-        self.cursor.refresh_height(len);
+        self.push_cursor_back(len);
 
         Ok(())
     }
@@ -460,6 +480,8 @@ impl AppDatabase for BasicDatabase {
         Ok(self.backend.write(|db| {
             let col = ColumnIdentifier::from(col);
 
+            // Use some heuristic to sort in parallel when it would offer speedup -
+            // parallel threads are slower for small sorts.
             if db.books.len() < 2500 {
                 if reverse {
                     db.books.sort_by(|_, a, _, b| b.cmp_column(a, &col))

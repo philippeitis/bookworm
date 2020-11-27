@@ -95,7 +95,7 @@ impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
             let mut added_section = false;
             for variant in variants {
                 if let Some(paths) = variant.get_paths() {
-                    if !added_section {
+                    if !added_section && !paths.is_empty() {
                         added_section = true;
                         data.extend(Text::raw("\nVariant paths:"));
                     }

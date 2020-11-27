@@ -304,7 +304,6 @@ impl BookVariant {
 }
 
 impl Book {
-    #[cfg(test)]
     pub(crate) fn with_id(id: u32) -> Book {
         Book {
             title: None,

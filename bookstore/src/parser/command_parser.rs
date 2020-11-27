@@ -152,11 +152,9 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             for flag in flags {
                 match flag {
                     Flag::Flag(c) => {
-                        if c == "d" {
-                            if path_exists {
-                                return Command::AddBooksFromDir(path);
-                            }
-                            d = true;
+                        d |= c == "d";
+                        if d && path_exists {
+                            return Command::AddBooksFromDir(path);
                         }
                     }
                     Flag::FlagWithArgument(c, args) => {
@@ -183,7 +181,7 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                     Command::AddBookFromFile(path)
                 };
             }
-            return Command::InvalidCommand;
+            Command::InvalidCommand
         }
         "!d" => {
             return if let Some(flag) = flags.first() {
@@ -272,9 +270,11 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                     }
                 };
             }
-            if col_exists {
-                return Command::SortColumn(col, d);
-            }
+            return if col_exists {
+                Command::SortColumn(col, d)
+            } else {
+                Command::InvalidCommand
+            };
         }
         "!c" => {
             return match flags.first() {
@@ -329,11 +329,11 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                 if let Ok(loc) = u32::from_str(loc.as_str()) {
                     if index_exists {
                         if let Ok(index) = usize::from_str(index.as_str()) {
-                            if f {
-                                return Command::OpenBookInExplorer(BookIndex::BookID(loc), index);
+                            return if f {
+                                Command::OpenBookInExplorer(BookIndex::BookID(loc), index)
                             } else {
-                                return Command::OpenBookInApp(BookIndex::BookID(loc), index);
-                            }
+                                Command::OpenBookInApp(BookIndex::BookID(loc), index)
+                            };
                         }
                     } else if f {
                         return Command::OpenBookInExplorer(BookIndex::BookID(loc), 0);
