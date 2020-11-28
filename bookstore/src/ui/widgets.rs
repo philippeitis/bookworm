@@ -5,8 +5,8 @@ use tui::text::Text;
 use tui::widgets::{Block, Borders, Paragraph};
 use tui::Frame;
 
+use crate::app::user_input::CommandString;
 use crate::record::Book;
-use crate::ui::user_input::CommandString;
 
 pub(crate) trait Widget<B: Backend> {
     /// Renders the widget into the frame, using the provided space.

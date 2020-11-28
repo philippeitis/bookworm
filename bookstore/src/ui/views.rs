@@ -1,18 +1,20 @@
 use std::iter::FromIterator;
 
+use crossterm::event::{Event, KeyCode, MouseEvent};
+
 use tui::backend::Backend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::Span;
 use tui::widgets::{Block, List, ListItem, ListState};
 use tui::Frame;
 
+use crate::app::app::ColumnUpdate;
+use crate::app::parse_args;
+use crate::app::user_input::EditState;
+use crate::app::{App, ApplicationError};
 use crate::database::SelectableDatabase;
-use crate::parser::parse_args;
-use crate::ui::terminal_ui::{App, ColumnUpdate, UIState};
-use crate::ui::user_input::EditState;
+use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{BookWidget, CommandWidget, Widget};
-use crate::ui::ApplicationError;
-use crossterm::event::{Event, KeyCode, MouseEvent};
 
 pub(crate) enum AppView {
     ColumnView,
@@ -109,7 +111,7 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
         let curr_height = vchunks[0].height as usize;
 
         if curr_height != 0 && app.refresh_window_size(curr_height - 1) {
-            app.update_columns = ColumnUpdate::Regenerate;
+            app.set_column_update(ColumnUpdate::Regenerate);
             app.update_column_data();
         }
 
@@ -262,7 +264,7 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
 
         let curr_height = vchunks[0].height as usize;
         if curr_height != 0 && app.refresh_window_size(curr_height - 1) {
-            app.update_columns = ColumnUpdate::Regenerate;
+            app.set_column_update(ColumnUpdate::Regenerate);
 
             app.update_column_data();
             app.update_value(

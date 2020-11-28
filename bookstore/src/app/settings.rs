@@ -222,7 +222,7 @@ impl From<TomlSort> for SortSettings {
     fn from(t: TomlSort) -> Self {
         SortSettings {
             is_sorted: t.column.is_none(),
-            column: UniCase::new(t.column.unwrap_or_else(|| "".to_string())),
+            column: UniCase::new(t.column.unwrap_or_default()),
             reverse: t.reverse.unwrap_or(false),
         }
     }

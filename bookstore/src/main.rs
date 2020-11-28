@@ -1,5 +1,5 @@
+mod app;
 mod database;
-mod parser;
 mod record;
 mod ui;
 
@@ -11,9 +11,10 @@ use crossterm::{event::DisableMouseCapture, event::EnableMouseCapture, execute};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
+use crate::app::parse_args;
+use crate::app::{App, ApplicationError, Settings};
 use crate::database::{AppDatabase, BasicDatabase};
-use crate::parser::parse_args;
-use crate::ui::{App, AppInterface, ApplicationError, Settings};
+use crate::ui::AppInterface;
 
 fn main() -> Result<(), ApplicationError> {
     #[cfg(feature = "cloud")]
@@ -48,8 +49,8 @@ fn main() -> Result<(), ApplicationError> {
     };
 
     let settings = if let Some(i) = args.iter().position(|s| "--settings".eq(s)) {
-        if let Some(db) = args.get(i + 1) {
-            Settings::open(db)
+        if let Some(settings_file) = args.get(i + 1) {
+            Settings::open(settings_file)
         } else {
             Settings::open("settings.toml")
         }
@@ -59,7 +60,6 @@ fn main() -> Result<(), ApplicationError> {
     .unwrap_or_default();
 
     let mut app = App::new(db);
-    // let mut app = App::new("Really Cool Library", settings, db)?;
 
     if !command.is_empty() {
         let command = parse_args(&command);

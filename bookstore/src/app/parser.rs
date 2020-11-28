@@ -36,6 +36,7 @@ pub enum Command {
     Quit,
     Write,
     WriteAndQuit,
+    FindMatches(String, String),
 }
 
 impl Command {
@@ -57,6 +58,7 @@ impl Command {
             Command::WriteAndQuit => true,
             Command::DeleteAll => false,
             Command::TryMergeAllBooks => false,
+            Command::FindMatches(_, _) => true,
         }
     }
 }
@@ -279,6 +281,15 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
         "!c" => {
             return match flags.first() {
                 Some(Flag::PositionalArg(args)) => Command::AddColumn(args[0].clone()),
+                Some(Flag::Flag(arg)) => Command::RemoveColumn(arg.clone()),
+                _ => Command::InvalidCommand,
+            };
+        }
+        "!f" => {
+            return match flags.first() {
+                Some(Flag::PositionalArg(args)) => {
+                    Command::FindMatches(args[0].clone(), args[1].clone())
+                }
                 Some(Flag::Flag(arg)) => Command::RemoveColumn(arg.clone()),
                 _ => Command::InvalidCommand,
             };

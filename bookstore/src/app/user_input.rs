@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use itertools::Itertools;
 
-use crate::ui::AutoCompleter;
+use crate::app::AutoCompleter;
 
 pub(crate) struct EditState {
     pub selected: usize,
