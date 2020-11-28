@@ -70,7 +70,7 @@ fn cut_word_to_fit(word: &str, max_len: usize) -> ListItem {
 fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
     let col_width = chunk.width / num_cols;
 
-    let mut widths = vec![col_width; num_cols as usize];
+    let mut widths = vec![col_width; usize::from(num_cols)];
     let total_w: u16 = widths.iter().sum();
     if total_w != chunk.width {
         widths[0] += chunk.width - total_w;
@@ -108,7 +108,7 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        let curr_height = vchunks[0].height as usize;
+        let curr_height = usize::from(vchunks[0].height);
 
         if curr_height != 0 && app.refresh_window_size(curr_height - 1) {
             app.set_column_update(ColumnUpdate::Regenerate);
@@ -122,7 +122,7 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
         for ((title, data), &chunk) in app.header_col_iter().zip(hchunks.iter()) {
             let list = List::new(
                 data.iter()
-                    .map(|word| cut_word_to_fit(word, chunk.width as usize - 3))
+                    .map(|word| cut_word_to_fit(word, usize::from(chunk.width).saturating_sub(3)))
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))
@@ -262,7 +262,7 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        let curr_height = vchunks[0].height as usize;
+        let curr_height = usize::from(vchunks[0].height);
         if curr_height != 0 && app.refresh_window_size(curr_height - 1) {
             app.set_column_update(ColumnUpdate::Regenerate);
 
@@ -282,7 +282,7 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
         for (i, ((title, data), &chunk)) in app.header_col_iter().zip(hchunks.iter()).enumerate() {
             let list = List::new(
                 data.iter()
-                    .map(|word| cut_word_to_fit(word, chunk.width as usize - 3))
+                    .map(|word| cut_word_to_fit(word, usize::from(chunk.width).saturating_sub(3)))
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))

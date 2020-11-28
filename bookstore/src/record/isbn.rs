@@ -24,19 +24,19 @@ impl ISBN {
                 let mut num = 0;
                 for &digit in digits {
                     num <<= 5;
-                    num |= digit as u64;
+                    num |= u64::from(digit);
                 }
                 num |= 10 << 60;
                 num
             }
             ISBN::ISBN13(digits) => {
-                let mut num = digits[0] as u64;
+                let mut num = u64::from(digits[0]);
                 for i in 0..6 {
                     num <<= 7;
                     let high_digit = digits[1 + i * 2];
                     let low_digit = digits[2 + i * 2];
                     let dual_digit = high_digit * 10 + low_digit;
-                    num |= dual_digit as u64;
+                    num |= u64::from(dual_digit);
                 }
                 num |= 13 << 60;
                 num
@@ -99,11 +99,11 @@ impl ISBN {
     pub(crate) fn check(&self) -> bool {
         match self {
             ISBN::ISBN13(digits) => {
-                let mut sum = 0u16;
+                let mut sum = 0;
                 for i in 0..6 {
-                    sum += (digits[i] + 3 * digits[i * 2 + 1]) as u16;
+                    sum += u16::from(digits[i] + 3 * digits[i * 2 + 1]);
                 }
-                sum += digits[12] as u16;
+                sum += u16::from(digits[12]);
                 (sum % 10) == 0
             }
             ISBN::ISBN10(digits) => {
@@ -111,7 +111,7 @@ impl ISBN {
                 let mut t = 0;
 
                 for &digit in digits {
-                    t += digit as u16;
+                    t += u16::from(digit);
                     s += t;
                 }
                 (s % 11) == 0

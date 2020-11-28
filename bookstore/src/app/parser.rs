@@ -286,6 +286,10 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             };
         }
         "!f" => {
+            // TODO:
+            //  -r for regex
+            //  -c for case sensitive
+            //  ignore quotes.
             return match flags.first() {
                 Some(Flag::PositionalArg(args)) => {
                     Command::FindMatches(args[0].clone(), args[1].clone())
