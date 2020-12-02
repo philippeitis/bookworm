@@ -9,7 +9,7 @@ use tui::Terminal;
 use crate::app::settings::{InterfaceStyle, NavigationSettings, Settings};
 use crate::app::user_input::{CommandString, EditState};
 use crate::app::{App, ApplicationError};
-use crate::database::SelectableDatabase;
+use crate::database::{AppDatabase, IndexableDatabase};
 use crate::ui::views::{AppView, ApplicationTask, ColumnWidget, EditWidget, View};
 use crate::ui::widgets::{BorderWidget, Widget};
 
@@ -21,13 +21,13 @@ pub(crate) struct UIState {
     pub(crate) selected_column: usize,
 }
 
-pub(crate) struct AppInterface<D, B> {
+pub(crate) struct AppInterface<D: AppDatabase, B> {
     app: App<D>,
     border_widget: BorderWidget,
     active_view: Box<dyn View<D, B>>,
 }
 
-impl<D: SelectableDatabase, B: Backend> AppInterface<D, B> {
+impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
     /// Returns a new database, instantiated with the provided settings and database.
     ///
     /// # Arguments

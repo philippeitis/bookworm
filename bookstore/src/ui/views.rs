@@ -12,7 +12,7 @@ use crate::app::app::ColumnUpdate;
 use crate::app::parse_args;
 use crate::app::user_input::EditState;
 use crate::app::{App, ApplicationError};
-use crate::database::SelectableDatabase;
+use crate::database::{AppDatabase, IndexableDatabase};
 use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{BookWidget, CommandWidget, Widget};
 
@@ -31,7 +31,7 @@ pub(crate) enum ApplicationTask {
 // TODO: when https://github.com/crossterm-rs/crossterm/issues/507 is resolved,
 //  use code to allow a Resizable trait for EditWidget and ColumnWidget.
 
-pub(crate) trait ResizableWidget<D, B: Backend> {
+pub(crate) trait ResizableWidget<D: AppDatabase, B: Backend> {
     /// Renders the widget into the frame, using the provided space.
     ///
     /// # Arguments
@@ -41,7 +41,7 @@ pub(crate) trait ResizableWidget<D, B: Backend> {
     fn render_into_frame(&self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect);
 }
 
-pub(crate) trait View<D, B: Backend>: ResizableWidget<D, B> {
+pub(crate) trait View<D: AppDatabase, B: Backend>: ResizableWidget<D, B> {
     /// Renders the widget into the frame, using the provided space.
     ///
     /// # Arguments
@@ -90,7 +90,7 @@ pub(crate) struct ColumnWidget {
     pub(crate) state: UIState,
 }
 
-impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
+impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
     fn render_into_frame(&self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
         let chunk = if let Ok(b) = app.selected_item() {
             let hchunks = Layout::default()
@@ -127,7 +127,6 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
             )
             .block(Block::default().title(Span::from(title.to_string())))
             .highlight_style(select_style);
-
             let mut selected_row = ListState::default();
             selected_row.select(app.selected());
             f.render_stateful_widget(list, chunk, &mut selected_row);
@@ -137,7 +136,7 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
     }
 }
 
-impl<'a, D: SelectableDatabase, B: Backend> View<D, B> for ColumnWidget {
+impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
     fn handle_input(
         &mut self,
         event: Event,
@@ -186,7 +185,9 @@ impl<'a, D: SelectableDatabase, B: Backend> View<D, B> for ColumnWidget {
                             .into_iter()
                             .map(|(_, a)| a)
                             .collect();
+
                         self.state.curr_command.clear();
+
                         if !app.run_command(parse_args(&args))? {
                             return Ok(ApplicationTask::Quit);
                         }
@@ -255,7 +256,7 @@ pub(crate) struct EditWidget {
     pub(crate) state: UIState,
 }
 
-impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
+impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
     fn render_into_frame(&self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
@@ -300,7 +301,7 @@ impl<D: SelectableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
     }
 }
 
-impl<D: SelectableDatabase, B: Backend> View<D, B> for EditWidget {
+impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
     fn handle_input(
         &mut self,
         event: Event,

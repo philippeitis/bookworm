@@ -5,7 +5,10 @@ use unicase::UniCase;
 
 use crate::app::settings::SortSettings;
 use crate::app::{parser, BookIndex, Command};
-use crate::database::{DatabaseError, SelectableDatabase};
+use crate::database::bookview::BookViewError;
+use crate::database::{
+    AppDatabase, BasicBookView, BookView, DatabaseError, IndexableDatabase, ScrollableBookView,
+};
 use crate::record::book::ColumnIdentifier;
 use crate::record::Book;
 
@@ -22,6 +25,7 @@ pub(crate) enum ApplicationError {
     IoError(std::io::Error),
     TerminalError(crossterm::ErrorKind),
     DatabaseError(DatabaseError),
+    BookViewError(BookViewError),
     NoBookSelected,
     Err(()),
 }
@@ -40,9 +44,15 @@ impl From<()> for ApplicationError {
 
 impl From<DatabaseError> for ApplicationError {
     fn from(e: DatabaseError) -> Self {
+        ApplicationError::DatabaseError(e)
+    }
+}
+
+impl From<BookViewError> for ApplicationError {
+    fn from(e: BookViewError) -> Self {
         match e {
-            DatabaseError::NoBookSelected => ApplicationError::NoBookSelected,
-            x => ApplicationError::DatabaseError(x),
+            BookViewError::NoBookSelected => ApplicationError::NoBookSelected,
+            x => ApplicationError::BookViewError(x),
         }
     }
 }
@@ -53,9 +63,9 @@ impl From<crossterm::ErrorKind> for ApplicationError {
     }
 }
 
-pub(crate) struct App<D> {
+pub(crate) struct App<D: AppDatabase> {
     // Application data
-    db: D,
+    db: BasicBookView<D>,
     selected_cols: Vec<UniCase<String>>,
     column_data: Vec<Vec<String>>,
 
@@ -65,10 +75,10 @@ pub(crate) struct App<D> {
     updated: bool,
 }
 
-impl<D: SelectableDatabase> App<D> {
+impl<D: IndexableDatabase> App<D> {
     pub(crate) fn new(db: D) -> Self {
         App {
-            db,
+            db: BasicBookView::new(db),
             selected_cols: vec![],
             sort_settings: SortSettings::default(),
             updated: true,
@@ -86,22 +96,22 @@ impl<D: SelectableDatabase> App<D> {
         &self.column_data[col][row]
     }
 
-    pub(crate) fn selected_item(&self) -> Result<Book, DatabaseError> {
-        self.db.selected_item()
+    pub(crate) fn selected_item(&self) -> Result<Book, ApplicationError> {
+        Ok(self.db.get_selected_book()?)
     }
 
     pub(crate) fn edit_selected_book_with_column<S: AsRef<str>>(
         &mut self,
         column: usize,
         new_value: S,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), ApplicationError> {
         self.db
             .edit_selected_book(&self.selected_cols[column], new_value)?;
         self.updated = true;
         Ok(())
     }
 
-    pub(crate) fn remove_selected_book(&mut self) -> Result<(), DatabaseError> {
+    pub(crate) fn remove_selected_book(&mut self) -> Result<(), ApplicationError> {
         self.db.remove_selected_book()?;
         self.updated = true;
         self.column_update = ColumnUpdate::Regenerate;
@@ -120,7 +130,7 @@ impl<D: SelectableDatabase> App<D> {
     /// * ` b ` - A BookIndex which either represents an exact ID, or the selected book.
     pub(crate) fn get_book(&self, b: BookIndex) -> Result<Book, ApplicationError> {
         match b {
-            BookIndex::Selected => Ok(self.db.selected_item()?),
+            BookIndex::Selected => Ok(self.db.get_selected_book()?),
             BookIndex::BookID(id) => Ok(self.db.get_book(id)?),
         }
     }
@@ -138,31 +148,33 @@ impl<D: SelectableDatabase> App<D> {
         match command {
             Command::DeleteBook(b) => {
                 match b {
-                    BookIndex::Selected => self.remove_selected_book()?,
+                    BookIndex::Selected => self.db.remove_selected_book()?,
                     BookIndex::BookID(id) => self.db.remove_book(id)?,
                 };
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::DeleteAll => {
-                self.db.clear()?;
+                self.db.write(|db| db.clear())?;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::EditBook(b, field, new_value) => {
                 match b {
                     BookIndex::Selected => self.db.edit_selected_book(field, new_value)?,
-                    BookIndex::BookID(id) => self.db.edit_book_with_id(id, field, new_value)?,
+                    BookIndex::BookID(id) => self
+                        .db
+                        .write(|db| db.edit_book_with_id(id, &field, &new_value))?,
                 };
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::AddBookFromFile(f) => {
-                self.db.read_book_from_file(f)?;
+                self.db.write(|db| db.read_book_from_file(&f))?;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::AddBooksFromDir(dir) => {
                 // TODO: Handle failed reads.
-                self.db.read_books_from_dir(dir)?;
+                self.db.write(|db| db.read_books_from_dir(&dir))?;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
@@ -188,17 +200,18 @@ impl<D: SelectableDatabase> App<D> {
                 }
             }
             Command::Write => {
-                self.db.save()?;
+                self.db.inner().save()?;
             }
             Command::Quit => {
                 return Ok(false);
             }
             Command::WriteAndQuit => {
-                self.db.save()?;
+                self.db.inner().save()?;
                 return Ok(false);
             }
             Command::TryMergeAllBooks => {
-                self.db.merge_similar()?;
+                self.db.write(|db| db.merge_similar())?;
+                self.updated = true;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             _ => {
@@ -238,10 +251,10 @@ impl<D: SelectableDatabase> App<D> {
                 self.updated = true;
                 self.column_data = (0..self.selected_cols.len())
                     .into_iter()
-                    .map(|_| Vec::with_capacity(self.db.cursor().window_size()))
+                    .map(|_| Vec::with_capacity(self.db.window_size()))
                     .collect();
 
-                if self.db.cursor().window_size() == 0 {
+                if self.db.window_size() == 0 {
                     self.column_update = ColumnUpdate::NoUpdate;
                     return;
                 }
@@ -252,7 +265,7 @@ impl<D: SelectableDatabase> App<D> {
                     .map(|col| ColumnIdentifier::from(col.as_str()))
                     .collect::<Vec<_>>();
 
-                for b in self.db.get_books_cursored().unwrap() {
+                for b in self.db.get_books_cursored() {
                     for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
                         column.push(b.get_column_or(&col, ""));
                     }
@@ -260,13 +273,12 @@ impl<D: SelectableDatabase> App<D> {
             }
             ColumnUpdate::AddColumn(word) => {
                 self.updated = true;
-                if self.db.has_column(&word) && !self.selected_cols.contains(&word) {
+                if self.db.inner().has_column(&word) && !self.selected_cols.contains(&word) {
                     self.selected_cols.push(word.clone());
                     let column_string = ColumnIdentifier::from(word.as_str());
                     self.column_data.push(
                         self.db
                             .get_books_cursored()
-                            .unwrap()
                             .iter()
                             .map(|book| book.get_column_or(&column_string, ""))
                             .collect(),
@@ -337,6 +349,7 @@ impl<D: SelectableDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` book ` - The book to open.
+    /// * ` index ` - The index of the path to open.
     ///
     /// # Errors
     /// This function may error if the book's variants do not exist,
@@ -357,7 +370,7 @@ impl<D: SelectableDatabase> App<D> {
     }
 
     pub(crate) fn scroll_up(&mut self, scroll: usize) -> bool {
-        if self.db.cursor_mut().scroll_up(scroll) {
+        if self.db.scroll_up(scroll) {
             self.updated = true;
             self.column_update = ColumnUpdate::Regenerate;
             true
@@ -367,7 +380,7 @@ impl<D: SelectableDatabase> App<D> {
     }
 
     pub(crate) fn scroll_down(&mut self, scroll: usize) -> bool {
-        if self.db.cursor_mut().scroll_down(scroll) {
+        if self.db.scroll_down(scroll) {
             self.updated = true;
             self.column_update = ColumnUpdate::Regenerate;
             true
@@ -377,7 +390,7 @@ impl<D: SelectableDatabase> App<D> {
     }
 
     pub(crate) fn deselect(&mut self) -> bool {
-        if self.db.cursor_mut().select(None) {
+        if self.db.deselect() {
             self.updated = true;
             true
         } else {
@@ -385,8 +398,8 @@ impl<D: SelectableDatabase> App<D> {
         }
     }
 
-    pub(crate) fn select_down(&mut self) -> bool {
-        if self.db.cursor_mut().select_down() {
+    pub(crate) fn select_up(&mut self) -> bool {
+        if self.db.select_up() {
             self.updated = true;
             self.column_update = ColumnUpdate::Regenerate;
             true
@@ -395,8 +408,8 @@ impl<D: SelectableDatabase> App<D> {
         }
     }
 
-    pub(crate) fn select_up(&mut self) -> bool {
-        if self.db.cursor_mut().select_up() {
+    pub(crate) fn select_down(&mut self) -> bool {
+        if self.db.select_down() {
             self.updated = true;
             self.column_update = ColumnUpdate::Regenerate;
             true
@@ -406,7 +419,7 @@ impl<D: SelectableDatabase> App<D> {
     }
 
     pub(crate) fn page_up(&mut self) -> bool {
-        if self.db.cursor_mut().page_up() {
+        if self.db.page_up() {
             self.updated = true;
             self.column_update = ColumnUpdate::Regenerate;
             true
@@ -416,17 +429,7 @@ impl<D: SelectableDatabase> App<D> {
     }
 
     pub(crate) fn page_down(&mut self) -> bool {
-        if self.db.cursor_mut().page_down() {
-            self.updated = true;
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
-    }
-
-    pub(crate) fn end(&mut self) -> bool {
-        if self.db.cursor_mut().end() {
+        if self.db.page_down() {
             self.updated = true;
             self.column_update = ColumnUpdate::Regenerate;
             true
@@ -436,7 +439,17 @@ impl<D: SelectableDatabase> App<D> {
     }
 
     pub(crate) fn home(&mut self) -> bool {
-        if self.db.cursor_mut().home() {
+        if self.db.home() {
+            self.updated = true;
+            self.column_update = ColumnUpdate::Regenerate;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn end(&mut self) -> bool {
+        if self.db.end() {
             self.updated = true;
             self.column_update = ColumnUpdate::Regenerate;
             true
@@ -447,7 +460,7 @@ impl<D: SelectableDatabase> App<D> {
 
     pub(crate) fn apply_sort(&mut self) -> Result<(), DatabaseError> {
         if !self.sort_settings.is_sorted {
-            self.db.sort_books_by_col(
+            self.db.sort_by_column(
                 self.sort_settings.column.as_str(),
                 self.sort_settings.reverse,
             )?;
@@ -461,8 +474,8 @@ impl<D: SelectableDatabase> App<D> {
     }
 
     pub(crate) fn refresh_window_size(&mut self, size: usize) -> bool {
-        if self.db.cursor().window_size() != size {
-            self.db.cursor_mut().refresh_window_size(size);
+        if self.db.window_size() != size {
+            self.db.refresh_window_size(size);
             true
         } else {
             false
