@@ -4,6 +4,7 @@ use std::{fs, path};
 
 use indexmap::IndexMap;
 use rayon::prelude::*;
+use regex::{Error as RegexError, Regex};
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
@@ -11,9 +12,17 @@ use unicase::UniCase;
 use crate::record::book::ColumnIdentifier;
 use crate::record::{Book, BookError};
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum Matching {
+    Regex,
+    CaseSensitive,
+    Default,
+}
+
 #[derive(Debug)]
 pub(crate) enum DatabaseError {
     Io(std::io::Error),
+    RegexError(RegexError),
     Book(BookError),
     Backend(RustbreakError),
     BookNotFound(u32),
@@ -35,6 +44,12 @@ impl From<RustbreakError> for DatabaseError {
 impl From<BookError> for DatabaseError {
     fn from(e: BookError) -> Self {
         DatabaseError::Book(e)
+    }
+}
+
+impl From<RegexError> for DatabaseError {
+    fn from(e: RegexError) -> Self {
+        DatabaseError::RegexError(e)
     }
 }
 
@@ -238,6 +253,13 @@ pub(crate) trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails.
     fn merge_similar(&mut self) -> Result<(), DatabaseError>;
+
+    fn find_matches<S: AsRef<str>, T: AsRef<str>>(
+        &self,
+        matching: Matching,
+        column: S,
+        search: T,
+    ) -> Result<Vec<Book>, DatabaseError>;
 
     fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError>;
 
@@ -449,6 +471,48 @@ impl AppDatabase for BasicDatabase {
         })?;
 
         Ok(())
+    }
+
+    fn find_matches<S: AsRef<str>, T: AsRef<str>>(
+        &self,
+        matching: Matching,
+        column: S,
+        search: T,
+    ) -> Result<Vec<Book>, DatabaseError> {
+        let col = ColumnIdentifier::from(column);
+
+        Ok(self
+            .backend
+            .read(|db| -> Result<Vec<Book>, DatabaseError> {
+                let mut results = vec![];
+                match matching {
+                    Matching::Default => {
+                        let insensitive = search.as_ref().to_ascii_lowercase();
+                        for (_, book) in db.books.iter() {
+                            if insensitive.contains(&book.get_column_or(&col, "")) {
+                                results.push(book.clone());
+                            }
+                        }
+                    }
+                    Matching::CaseSensitive => {
+                        let sensitive = search.as_ref().to_string();
+                        for (_, book) in db.books.iter() {
+                            if sensitive.contains(&book.get_column_or(&col, "")) {
+                                results.push(book.clone());
+                            }
+                        }
+                    }
+                    Matching::Regex => {
+                        let matcher = Regex::new(&search.as_ref())?;
+                        for (_, book) in db.books.iter() {
+                            if matcher.is_match(&book.get_column_or(&col, "")) {
+                                results.push(book.clone());
+                            }
+                        }
+                    }
+                }
+                Ok(results)
+            })??)
     }
 
     fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError> {

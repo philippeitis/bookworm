@@ -3,6 +3,8 @@ use std::str::FromStr;
 
 extern crate shellwords;
 
+use crate::database::Matching;
+
 #[derive(Debug)]
 pub enum Flag {
     Flag(String),
@@ -36,7 +38,7 @@ pub enum Command {
     Quit,
     Write,
     WriteAndQuit,
-    FindMatches(String, String),
+    FindMatches(Matching, String, String),
 }
 
 impl Command {
@@ -58,7 +60,7 @@ impl Command {
             Command::WriteAndQuit => true,
             Command::DeleteAll => false,
             Command::TryMergeAllBooks => false,
-            Command::FindMatches(_, _) => true,
+            Command::FindMatches(_, _, _) => true,
         }
     }
 }
@@ -286,15 +288,19 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             };
         }
         "!f" => {
-            // TODO:
-            //  -r for regex
-            //  -c for case sensitive
-            //  ignore quotes.
             return match flags.first() {
                 Some(Flag::PositionalArg(args)) => {
-                    Command::FindMatches(args[0].clone(), args[1].clone())
+                    Command::FindMatches(Matching::Default, args[0].clone(), args[1].clone())
                 }
-                Some(Flag::Flag(arg)) => Command::RemoveColumn(arg.clone()),
+                Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
+                    "r" => Command::FindMatches(Matching::Regex, args[0].clone(), args[1].clone()),
+                    "c" => Command::FindMatches(
+                        Matching::CaseSensitive,
+                        args[0].clone(),
+                        args[1].clone(),
+                    ),
+                    _ => Command::InvalidCommand,
+                },
                 _ => Command::InvalidCommand,
             };
         }

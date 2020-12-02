@@ -199,6 +199,10 @@ impl<D: IndexableDatabase> App<D> {
                     self.open_book_in_dir(&b, index)?;
                 }
             }
+            Command::FindMatches(_matching, _column, _pattern) => {
+                unimplemented!("Searches not implemented yet.")
+                // self.matches = Some(self.db.find_matches(matching, &column, &pattern)?);
+            }
             Command::Write => {
                 self.db.inner().save()?;
             }
