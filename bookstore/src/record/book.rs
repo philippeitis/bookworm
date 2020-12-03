@@ -13,6 +13,11 @@ use crate::record::epub::{EpubError, EpubMetadata};
 use crate::record::ISBN;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Identifier {
+    ISBN(ISBN),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 /// Enumerates all supported book types.
 pub(crate) enum BookType {
     EPUB,
@@ -95,10 +100,10 @@ impl BookType {
                     book.language = metadata.language;
                 }
 
-                if book.isbn.is_none() {
+                if book.identifier.is_none() {
                     if let Some(isbn) = metadata.isbn {
                         if let Ok(isbn) = ISBN::from_str(&isbn) {
-                            book.isbn = Some(isbn);
+                            book.identifier = Some(Identifier::ISBN(isbn));
                         }
                     }
                 }
@@ -122,10 +127,10 @@ impl BookType {
                     book.language = doc.language();
                 }
 
-                if book.isbn.is_none() {
+                if book.identifier.is_none() {
                     if let Some(isbn) = doc.isbn() {
                         if let Ok(isbn) = ISBN::from_str(&isbn) {
-                            book.isbn = Some(isbn);
+                            book.identifier = Some(Identifier::ISBN(isbn));
                         }
                     }
                 }
@@ -177,7 +182,7 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub(crate) struct BookVariant {
     local_title: Option<String>,
-    isbn: Option<ISBN>,
+    identifier: Option<Identifier>,
     paths: Option<Vec<(BookType, path::PathBuf)>>,
     language: Option<String>,
     additional_authors: Option<Vec<String>>,
@@ -276,7 +281,7 @@ impl BookVariant {
         let paths = vec![(book_type, path.to_owned())];
         let mut book = BookVariant {
             local_title: None,
-            isbn: None,
+            identifier: None,
             paths: Some(paths.clone()),
             language: None,
             additional_authors: None,
