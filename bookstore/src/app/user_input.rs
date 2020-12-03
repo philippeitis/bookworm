@@ -17,8 +17,8 @@ impl Default for EditState {
         EditState {
             selected: 0,
             started_edit: false,
-            orig_value: "".to_string(),
-            new_value: "".to_string(),
+            orig_value: String::new(),
+            new_value: String::new(),
         }
     }
 }
@@ -29,7 +29,7 @@ impl EditState {
             selected,
             started_edit: false,
             orig_value: orig_value.as_ref().to_string(),
-            new_value: "".to_string(),
+            new_value: String::new(),
         }
     }
 

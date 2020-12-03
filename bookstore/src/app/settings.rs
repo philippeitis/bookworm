@@ -66,7 +66,7 @@ pub(crate) struct SortSettings {
 impl Default for SortSettings {
     fn default() -> Self {
         SortSettings {
-            column: UniCase::new("".to_string()),
+            column: UniCase::new(String::new()),
             is_sorted: false,
             reverse: false,
         }
