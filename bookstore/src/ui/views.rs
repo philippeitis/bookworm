@@ -143,9 +143,10 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
         let select_style = self.state.style.select_style();
 
         for ((title, data), &chunk) in app.header_col_iter().zip(hchunks.iter()) {
+            let width = usize::from(chunk.width).saturating_sub(1);
             let list = List::new(
                 data.iter()
-                    .map(|word| cut_word_to_fit(word, usize::from(chunk.width).saturating_sub(3)))
+                    .map(|word| cut_word_to_fit(word, width))
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))
@@ -306,9 +307,10 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
         // TODO: Make it so that the selected value is visible
         //  at the cursor location.
         for (i, ((title, data), &chunk)) in app.header_col_iter().zip(hchunks.iter()).enumerate() {
+            let width = usize::from(chunk.width).saturating_sub(1);
             let list = List::new(
                 data.iter()
-                    .map(|word| cut_word_to_fit(word, usize::from(chunk.width).saturating_sub(3)))
+                    .map(|word| ListItem::new(Span::from(word.unicode_truncate(width).0)))
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))
