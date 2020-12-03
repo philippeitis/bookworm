@@ -79,13 +79,22 @@ fn cut_word_to_fit(word: &str, max_width: usize) -> ListItem {
     }))
 }
 
+/// Splits the chunk into `num_cols` columns and ensures that their width is balanced.
+/// If called with sequentially increasing or decreasing values, chunk sizes
+/// will never decrease / increase.
+///
+/// # Arguments
+/// * ` chunk ` - A chunk which the columns will be placed into.
+/// * ` num_cols ` - The number of columns to fit.
 fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
     let col_width = chunk.width / num_cols;
 
     let mut widths = vec![col_width; usize::from(num_cols)];
     let total_w: u16 = widths.iter().sum();
     if total_w != chunk.width {
-        widths[0] += chunk.width - total_w;
+        widths[..usize::from(chunk.width - total_w)]
+            .iter_mut()
+            .for_each(|w| *w += 1);
     }
     Layout::default()
         .direction(Direction::Horizontal)
