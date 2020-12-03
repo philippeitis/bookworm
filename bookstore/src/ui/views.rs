@@ -81,14 +81,19 @@ fn cut_word_to_fit(word: &str, max_width: usize) -> ListItem {
     }))
 }
 
-/// Splits the chunk into `num_cols` columns and ensures that their width is balanced.
+/// Splits `chunk` into `num_cols` columns with widths differing by no more than
+/// one, and adding up to the width of `chunk`, except when `num_cols` is 0.
 /// If called with sequentially increasing or decreasing values, chunk sizes
-/// will never decrease / increase.
+/// will never decrease or increase, respectively.
 ///
 /// # Arguments
 /// * ` chunk ` - A chunk which the columns will be placed into.
 /// * ` num_cols ` - The number of columns to fit.
 fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
+    if num_cols == 0 {
+        return vec![];
+    }
+
     let col_width = chunk.width / num_cols;
 
     let mut widths = vec![col_width; usize::from(num_cols)];
@@ -425,5 +430,22 @@ impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
 
     fn take_state(&mut self) -> UIState {
         std::mem::take(&mut self.state)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_chunk_split() {
+        let width = 50;
+        let c = Rect::new(0, 0, width, 0);
+
+        assert_eq!(split_chunk_into_columns(c, 0), vec![]);
+
+        for i in 1..width {
+            assert_eq!(split_chunk_into_columns(c, i).iter().map(|r| r.width).sum::<u16>(), width);
+        }
     }
 }
