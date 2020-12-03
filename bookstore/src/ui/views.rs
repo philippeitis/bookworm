@@ -292,6 +292,8 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
         let edit_style = self.state.style.edit_style();
         let select_style = self.state.style.select_style();
 
+        // TODO: Make it so that the selected value is visible
+        //  at the cursor location.
         for (i, ((title, data), &chunk)) in app.header_col_iter().zip(hchunks.iter()).enumerate() {
             let list = List::new(
                 data.iter()

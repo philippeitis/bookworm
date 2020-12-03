@@ -278,7 +278,8 @@ impl PageCursor {
         self.top_index..(self.top_index + self.window_size).min(self.height)
     }
 
-    // TODO: Add pop / insert / in_window
+    // TODO: Add in_window to allow determining if a change requires a UI
+    //  update?
 }
 
 #[cfg(test)]

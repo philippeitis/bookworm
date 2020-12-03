@@ -89,7 +89,6 @@ impl From<ZipError> for EpubError {
 }
 
 // TODO: Can have multi-part titles.
-//
 
 impl EpubMetadata {
     pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self, EpubError> {

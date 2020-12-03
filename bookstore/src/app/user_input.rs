@@ -221,6 +221,9 @@ impl CommandString {
         values
     }
 
+    /// Returns a Vector of tuples (bool, String), where the bool indicates whether
+    /// the string needs to be escaped or not, and the string is the content of a
+    /// quote escaped string, or is a regular word without whitespace.
     pub(crate) fn get_values_autofilled(&self) -> Vec<(bool, String)> {
         let mut values = self.get_values();
         if let Some(s) = &self.autofilled {
