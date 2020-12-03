@@ -54,7 +54,9 @@ pub(crate) trait View<D: AppDatabase, B: Backend>: ResizableWidget<D, B> {
         app_state: &mut App<D>,
     ) -> Result<ApplicationTask, ApplicationError>;
 
-    fn get_owned_state(&mut self) -> UIState;
+    /// Takes the object's UIState to allow use in another
+    /// View.
+    fn take_state(&mut self) -> UIState;
 }
 
 /// Takes `word`, and cuts excess letters to ensure that it fits within
@@ -267,7 +269,7 @@ impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
         Ok(ApplicationTask::Update)
     }
 
-    fn get_owned_state(&mut self) -> UIState {
+    fn take_state(&mut self) -> UIState {
         std::mem::take(&mut self.state)
     }
 }
@@ -419,7 +421,7 @@ impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
         Ok(ApplicationTask::Update)
     }
 
-    fn get_owned_state(&mut self) -> UIState {
+    fn take_state(&mut self) -> UIState {
         std::mem::take(&mut self.state)
     }
 }

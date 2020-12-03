@@ -76,7 +76,7 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                     ApplicationTask::Update => self.app.register_update(),
                     ApplicationTask::SwitchView(view) => {
                         self.app.register_update();
-                        let state = self.active_view.get_owned_state();
+                        let state = self.active_view.take_state();
                         match view {
                             AppView::ColumnView => {
                                 self.active_view = Box::new(ColumnWidget { state })
