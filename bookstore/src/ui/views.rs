@@ -1,5 +1,3 @@
-use std::iter::FromIterator;
-
 use crossterm::event::{Event, KeyCode, MouseEvent};
 
 use tui::backend::Backend;
@@ -7,6 +5,8 @@ use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::Span;
 use tui::widgets::{Block, List, ListItem, ListState};
 use tui::Frame;
+
+use unicode_truncate::UnicodeTruncateStr;
 
 use crate::app::app::ColumnUpdate;
 use crate::app::parse_args;
@@ -57,13 +57,25 @@ pub(crate) trait View<D: AppDatabase, B: Backend>: ResizableWidget<D, B> {
     fn get_owned_state(&mut self) -> UIState;
 }
 
-fn cut_word_to_fit(word: &str, max_len: usize) -> ListItem {
-    ListItem::new(Span::from(if word.len() > max_len {
-        let mut base_word = word.chars().into_iter().collect::<Vec<_>>();
-        base_word.truncate(max_len - 3);
-        String::from_iter(base_word.iter()) + "..."
+/// Takes `word`, and cuts excess letters to ensure that it fits within
+/// `max_width` visible characters. If `word` is too long, it will be truncated
+/// and have '...' appended to indicate that it has been truncated (if max_width
+/// is at least 3, otherwise, letters will simply be cut). It will then be returned as a ListItem.
+///
+/// # Arguments
+/// * ` word ` - A string reference.
+/// * ` max_width ` - The maximum width of word in visible characters.
+fn cut_word_to_fit(word: &str, max_width: usize) -> ListItem {
+    // TODO: What should be done if max_width is too small?
+    ListItem::new(Span::from(if word.len() > max_width {
+        if max_width >= 3 {
+            let possible_word = word.unicode_truncate(max_width - 3);
+            possible_word.0.to_owned() + "..."
+        } else {
+            word.unicode_truncate(max_width).0.to_owned()
+        }
     } else {
-        word.to_string()
+        word.to_owned()
     }))
 }
 

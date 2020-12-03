@@ -18,6 +18,7 @@ itertools = "0.9.0"
 mobi = "0.5.0"
 rayon = "1.5.0"
 indexmap = { version = "1.6.0", default-features = false, features = ['serde-1', 'rayon'] }
+unicode-truncate = "0.1.1"
 
 # Epub parsing dependencies.
 zip = "0.5.8"
@@ -36,8 +37,7 @@ tempfile = "3.1.0"
 
 [dependencies.rustbreak]
 version = "2"
-features = ["ron_enc"] # You can also use "yaml_enc" or "bin_enc"
-                       # Check the documentation to add your own!
+features = ["ron_enc"]
 
 [features]
 cloud = ["google-drive3", "hyper", "hyper-rustls", "serde_json", "yup-oauth2"]
