@@ -65,40 +65,51 @@ impl Command {
     }
 }
 
-/// Read flags of the forms
-/// - -f1 arg1 arg2 ... -f2?
-/// - arg1 arg2 arg3 ... -f1?
-/// - -f1 -f2
-/// And return a Vec with all flags collected.
-fn read_flags(vec: &[String]) -> Vec<Flag> {
-    if vec.is_empty() {
+/// Read a white-space split command string, and collect flags and arguments together.
+/// Returns a vec of Flags corresponding to the input.
+/// Flag-argument sets of the following forms are handled:
+/// * -f1 arg1 arg2 ... -f2?
+/// * arg1 arg2 arg3 ... -f1?
+/// * -f1 -f2
+///
+/// Note: Does not handle -abcdef.
+///
+/// # Arguments
+/// * ` args ` - A vector of command line arguments in sequential order.
+fn read_flags(args: Vec<String>) -> Vec<Flag> {
+    if args.len() <= 1 {
         return vec![];
     }
+
     let mut flags = vec![];
     let mut last_flag_valid = false;
     let mut flag = String::new();
     let mut flag_args = vec![];
     let mut ended = false;
-    for v in vec.iter() {
+
+    let mut v_iter = args.into_iter();
+    v_iter.next();
+
+    for v in v_iter {
         ended = false;
         if v.starts_with('-') {
             if last_flag_valid {
                 if flag_args.is_empty() {
-                    flags.push(Flag::Flag(flag.clone()));
+                    flags.push(Flag::Flag(flag));
                 } else {
-                    flags.push(Flag::FlagWithArgument(flag.clone(), flag_args.clone()));
-                    flag_args.clear();
+                    flags.push(Flag::FlagWithArgument(flag, flag_args));
+                    flag_args = vec![];
                     ended = true;
                 }
             } else if !flag_args.is_empty() {
-                flags.push(Flag::PositionalArg(flag_args.clone()));
-                flag_args.clear();
+                flags.push(Flag::PositionalArg(flag_args));
+                flag_args = vec![];
             }
 
             flag = v.trim_start_matches('-').to_owned();
             last_flag_valid = true;
         } else {
-            flag_args.push(v.clone());
+            flag_args.push(v);
         }
     }
 
@@ -113,6 +124,7 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
             flags.push(Flag::PositionalArg(flag_args));
         }
     }
+
     flags
 }
 
@@ -122,7 +134,7 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
 pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
     let s = s.to_string();
     match shellwords::split(s.as_str()) {
-        Ok(vec) => parse_args(&vec),
+        Ok(vec) => parse_args(vec),
         Err(_) => Command::InvalidCommand,
     }
 }
@@ -130,14 +142,14 @@ pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
 /// Reads args and returns the appropriate command. If the command format is incorrect,
 /// returns Command::InvalidCommand, or Command::InvalidCommand if the first argument is not
 /// a recognized command.
-pub(crate) fn parse_args(args: &[String]) -> Command {
+pub(crate) fn parse_args(args: Vec<String>) -> Command {
     let c = if let Some(c) = args.first() {
-        c
+        c.clone()
     } else {
         return Command::InvalidCommand;
     };
 
-    let flags = read_flags(&args[1..]);
+    let flags = read_flags(args);
     match c.as_str() {
         "!q" => {
             return Command::Quit;
@@ -211,21 +223,21 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             };
         }
         "!e" => {
-            return match flags.first() {
+            return match flags.into_iter().next() {
                 Some(Flag::PositionalArg(args)) => {
-                    if args.len() >= 3 {
-                        if let Ok(id) = u32::from_str(args[0].as_str()) {
-                            Command::EditBook(
-                                BookIndex::BookID(id),
-                                args[1].clone(),
-                                args[2].clone(),
-                            )
-                        } else {
-                            Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
+                    let mut args = args.into_iter();
+                    if let Some(a) = args.next() {
+                        if let Some(b) = args.next() {
+                            if let Some(c) = args.next() {
+                                if let Ok(id) = u32::from_str(a.as_str()) {
+                                    return Command::EditBook(BookIndex::BookID(id), b, c);
+                                }
+                            }
+
+                            return Command::EditBook(BookIndex::Selected, a, b);
                         }
-                    } else {
-                        Command::EditBook(BookIndex::Selected, args[0].clone(), args[1].clone())
                     }
+                    Command::InvalidCommand
                 }
                 _ => Command::InvalidCommand,
             };
@@ -247,7 +259,7 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             let mut col_exists = false;
             let mut col = String::new();
 
-            for flag in flags {
+            for flag in flags.into_iter() {
                 match flag {
                     Flag::Flag(f) => {
                         if f == "d" {
@@ -260,16 +272,17 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                     Flag::FlagWithArgument(f, args) => {
                         d |= f == "d";
                         if d {
-                            return Command::SortColumn(args[0].clone(), d);
+                            return Command::SortColumn(args.into_iter().next().unwrap(), d);
                         }
                     }
                     Flag::PositionalArg(args) => {
+                        if d {
+                            return Command::SortColumn(args.into_iter().next().unwrap(), true);
+                        }
+
                         if !col_exists {
                             col_exists = true;
-                            col = args[0].clone();
-                        }
-                        if d {
-                            return Command::SortColumn(args[0].clone(), true);
+                            col = args.into_iter().next().unwrap();
                         }
                     }
                 };
@@ -281,24 +294,41 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
             };
         }
         "!c" => {
-            return match flags.first() {
-                Some(Flag::PositionalArg(args)) => Command::AddColumn(args[0].clone()),
-                Some(Flag::Flag(arg)) => Command::RemoveColumn(arg.clone()),
+            return match flags.into_iter().next() {
+                Some(Flag::PositionalArg(args)) => {
+                    Command::AddColumn(args.into_iter().next().unwrap())
+                }
+                Some(Flag::Flag(arg)) => Command::RemoveColumn(arg),
                 _ => Command::InvalidCommand,
             };
         }
         "!f" => {
-            return match flags.first() {
+            return match flags.into_iter().next() {
                 Some(Flag::PositionalArg(args)) => {
-                    Command::FindMatches(Matching::Default, args[0].clone(), args[1].clone())
+                    let mut args = args.into_iter();
+                    Command::FindMatches(
+                        Matching::Default,
+                        args.next().unwrap(),
+                        args.next().unwrap(),
+                    )
                 }
                 Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
-                    "r" => Command::FindMatches(Matching::Regex, args[0].clone(), args[1].clone()),
-                    "c" => Command::FindMatches(
-                        Matching::CaseSensitive,
-                        args[0].clone(),
-                        args[1].clone(),
-                    ),
+                    "r" => {
+                        let mut args = args.into_iter();
+                        Command::FindMatches(
+                            Matching::Regex,
+                            args.next().unwrap(),
+                            args.next().unwrap(),
+                        )
+                    }
+                    "c" => {
+                        let mut args = args.into_iter();
+                        Command::FindMatches(
+                            Matching::CaseSensitive,
+                            args.next().unwrap(),
+                            args.next().unwrap(),
+                        )
+                    }
                     _ => Command::InvalidCommand,
                 },
                 _ => Command::InvalidCommand,
@@ -334,14 +364,16 @@ pub(crate) fn parse_args(args: &[String]) -> Command {
                         return Command::InvalidCommand;
                     }
                     Flag::PositionalArg(args) => {
-                        if let Some(i) = args.get(1).cloned() {
-                            index_exists = true;
-                            index = i;
-                        }
+                        let mut args = args.into_iter();
 
-                        if let Some(l) = args.get(0).cloned() {
+                        if let Some(l) = args.next() {
                             loc_exists = true;
                             loc = l;
+                        }
+
+                        if let Some(i) = args.next() {
+                            index_exists = true;
+                            index = i;
                         }
                     }
                 }

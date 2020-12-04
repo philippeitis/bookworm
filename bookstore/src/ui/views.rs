@@ -217,7 +217,7 @@ impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
 
                         self.state.curr_command.clear();
 
-                        if !app.run_command(parse_args(&args))? {
+                        if !app.run_command(parse_args(args))? {
                             return Ok(ApplicationTask::Quit);
                         }
 

@@ -62,7 +62,7 @@ fn main() -> Result<(), ApplicationError> {
     let mut app = App::new(db);
 
     if !command.is_empty() {
-        let command = parse_args(&command);
+        let command = parse_args(command);
         if command.requires_ui() {
             println!(
                 "The selected command ({:?}) requires opening the user interface.",
