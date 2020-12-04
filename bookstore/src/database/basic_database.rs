@@ -302,8 +302,10 @@ impl AppDatabase for BasicDatabase {
                 }
             }
 
-            let owned_c: HashSet<_> = c.iter().map(|&c| UniCase::new(c.to_owned())).collect();
-            (owned_c, db.books.len())
+            (
+                c.into_iter().map(|c| UniCase::new(c.to_owned())).collect(),
+                db.books.len(),
+            )
         })?;
 
         Ok(BasicDatabase { backend, cols, len })
