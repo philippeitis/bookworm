@@ -289,19 +289,21 @@ impl AppDatabase for BasicDatabase {
         let backend = FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)?;
         let (cols, len) = backend.read(|db| {
             let mut c = HashSet::new();
-            c.insert(UniCase::new("title".to_string()));
-            c.insert(UniCase::new("authors".to_string()));
-            c.insert(UniCase::new("series".to_string()));
-            c.insert(UniCase::new("id".to_string()));
+
+            for &col in &["title", "authors", "series", "id"] {
+                c.insert(col);
+            }
+
             for book in db.books.values() {
                 if let Some(e) = book.get_extended_columns() {
                     for key in e.keys() {
-                        // TODO: Profile this for large database.
-                        c.insert(UniCase::new(key.clone()));
+                        c.insert(key);
                     }
                 }
             }
-            (c, db.books.len())
+
+            let owned_c: HashSet<_> = c.iter().map(|&c| UniCase::new(c.to_owned())).collect();
+            (owned_c, db.books.len())
         })?;
 
         Ok(BasicDatabase { backend, cols, len })
