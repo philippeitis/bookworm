@@ -249,7 +249,7 @@ impl<D: IndexableDatabase> App<D> {
     }
 
     /// Updates the table data if a change occurs.
-    pub(crate) fn update_column_data(&mut self) {
+    pub(crate) fn update_column_data(&mut self) -> Result<(), ApplicationError> {
         match &self.column_update {
             ColumnUpdate::Regenerate => {
                 self.updated = true;
@@ -260,7 +260,7 @@ impl<D: IndexableDatabase> App<D> {
 
                 if self.db.window_size() == 0 {
                     self.column_update = ColumnUpdate::NoUpdate;
-                    return;
+                    return Ok(());
                 }
 
                 let cols = self
@@ -269,7 +269,7 @@ impl<D: IndexableDatabase> App<D> {
                     .map(|col| ColumnIdentifier::from(col.as_str()))
                     .collect::<Vec<_>>();
 
-                for b in self.db.get_books_cursored() {
+                for b in self.db.get_books_cursored()? {
                     for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
                         column.push(b.get_column_or(&col, ""));
                     }
@@ -282,7 +282,7 @@ impl<D: IndexableDatabase> App<D> {
                     let column_string = ColumnIdentifier::from(word.as_str());
                     self.column_data.push(
                         self.db
-                            .get_books_cursored()
+                            .get_books_cursored()?
                             .iter()
                             .map(|book| book.get_column_or(&column_string, ""))
                             .collect(),
@@ -301,6 +301,7 @@ impl<D: IndexableDatabase> App<D> {
         }
 
         self.column_update = ColumnUpdate::NoUpdate;
+        Ok(())
     }
 
     #[cfg(windows)]

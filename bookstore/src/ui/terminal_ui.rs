@@ -110,7 +110,7 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
     pub(crate) fn run(&mut self, terminal: &mut Terminal<B>) -> Result<(), ApplicationError> {
         loop {
             self.app.apply_sort()?;
-            self.app.update_column_data();
+            self.app.update_column_data()?;
 
             if self.app.take_update() {
                 terminal.draw(|f| {

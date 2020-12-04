@@ -17,7 +17,7 @@ impl From<DatabaseError> for BookViewError {
 pub(crate) trait BookView<D: AppDatabase> {
     fn new(db: D) -> Self;
 
-    fn get_books_cursored(&self) -> Vec<Book>;
+    fn get_books_cursored(&self) -> Result<Vec<Book>, BookViewError>;
 
     fn sort_by_column<S: AsRef<str>>(&mut self, col: S, reverse: bool)
         -> Result<(), DatabaseError>;
@@ -93,10 +93,8 @@ impl<D: IndexableDatabase> BookView<D> for BasicBookView<D> {
         }
     }
 
-    fn get_books_cursored(&self) -> Vec<Book> {
-        self.db
-            .get_books_indexed(self.cursor.window_range())
-            .unwrap()
+    fn get_books_cursored(&self) -> Result<Vec<Book>, BookViewError> {
+        Ok(self.db.get_books_indexed(self.cursor.window_range())?)
     }
 
     fn sort_by_column<S: AsRef<str>>(
