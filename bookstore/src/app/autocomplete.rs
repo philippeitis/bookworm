@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use glob::glob;
 
 pub(crate) struct AutoCompleter<S> {
-    word: String,
+    word_len: usize,
     possibilities: GetRing<S>,
 }
 
@@ -19,13 +19,14 @@ impl AutoCompleter<PathBuf> {
     /// If the glob fails, an error will be returned.
     pub(crate) fn new<S: AsRef<str>>(word: S) -> Result<Self, ()> {
         let word = word.as_ref().to_owned();
-        let glob_str = word.clone() + "*";
+        let word_len = word.len();
+        let glob_str = word + "*";
 
         if let Ok(paths) = glob(glob_str.as_str()) {
             let mut p: Vec<_> = paths.into_iter().filter_map(Result::ok).collect();
             p.sort();
             Ok(AutoCompleter {
-                word,
+                word_len,
                 possibilities: GetRing::new(p),
             })
         } else {
@@ -54,7 +55,7 @@ impl AutoCompleter<PathBuf> {
     /// * ` p ` - A predicate which returns true if the given path should
     ///             be returned, otherwise false.
     pub(crate) fn get_next_word_by(&mut self, p: impl Fn(&PathBuf) -> bool) -> Option<&PathBuf> {
-        let word_len = self.word.len();
+        let word_len = self.word_len;
         self.possibilities
             .get_next_item_by(|path| path.as_os_str().len() >= word_len && p(path))
     }
