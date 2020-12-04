@@ -59,6 +59,7 @@ impl EditState {
 
     pub(crate) fn reset_orig<S: AsRef<str>>(&mut self, orig_value: S) {
         self.started_edit = false;
+        // TODO: Use .clone_into() when stabilized?
         self.orig_value.clear();
         self.orig_value.push_str(orig_value.as_ref());
         self.new_value.clear();
@@ -89,12 +90,13 @@ impl CommandString {
         values
             .map(|(escaped, raw_str)| {
                 if *escaped {
-                    let mut s = String::from('"');
+                    let mut s = String::with_capacity(2 + raw_str.len());
+                    s.push('"');
                     s.push_str(raw_str.as_str());
                     s.push('"');
                     s
                 } else {
-                    raw_str.clone()
+                    raw_str.to_owned()
                 }
             })
             .join(" ")
@@ -231,7 +233,7 @@ impl CommandString {
             if !self.keep_last {
                 values.pop();
             }
-            values.push((s.contains(' '), s.clone()));
+            values.push((s.contains(' '), s.to_owned()));
         }
         values
     }

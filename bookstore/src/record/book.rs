@@ -407,10 +407,10 @@ impl Book {
             }
             ColumnIdentifier::ExtendedTag(column) => {
                 if let Some(d) = self.extended_tags.as_mut() {
-                    d.insert(column.clone(), value.to_owned());
+                    d.insert(column.to_owned(), value.to_owned());
                 } else {
                     let mut d = HashMap::new();
-                    d.insert(column.clone(), value.to_owned());
+                    d.insert(column.to_owned(), value.to_owned());
                     self.extended_tags = Some(d);
                 }
             }

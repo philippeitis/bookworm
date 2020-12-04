@@ -231,14 +231,11 @@ impl<D: IndexableDatabase> App<D> {
     ///
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
-    fn update_selected_column(&mut self, word: UniCase<String>, reverse: bool) {
-        let word = UniCase::new(
-            match word.as_str() {
-                "author" => "authors",
-                x => x,
-            }
-            .to_owned(),
-        );
+    fn update_selected_column(&mut self, mut word: UniCase<String>, reverse: bool) {
+        match word.as_str() {
+            "author" => word = UniCase::from(String::from("authors")),
+            _ => {}
+        }
 
         if self.selected_cols.contains(&word) {
             self.sort_settings.column = word;
