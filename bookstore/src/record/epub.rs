@@ -58,6 +58,25 @@ pub enum EpubError {
     // BadMimetype,
     // NoMimetype,
     NoMetadata,
+    BadXML,
+}
+
+impl From<std::io::Error> for EpubError {
+    fn from(_: Error) -> Self {
+        EpubError::IoError
+    }
+}
+
+impl From<ZipError> for EpubError {
+    fn from(_: ZipError) -> Self {
+        EpubError::BadZip
+    }
+}
+
+impl From<quick_xml::Error> for EpubError {
+    fn from(_: quick_xml::Error) -> Self {
+        EpubError::BadXML
+    }
 }
 
 pub struct EpubMetadata {
@@ -217,7 +236,7 @@ impl EpubMetadata {
                     }
                     Ok(Event::Text(e)) => {
                         // TODO: Remove unwrap
-                        let val = e.unescape_and_decode(&reader).unwrap();
+                        let val = e.unescape_and_decode(&reader)?;
                         // println!("{}", val);
                         match seen {
                             FieldSeen::Author => {
