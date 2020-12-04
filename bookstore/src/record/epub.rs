@@ -23,7 +23,7 @@ fn get_root_file(text: &str) -> Option<String> {
 
 fn get_isbn(text: &str) -> Option<String> {
     lazy_static::lazy_static! {
-        static ref RE: Regex = Regex::new(r#"(?:urn:isbn:)(\d*)"#).unwrap();
+        static ref RE: Regex = Regex::new(r#"(?:urn:isbn:)?([\d-]*)"#).unwrap();
     }
     if let Some(captures) = RE.captures(text) {
         if let Some(val) = captures.get(1) {
@@ -271,3 +271,18 @@ impl EpubMetadata {
 }
 
 // TODO: https://www.oreilly.com/library/view/epub-3-best/9781449329129/ch01.html
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_get_isbn() {
+        let isbn = "urn:isbn:0123456789012";
+        assert_eq!(get_isbn(isbn), Some(String::from("0123456789012")));
+        let isbn = "0123456789012";
+        assert_eq!(get_isbn(isbn), Some(String::from("0123456789012")));
+        let isbn = "978-0-345-53979-3";
+        assert_eq!(get_isbn(isbn), Some(String::from("978-0-345-53979-3")));
+    }
+}
