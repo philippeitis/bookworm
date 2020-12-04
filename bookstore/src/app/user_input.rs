@@ -57,9 +57,10 @@ impl EditState {
         }
     }
 
-    pub(crate) fn reset_orig(&mut self, orig_value: String) {
+    pub(crate) fn reset_orig<S: AsRef<str>>(&mut self, orig_value: S) {
         self.started_edit = false;
-        self.orig_value = orig_value;
+        self.orig_value.clear();
+        self.orig_value.push_str(orig_value.as_ref());
         self.new_value.clear();
     }
 
