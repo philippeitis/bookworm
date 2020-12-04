@@ -221,7 +221,7 @@ impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
                             return Ok(ApplicationTask::Quit);
                         }
 
-                        return Ok(ApplicationTask::DoNothing);
+                        return Ok(ApplicationTask::Update);
                     }
                     KeyCode::Tab | KeyCode::BackTab => {
                         self.state.curr_command.refresh_autofill()?;
