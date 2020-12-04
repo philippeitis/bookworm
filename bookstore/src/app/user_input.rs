@@ -28,7 +28,7 @@ impl EditState {
         EditState {
             selected,
             started_edit: false,
-            orig_value: orig_value.as_ref().to_string(),
+            orig_value: orig_value.as_ref().to_owned(),
             new_value: String::new(),
         }
     }
@@ -88,7 +88,7 @@ impl CommandString {
         values
             .map(|(escaped, raw_str)| {
                 if *escaped {
-                    let mut s = '"'.to_string();
+                    let mut s = String::from('"');
                     s.push_str(raw_str.as_str());
                     s.push('"');
                     s

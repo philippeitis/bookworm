@@ -52,7 +52,7 @@ fn unravel_author(author: &str) -> String {
         let b = b.trim_start_matches(',').trim_start_matches(' ');
         format!("{} {}", b, a)
     } else {
-        author.to_string()
+        author.to_owned()
     }
 }
 
@@ -174,7 +174,7 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
             "series" => Self::Series,
             "id" => Self::ID,
             "variant" | "variants" => Self::Variants,
-            _ => Self::ExtendedTag(val.as_ref().to_string()),
+            _ => Self::ExtendedTag(val.as_ref().to_owned()),
         }
     }
 }
@@ -222,9 +222,9 @@ impl Book {
                 .get_title()
                 .clone()
                 .unwrap_or_else(|| default.as_ref())
-                .to_string(),
+                .to_owned(),
             ColumnIdentifier::Author => match self.get_authors() {
-                None => default.as_ref().to_string(),
+                None => default.as_ref().to_owned(),
                 Some(authors) => authors.join(", "),
             },
             ColumnIdentifier::Series => {
@@ -235,21 +235,21 @@ impl Book {
                         series_name.clone()
                     }
                 } else {
-                    default.as_ref().to_string()
+                    default.as_ref().to_owned()
                 }
             }
             ColumnIdentifier::ID => self.id.to_string(),
             ColumnIdentifier::ExtendedTag(x) => {
                 if let Some(d) = &self.extended_tags {
                     match d.get(x) {
-                        None => default.as_ref().to_string(),
+                        None => default.as_ref().to_owned(),
                         Some(s) => s.to_owned(),
                     }
                 } else {
-                    default.as_ref().to_string()
+                    default.as_ref().to_owned()
                 }
             }
-            ColumnIdentifier::Variants => default.as_ref().to_string(),
+            ColumnIdentifier::Variants => default.as_ref().to_owned(),
         }
     }
 }
@@ -381,10 +381,10 @@ impl Book {
         let value = value.as_ref();
         match column {
             ColumnIdentifier::Title => {
-                self.title = Some(value.to_string());
+                self.title = Some(value.to_owned());
             }
             ColumnIdentifier::Author => {
-                self.authors = Some(vec![value.to_string()]);
+                self.authors = Some(vec![value.to_owned()]);
             }
             ColumnIdentifier::ID | ColumnIdentifier::Variants => {
                 return Err(BookError::ImmutableColumnError);
@@ -397,20 +397,20 @@ impl Book {
                         if let Some(series) = words.next() {
                             if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str())
                             {
-                                self.series = Some((series.to_string(), Some(id)));
+                                self.series = Some((series.to_owned(), Some(id)));
                             }
                         }
                     }
                 } else {
-                    self.series = Some((value.to_string(), None));
+                    self.series = Some((value.to_owned(), None));
                 }
             }
             ColumnIdentifier::ExtendedTag(column) => {
                 if let Some(d) = self.extended_tags.as_mut() {
-                    d.insert(column.clone(), value.to_string());
+                    d.insert(column.clone(), value.to_owned());
                 } else {
                     let mut d = HashMap::new();
-                    d.insert(column.clone(), value.to_string());
+                    d.insert(column.clone(), value.to_owned());
                     self.extended_tags = Some(d);
                 }
             }

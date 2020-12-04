@@ -89,7 +89,7 @@ impl<D: IndexableDatabase> App<D> {
 
     pub(crate) fn update_value<S: AsRef<str>>(&mut self, col: usize, row: usize, new_value: S) {
         self.updated = true;
-        self.column_data[col][row] = new_value.as_ref().to_string();
+        self.column_data[col][row] = new_value.as_ref().to_owned();
     }
 
     pub(crate) fn get_value(&self, col: usize, row: usize) -> &str {
@@ -237,7 +237,7 @@ impl<D: IndexableDatabase> App<D> {
                 "author" => "authors",
                 x => x,
             }
-            .to_string(),
+            .to_owned(),
         );
 
         if self.selected_cols.contains(&word) {

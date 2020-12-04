@@ -397,7 +397,7 @@ impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
                         }
                         self.edit.reset_orig(
                             app.get_value(self.state.selected_column, self.edit.selected)
-                                .to_string(),
+                                .to_owned(),
                         );
                     }
                     KeyCode::Up => {
@@ -412,7 +412,7 @@ impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
                         }
                         self.edit.reset_orig(
                             app.get_value(self.state.selected_column, self.edit.selected)
-                                .to_string(),
+                                .to_owned(),
                         );
                     }
                     _ => return Ok(ApplicationTask::DoNothing),

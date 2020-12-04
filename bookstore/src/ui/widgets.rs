@@ -74,7 +74,7 @@ impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
             Text::styled("No title provided", field_not_provided)
         };
         if let Some(t) = &self.book.authors {
-            let mut s = "By: ".to_string();
+            let mut s = String::from("By: ");
             s.push_str(&t.join(", "));
             data.extend(Text::styled(s, field_exists));
         } else {

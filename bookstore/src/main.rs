@@ -74,7 +74,7 @@ fn main() -> Result<(), ApplicationError> {
     }
 
     // TODO: Make -h do something interesting, like open a server in the background.
-    if args.contains(&"-h".to_string()) {
+    if args.contains(&String::from("-h")) {
         return Ok(());
     }
 

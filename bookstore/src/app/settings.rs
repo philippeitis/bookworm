@@ -18,7 +18,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             interface_style: InterfaceStyle::default(),
-            columns: vec!["Title".to_string(), "Authors".to_string()],
+            columns: vec![String::from("Title"), String::from("Authors")],
             sort_settings: SortSettings::default(),
             navigation_settings: NavigationSettings::default(),
         }
@@ -198,7 +198,7 @@ impl From<TomlColumns> for Vec<String> {
         if let Some(s) = t.columns {
             s
         } else {
-            vec!["Title".to_string(), "Authors".to_string()]
+            vec![String::from("Title"), String::from("Authors")]
         }
     }
 }

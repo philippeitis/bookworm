@@ -15,7 +15,7 @@ fn get_root_file(text: &str) -> Option<String> {
         static ref RE: Regex = Regex::new(r#"(?:<rootfile )(?:[^>]*)(?:full-path=")([^"]*)(?:"[^>]*>)"#).unwrap();
     }
     if let Some(val) = RE.captures(text).expect(text).get(1) {
-        Some(val.as_str().to_string())
+        Some(val.as_str().to_owned())
     } else {
         None
     }
@@ -27,7 +27,7 @@ fn get_isbn(text: &str) -> Option<String> {
     }
     if let Some(captures) = RE.captures(text) {
         if let Some(val) = captures.get(1) {
-            Some(val.as_str().to_string())
+            Some(val.as_str().to_owned())
         } else {
             None
         }
@@ -43,7 +43,7 @@ fn get_metadata(text: &str) -> Option<String> {
         static ref RE: Regex = Regex::new(r#"(?s:<(?:opf:)?metadata[^>]*>)(?s)(.*)(?-s)(?:</(?:opf:)?metadata>)"#).unwrap();
     }
     if let Some(val) = RE.captures(text).expect(text).get(0) {
-        Some(val.as_str().to_string())
+        Some(val.as_str().to_owned())
     } else {
         None
     }

@@ -18,7 +18,7 @@ impl AutoCompleter<PathBuf> {
     ///
     /// If the glob fails, an error will be returned.
     pub(crate) fn new<S: AsRef<str>>(word: S) -> Result<Self, ()> {
-        let word = word.as_ref().to_string();
+        let word = word.as_ref().to_owned();
         let glob_str = word.clone() + "*";
 
         if let Ok(paths) = glob(glob_str.as_str()) {

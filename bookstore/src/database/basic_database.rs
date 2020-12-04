@@ -432,7 +432,7 @@ impl AppDatabase for BasicDatabase {
             None => Err(DatabaseError::BookNotFound(id)),
             Some(book) => Ok(book.set_column(&column.as_ref().into(), new_value)?),
         })??;
-        self.cols.insert(UniCase::new(column.as_ref().to_string()));
+        self.cols.insert(UniCase::new(column.as_ref().to_owned()));
         Ok(())
     }
 
@@ -495,7 +495,7 @@ impl AppDatabase for BasicDatabase {
                         }
                     }
                     Matching::CaseSensitive => {
-                        let sensitive = search.as_ref().to_string();
+                        let sensitive = search.as_ref().to_owned();
                         for (_, book) in db.books.iter() {
                             if sensitive.contains(&book.get_column_or(&col, "")) {
                                 results.push(book.clone());
@@ -592,7 +592,7 @@ impl IndexableDatabase for BasicDatabase {
             }
         })??;
 
-        self.cols.insert(UniCase::new(column.as_ref().to_string()));
+        self.cols.insert(UniCase::new(column.as_ref().to_owned()));
         Ok(())
     }
 }
@@ -614,7 +614,7 @@ mod test {
         let base_cols = ["title", "authors", "id", "series"];
         assert!(db.cols.eq(&base_cols
             .iter()
-            .map(|c| UniCase::new(c.to_string()))
+            .map(|&c| UniCase::new(c.to_owned()))
             .collect()));
     }
 

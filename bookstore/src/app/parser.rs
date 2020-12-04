@@ -95,7 +95,7 @@ fn read_flags(vec: &[String]) -> Vec<Flag> {
                 flag_args.clear();
             }
 
-            flag = v.trim_start_matches('-').to_string();
+            flag = v.trim_start_matches('-').to_owned();
             last_flag_valid = true;
         } else {
             flag_args.push(v.clone());
