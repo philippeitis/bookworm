@@ -62,15 +62,19 @@ fn main() -> Result<(), ApplicationError> {
     let mut app = App::new(db);
 
     if !command.is_empty() {
-        let command = parse_args(command);
-        if command.requires_ui() {
-            println!(
-                "The selected command ({:?}) requires opening the user interface.",
-                command
-            );
-            return Ok(());
+        for command in command.split(|v| v == "--") {
+            let command = parse_args(command.to_owned());
+            if command.requires_ui() {
+                println!(
+                    "The selected command ({:?}) requires opening the user interface.",
+                    command
+                );
+                return Ok(());
+            }
+            if !app.run_command(command)? {
+                return Ok(());
+            }
         }
-        app.run_command(command)?;
     }
 
     // TODO: Make -h do something interesting, like open a server in the background.

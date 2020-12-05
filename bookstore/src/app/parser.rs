@@ -44,23 +44,15 @@ pub enum Command {
 impl Command {
     pub(crate) fn requires_ui(&self) -> bool {
         match self {
-            Command::UnknownCommand => false,
-            Command::InvalidCommand => false,
             Command::DeleteBook(b) => b == &BookIndex::Selected,
             Command::EditBook(b, _, _) => b == &BookIndex::Selected,
-            Command::AddBookFromFile(_) => false,
-            Command::AddBooksFromDir(_) => false,
+            Command::OpenBookInApp(b, _) => b == &BookIndex::Selected,
+            Command::OpenBookInExplorer(b, _) => b == &BookIndex::Selected,
             Command::AddColumn(_) => true,
             Command::RemoveColumn(_) => true,
             Command::SortColumn(_, _) => true,
-            Command::OpenBookInApp(b, _) => b == &BookIndex::Selected,
-            Command::OpenBookInExplorer(b, _) => b == &BookIndex::Selected,
-            Command::Quit => true,
-            Command::Write => true,
-            Command::WriteAndQuit => true,
-            Command::DeleteAll => false,
-            Command::TryMergeAllBooks => false,
             Command::FindMatches(_, _, _) => true,
+            _ => false,
         }
     }
 }
