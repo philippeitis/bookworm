@@ -138,7 +138,7 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
 
         let curr_height = usize::from(vchunks[0].height);
 
-        if curr_height != 0 && app.refresh_window_size(curr_height - 1) {
+        if app.refresh_window_size(curr_height.saturating_sub(1)) {
             app.set_column_update(ColumnUpdate::Regenerate);
             let _ = app.update_column_data();
         }
@@ -293,7 +293,7 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
             .split(chunk);
 
         let curr_height = usize::from(vchunks[0].height);
-        if curr_height != 0 && app.refresh_window_size(curr_height - 1) {
+        if app.refresh_window_size(curr_height.saturating_sub(1)) {
             app.set_column_update(ColumnUpdate::Regenerate);
 
             let _ = app.update_column_data();
