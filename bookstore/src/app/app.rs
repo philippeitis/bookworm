@@ -88,7 +88,7 @@ impl<D: IndexableDatabase> App<D> {
     }
 
     pub(crate) fn update_value<S: AsRef<str>>(&mut self, col: usize, row: usize, new_value: S) {
-        self.updated = true;
+        self.register_update();
         self.column_data[col][row] = new_value.as_ref().to_owned();
     }
 
@@ -107,13 +107,13 @@ impl<D: IndexableDatabase> App<D> {
     ) -> Result<(), ApplicationError> {
         self.db
             .edit_selected_book(&self.selected_cols[column], new_value)?;
-        self.updated = true;
+        self.register_update();
         Ok(())
     }
 
     pub(crate) fn remove_selected_book(&mut self) -> Result<(), ApplicationError> {
         self.db.remove_selected_book()?;
-        self.updated = true;
+        self.register_update();
         self.column_update = ColumnUpdate::Regenerate;
         Ok(())
     }
@@ -215,7 +215,7 @@ impl<D: IndexableDatabase> App<D> {
             }
             Command::TryMergeAllBooks => {
                 self.db.write(|db| db.merge_similar())?;
-                self.updated = true;
+                self.register_update();
                 self.column_update = ColumnUpdate::Regenerate;
             }
             _ => {
@@ -371,93 +371,50 @@ impl<D: IndexableDatabase> App<D> {
         Ok(())
     }
 
-    pub(crate) fn scroll_up(&mut self, scroll: usize) -> bool {
-        if self.db.scroll_up(scroll) {
-            self.updated = true;
+    fn modify_db(&mut self, f: impl Fn(&mut BasicBookView<D>) -> bool) -> bool {
+        if f(&mut self.db) {
+            self.register_update();
             self.column_update = ColumnUpdate::Regenerate;
             true
         } else {
             false
         }
+    }
+
+    pub(crate) fn scroll_up(&mut self, scroll: usize) -> bool {
+        self.modify_db(|db| db.scroll_up(scroll))
     }
 
     pub(crate) fn scroll_down(&mut self, scroll: usize) -> bool {
-        if self.db.scroll_down(scroll) {
-            self.updated = true;
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
+        self.modify_db(|db| db.scroll_down(scroll))
     }
 
     pub(crate) fn deselect(&mut self) -> bool {
-        if self.db.deselect() {
-            self.updated = true;
-            true
-        } else {
-            false
-        }
+        self.modify_db(|db| db.deselect())
     }
 
     pub(crate) fn select_up(&mut self) -> bool {
-        if self.db.select_up() {
-            self.updated = true;
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
+        self.modify_db(|db| db.select_up())
     }
 
     pub(crate) fn select_down(&mut self) -> bool {
-        if self.db.select_down() {
-            self.updated = true;
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
+        self.modify_db(|db| db.select_down())
     }
 
     pub(crate) fn page_up(&mut self) -> bool {
-        if self.db.page_up() {
-            self.updated = true;
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
+        self.modify_db(|db| db.page_up())
     }
 
     pub(crate) fn page_down(&mut self) -> bool {
-        if self.db.page_down() {
-            self.updated = true;
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
+        self.modify_db(|db| db.page_down())
     }
 
     pub(crate) fn home(&mut self) -> bool {
-        if self.db.home() {
-            self.updated = true;
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
+        self.modify_db(|db| db.home())
     }
 
     pub(crate) fn end(&mut self) -> bool {
-        if self.db.end() {
-            self.updated = true;
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
+        self.modify_db(|db| db.end())
     }
 
     pub(crate) fn apply_sort(&mut self) -> Result<(), DatabaseError> {
