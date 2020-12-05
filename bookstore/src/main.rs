@@ -16,48 +16,35 @@ use crate::app::{App, ApplicationError, Settings};
 use crate::database::{AppDatabase, BasicDatabase};
 use crate::ui::AppInterface;
 
-fn main() -> Result<(), ApplicationError> {
-    #[cfg(feature = "cloud")]
-    {
-        database::google_cloud_database::CloudDatabase::open_database();
-        return Ok(());
-    }
+use clap::Clap;
 
-    let (args, command) = {
-        let args: Vec<_> = env::args().skip(1).collect();
+#[derive(Clap)]
+#[clap(version = "0.1", author = "?")]
+struct Opts {
+    #[clap(short, long, default_value = "settings.toml")]
+    settings: String,
+    #[clap(short, long, default_value = "books.db")]
+    database: String,
+}
+
+fn main() -> Result<(), ApplicationError> {
+    let (opts, command) = {
+        let args: Vec<_> = env::args().collect();
         if args.is_empty() {
-            (vec![], vec![])
+            (Opts::parse_from(Vec::<String>::new()), vec![])
         } else {
             let before_index = args.iter().position(|s| "--".eq(s)).unwrap_or(args.len());
             let (args, command) = args.split_at(before_index);
             if command.is_empty() {
-                (args.to_owned(), command.to_owned())
+                (Opts::parse_from(args), command.to_owned())
             } else {
-                (args.to_owned(), command[1..].to_owned())
+                (Opts::parse_from(args), command[1..].to_owned())
             }
         }
     };
 
-    let db = if let Some(i) = args.iter().position(|s| "--db".eq(s)) {
-        if let Some(db) = args.get(i + 1) {
-            BasicDatabase::open(db)?
-        } else {
-            BasicDatabase::open("books.db")?
-        }
-    } else {
-        BasicDatabase::open("books.db")?
-    };
-
-    let settings = if let Some(i) = args.iter().position(|s| "--settings".eq(s)) {
-        if let Some(settings_file) = args.get(i + 1) {
-            Settings::open(settings_file)
-        } else {
-            Settings::open("settings.toml")
-        }
-    } else {
-        Settings::open("settings.toml")
-    }
-    .unwrap_or_default();
+    let settings = Settings::open(opts.settings).unwrap_or_default();
+    let db = BasicDatabase::open(opts.database)?;
 
     let mut app = App::new(db);
 
@@ -75,11 +62,6 @@ fn main() -> Result<(), ApplicationError> {
                 return Ok(());
             }
         }
-    }
-
-    // TODO: Make -h do something interesting, like open a server in the background.
-    if args.contains(&String::from("-h")) {
-        return Ok(());
     }
 
     if !cfg!(windows) {
