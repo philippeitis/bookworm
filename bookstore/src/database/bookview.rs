@@ -88,7 +88,7 @@ impl<D: AppDatabase> BasicBookView<D> {
 impl<D: IndexableDatabase> BookView<D> for BasicBookView<D> {
     fn new(db: D) -> Self {
         Self {
-            cursor: PageCursor::new(0, 0),
+            cursor: PageCursor::new(0, db.size()),
             db,
         }
     }
