@@ -81,7 +81,7 @@ impl ISBN {
     }
 
     pub(crate) fn isbn10_from_digits(digits: [u8; 10]) -> Result<ISBN, ISBNError> {
-        if digits.iter().any(|x| *x > 10) {
+        if digits[..9].iter().any(|x| *x > 9) || digits[9] > 10 {
             return Err(ISBNError::DigitTooLarge);
         }
 
@@ -89,7 +89,7 @@ impl ISBN {
     }
 
     pub(crate) fn isbn13_from_digits(digits: [u8; 13]) -> Result<ISBN, ISBNError> {
-        if digits.iter().any(|x| *x > 10) {
+        if digits.iter().any(|x| *x > 9) {
             return Err(ISBNError::DigitTooLarge);
         }
 
@@ -101,7 +101,7 @@ impl ISBN {
             ISBN::ISBN13(digits) => {
                 let mut sum = 0;
                 for i in 0..6 {
-                    sum += u16::from(digits[i] + 3 * digits[i * 2 + 1]);
+                    sum += u16::from(digits[i * 2] + 3 * digits[i * 2 + 1]);
                 }
                 sum += u16::from(digits[12]);
                 (sum % 10) == 0
