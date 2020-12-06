@@ -203,12 +203,8 @@ impl<D: IndexableDatabase> App<D> {
                 unimplemented!("Searches not implemented yet.")
                 // self.matches = Some(self.db.find_matches(matching, &column, &pattern)?);
             }
-            Command::Write => {
-                self.db.inner().save()?;
-            }
-            Command::Quit => {
-                return Ok(false);
-            }
+            Command::Write => self.db.inner().save()?,
+            Command::Quit => return Ok(false),
             Command::WriteAndQuit => {
                 self.db.inner().save()?;
                 return Ok(false);
@@ -218,6 +214,8 @@ impl<D: IndexableDatabase> App<D> {
                 self.register_update();
                 self.column_update = ColumnUpdate::Regenerate;
             }
+            #[cfg(not(windows))]
+            _ => return Ok(true),
         }
         Ok(true)
     }
