@@ -213,36 +213,32 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 Ok(Command::DeleteBook(BookIndex::Selected))
             }
         }
-        "!e" => {
-            match flags.into_iter().next() {
-                Some(Flag::PositionalArg(args)) => {
-                    let mut args = args.into_iter();
-                    let a = args.next().ok_or_else(insuf)?;
-                    let b = args.next().ok_or_else(insuf)?;
+        "!e" => match flags.into_iter().next() {
+            Some(Flag::PositionalArg(args)) => {
+                let mut args = args.into_iter();
+                let a = args.next().ok_or_else(insuf)?;
+                let b = args.next().ok_or_else(insuf)?;
 
-                    if let Some(c) = args.next() {
-                        if let Ok(id) = u32::from_str(a.as_str()) {
-                            return Ok(Command::EditBook(BookIndex::BookID(id), b, c));
-                        }
-                    }
-
-                    Ok(Command::EditBook(BookIndex::Selected, a, b))
-                }
-                _ => Err(CommandError::InvalidCommand),
-            }
-        }
-        "!m" => {
-            match flags.first() {
-                Some(Flag::Flag(a)) => {
-                    if a == "a" {
-                        Ok(Command::TryMergeAllBooks)
-                    } else {
-                        Err(CommandError::InvalidCommand)
+                if let Some(c) = args.next() {
+                    if let Ok(id) = u32::from_str(a.as_str()) {
+                        return Ok(Command::EditBook(BookIndex::BookID(id), b, c));
                     }
                 }
-                _ => Err(CommandError::InvalidCommand),
+
+                Ok(Command::EditBook(BookIndex::Selected, a, b))
             }
-        }
+            _ => Err(CommandError::InvalidCommand),
+        },
+        "!m" => match flags.first() {
+            Some(Flag::Flag(a)) => {
+                if a == "a" {
+                    Ok(Command::TryMergeAllBooks)
+                } else {
+                    Err(CommandError::InvalidCommand)
+                }
+            }
+            _ => Err(CommandError::InvalidCommand),
+        },
         "!s" => {
             let mut d = false;
             let mut col_exists = false;
@@ -289,47 +285,43 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 Err(CommandError::InsufficientArguments)
             }
         }
-        "!c" => {
-            match flags.into_iter().next() {
-                Some(Flag::PositionalArg(args)) => Ok(Command::AddColumn(
-                    args.into_iter().next().ok_or_else(insuf)?,
-                )),
-                Some(Flag::Flag(arg)) => Ok(Command::RemoveColumn(arg)),
-                _ => Err(CommandError::InvalidCommand),
+        "!c" => match flags.into_iter().next() {
+            Some(Flag::PositionalArg(args)) => Ok(Command::AddColumn(
+                args.into_iter().next().ok_or_else(insuf)?,
+            )),
+            Some(Flag::Flag(arg)) => Ok(Command::RemoveColumn(arg)),
+            _ => Err(CommandError::InvalidCommand),
+        },
+        "!f" => match flags.into_iter().next() {
+            Some(Flag::PositionalArg(args)) => {
+                let mut args = args.into_iter();
+                Ok(Command::FindMatches(
+                    Matching::Default,
+                    args.next().ok_or_else(insuf)?,
+                    args.next().ok_or_else(insuf)?,
+                ))
             }
-        }
-        "!f" => {
-            match flags.into_iter().next() {
-                Some(Flag::PositionalArg(args)) => {
+            Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
+                "r" => {
                     let mut args = args.into_iter();
                     Ok(Command::FindMatches(
-                        Matching::Default,
+                        Matching::Regex,
                         args.next().ok_or_else(insuf)?,
                         args.next().ok_or_else(insuf)?,
                     ))
                 }
-                Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
-                    "r" => {
-                        let mut args = args.into_iter();
-                        Ok(Command::FindMatches(
-                            Matching::Regex,
-                            args.next().ok_or_else(insuf)?,
-                            args.next().ok_or_else(insuf)?,
-                        ))
-                    }
-                    "c" => {
-                        let mut args = args.into_iter();
-                        Ok(Command::FindMatches(
-                            Matching::CaseSensitive,
-                            args.next().ok_or_else(insuf)?,
-                            args.next().ok_or_else(insuf)?,
-                        ))
-                    }
-                    _ => Err(CommandError::InvalidCommand),
-                },
+                "c" => {
+                    let mut args = args.into_iter();
+                    Ok(Command::FindMatches(
+                        Matching::CaseSensitive,
+                        args.next().ok_or_else(insuf)?,
+                        args.next().ok_or_else(insuf)?,
+                    ))
+                }
                 _ => Err(CommandError::InvalidCommand),
-            }
-        }
+            },
+            _ => Err(CommandError::InvalidCommand),
+        },
         "!o" => {
             let mut f = false;
             let mut loc_exists = false;
