@@ -218,9 +218,6 @@ impl<D: IndexableDatabase> App<D> {
                 self.register_update();
                 self.column_update = ColumnUpdate::Regenerate;
             }
-            _ => {
-                return Ok(true);
-            }
         }
         Ok(true)
     }

@@ -20,10 +20,6 @@ pub enum BookIndex {
 
 #[derive(Debug)]
 pub enum Command {
-    // NoCommand,
-    // IncompleteCommand,
-    UnknownCommand,
-    InvalidCommand,
     DeleteBook(BookIndex),
     DeleteAll,
     EditBook(BookIndex, String, String),
@@ -39,6 +35,12 @@ pub enum Command {
     Write,
     WriteAndQuit,
     FindMatches(Matching, String, String),
+}
+
+pub enum CommandError {
+    UnknownCommand,
+    InsufficientArguments,
+    InvalidCommand,
 }
 
 impl Command {
@@ -123,35 +125,31 @@ fn read_flags(args: Vec<String>) -> Vec<Flag> {
 #[allow(dead_code)]
 /// Reads a string which acts as a command, splits into into its component words,
 /// and then parses the result into a command which can be run.
-pub(crate) fn parse_command_string<S: ToString>(s: S) -> Command {
+pub(crate) fn parse_command_string<S: ToString>(s: S) -> Result<Command, CommandError> {
     let s = s.to_string();
     match shellwords::split(s.as_str()) {
         Ok(vec) => parse_args(vec),
-        Err(_) => Command::InvalidCommand,
+        Err(_) => Err(CommandError::InvalidCommand),
     }
 }
 
 /// Reads args and returns the appropriate command. If the command format is incorrect,
 /// returns Command::InvalidCommand, or Command::InvalidCommand if the first argument is not
 /// a recognized command.
-pub(crate) fn parse_args(args: Vec<String>) -> Command {
+pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
     let c = if let Some(c) = args.first() {
         c.clone()
     } else {
-        return Command::InvalidCommand;
+        return Err(CommandError::InsufficientArguments);
     };
+
+    let insuf = || CommandError::InsufficientArguments;
 
     let flags = read_flags(args);
     match c.as_str() {
-        "!q" => {
-            return Command::Quit;
-        }
-        "!w" => {
-            return Command::Write;
-        }
-        "!wq" => {
-            return Command::WriteAndQuit;
-        }
+        "!q" => Ok(Command::Quit),
+        "!w" => Ok(Command::Write),
+        "!wq" => Ok(Command::WriteAndQuit),
         "!a" => {
             let mut d = false;
             let mut path_exists = false;
@@ -162,13 +160,13 @@ pub(crate) fn parse_args(args: Vec<String>) -> Command {
                     Flag::Flag(c) => {
                         d |= c == "d";
                         if d && path_exists {
-                            return Command::AddBooksFromDir(path);
+                            return Ok(Command::AddBooksFromDir(path));
                         }
                     }
                     Flag::FlagWithArgument(c, args) => {
                         d |= c == "d";
                         if d {
-                            return Command::AddBooksFromDir(PathBuf::from(&args[0]));
+                            return Ok(Command::AddBooksFromDir(PathBuf::from(&args[0])));
                         }
                     }
                     Flag::PositionalArg(args) => {
@@ -177,74 +175,73 @@ pub(crate) fn parse_args(args: Vec<String>) -> Command {
                             path = PathBuf::from(&args[0]);
                         }
                         if d {
-                            return Command::AddBooksFromDir(path);
+                            return Ok(Command::AddBooksFromDir(path));
                         }
                     }
                 };
             }
             if path_exists {
-                return if d {
+                Ok(if d {
                     Command::AddBooksFromDir(path)
                 } else {
                     Command::AddBookFromFile(path)
-                };
+                })
+            } else {
+                Err(CommandError::InsufficientArguments)
             }
-            Command::InvalidCommand
         }
         "!d" => {
-            return if let Some(flag) = flags.first() {
+            if let Some(flag) = flags.first() {
                 match flag {
                     Flag::Flag(a) => {
                         if a == "a" {
-                            Command::DeleteAll
+                            Ok(Command::DeleteAll)
                         } else {
-                            Command::InvalidCommand
+                            Err(CommandError::InvalidCommand)
                         }
                     }
                     Flag::PositionalArg(args) => {
                         if let Ok(i) = u32::from_str(args[0].as_str()) {
-                            Command::DeleteBook(BookIndex::BookID(i))
+                            Ok(Command::DeleteBook(BookIndex::BookID(i)))
                         } else {
-                            Command::InvalidCommand
+                            Err(CommandError::InvalidCommand)
                         }
                     }
-                    _ => Command::InvalidCommand,
+                    _ => Err(CommandError::InvalidCommand),
                 }
             } else {
-                Command::DeleteBook(BookIndex::Selected)
-            };
+                Ok(Command::DeleteBook(BookIndex::Selected))
+            }
         }
         "!e" => {
-            return match flags.into_iter().next() {
+            match flags.into_iter().next() {
                 Some(Flag::PositionalArg(args)) => {
                     let mut args = args.into_iter();
-                    if let Some(a) = args.next() {
-                        if let Some(b) = args.next() {
-                            if let Some(c) = args.next() {
-                                if let Ok(id) = u32::from_str(a.as_str()) {
-                                    return Command::EditBook(BookIndex::BookID(id), b, c);
-                                }
-                            }
+                    let a = args.next().ok_or_else(insuf)?;
+                    let b = args.next().ok_or_else(insuf)?;
 
-                            return Command::EditBook(BookIndex::Selected, a, b);
+                    if let Some(c) = args.next() {
+                        if let Ok(id) = u32::from_str(a.as_str()) {
+                            return Ok(Command::EditBook(BookIndex::BookID(id), b, c));
                         }
                     }
-                    Command::InvalidCommand
+
+                    Ok(Command::EditBook(BookIndex::Selected, a, b))
                 }
-                _ => Command::InvalidCommand,
-            };
+                _ => Err(CommandError::InvalidCommand),
+            }
         }
         "!m" => {
-            return match flags.first() {
+            match flags.first() {
                 Some(Flag::Flag(a)) => {
                     if a == "a" {
-                        Command::TryMergeAllBooks
+                        Ok(Command::TryMergeAllBooks)
                     } else {
-                        Command::InvalidCommand
+                        Err(CommandError::InvalidCommand)
                     }
                 }
-                _ => Command::InvalidCommand,
-            };
+                _ => Err(CommandError::InvalidCommand),
+            }
         }
         "!s" => {
             let mut d = false;
@@ -256,7 +253,7 @@ pub(crate) fn parse_args(args: Vec<String>) -> Command {
                     Flag::Flag(f) => {
                         if f == "d" {
                             if col_exists {
-                                return Command::SortColumn(col, true);
+                                return Ok(Command::SortColumn(col, true));
                             }
                             d = true;
                         }
@@ -264,67 +261,74 @@ pub(crate) fn parse_args(args: Vec<String>) -> Command {
                     Flag::FlagWithArgument(f, args) => {
                         d |= f == "d";
                         if d {
-                            return Command::SortColumn(args.into_iter().next().unwrap(), d);
+                            return Ok(Command::SortColumn(
+                                args.into_iter().next().ok_or_else(insuf)?,
+                                d,
+                            ));
                         }
                     }
                     Flag::PositionalArg(args) => {
                         if d {
-                            return Command::SortColumn(args.into_iter().next().unwrap(), true);
+                            return Ok(Command::SortColumn(
+                                args.into_iter().next().ok_or_else(insuf)?,
+                                true,
+                            ));
                         }
 
                         if !col_exists {
                             col_exists = true;
-                            col = args.into_iter().next().unwrap();
+                            col = args.into_iter().next().ok_or_else(insuf)?;
                         }
                     }
                 };
             }
-            return if col_exists {
-                Command::SortColumn(col, d)
+
+            if col_exists {
+                Ok(Command::SortColumn(col, d))
             } else {
-                Command::InvalidCommand
-            };
+                Err(CommandError::InsufficientArguments)
+            }
         }
         "!c" => {
-            return match flags.into_iter().next() {
-                Some(Flag::PositionalArg(args)) => {
-                    Command::AddColumn(args.into_iter().next().unwrap())
-                }
-                Some(Flag::Flag(arg)) => Command::RemoveColumn(arg),
-                _ => Command::InvalidCommand,
-            };
+            match flags.into_iter().next() {
+                Some(Flag::PositionalArg(args)) => Ok(Command::AddColumn(
+                    args.into_iter().next().ok_or_else(insuf)?,
+                )),
+                Some(Flag::Flag(arg)) => Ok(Command::RemoveColumn(arg)),
+                _ => Err(CommandError::InvalidCommand),
+            }
         }
         "!f" => {
-            return match flags.into_iter().next() {
+            match flags.into_iter().next() {
                 Some(Flag::PositionalArg(args)) => {
                     let mut args = args.into_iter();
-                    Command::FindMatches(
+                    Ok(Command::FindMatches(
                         Matching::Default,
-                        args.next().unwrap(),
-                        args.next().unwrap(),
-                    )
+                        args.next().ok_or_else(insuf)?,
+                        args.next().ok_or_else(insuf)?,
+                    ))
                 }
                 Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
                     "r" => {
                         let mut args = args.into_iter();
-                        Command::FindMatches(
+                        Ok(Command::FindMatches(
                             Matching::Regex,
-                            args.next().unwrap(),
-                            args.next().unwrap(),
-                        )
+                            args.next().ok_or_else(insuf)?,
+                            args.next().ok_or_else(insuf)?,
+                        ))
                     }
                     "c" => {
                         let mut args = args.into_iter();
-                        Command::FindMatches(
+                        Ok(Command::FindMatches(
                             Matching::CaseSensitive,
-                            args.next().unwrap(),
-                            args.next().unwrap(),
-                        )
+                            args.next().ok_or_else(insuf)?,
+                            args.next().ok_or_else(insuf)?,
+                        ))
                     }
-                    _ => Command::InvalidCommand,
+                    _ => Err(CommandError::InvalidCommand),
                 },
-                _ => Command::InvalidCommand,
-            };
+                _ => Err(CommandError::InvalidCommand),
+            }
         }
         "!o" => {
             let mut f = false;
@@ -343,17 +347,20 @@ pub(crate) fn parse_args(args: Vec<String>) -> Command {
                                 if let Ok(bi) = u32::from_str(ind_book.as_str()) {
                                     if let Some(ind_var) = args.get(1) {
                                         if let Ok(vi) = usize::from_str(ind_var.as_str()) {
-                                            return Command::OpenBookInExplorer(
+                                            return Ok(Command::OpenBookInExplorer(
                                                 BookIndex::BookID(bi),
                                                 vi,
-                                            );
+                                            ));
                                         }
                                     }
-                                    return Command::OpenBookInExplorer(BookIndex::BookID(bi), 0);
+                                    return Ok(Command::OpenBookInExplorer(
+                                        BookIndex::BookID(bi),
+                                        0,
+                                    ));
                                 }
                             }
                         }
-                        return Command::InvalidCommand;
+                        return Err(CommandError::InvalidCommand);
                     }
                     Flag::PositionalArg(args) => {
                         let mut args = args.into_iter();
@@ -374,26 +381,25 @@ pub(crate) fn parse_args(args: Vec<String>) -> Command {
                 if let Ok(loc) = u32::from_str(loc.as_str()) {
                     if index_exists {
                         if let Ok(index) = usize::from_str(index.as_str()) {
-                            return if f {
+                            return Ok(if f {
                                 Command::OpenBookInExplorer(BookIndex::BookID(loc), index)
                             } else {
                                 Command::OpenBookInApp(BookIndex::BookID(loc), index)
-                            };
+                            });
                         }
                     } else if f {
-                        return Command::OpenBookInExplorer(BookIndex::BookID(loc), 0);
+                        return Ok(Command::OpenBookInExplorer(BookIndex::BookID(loc), 0));
                     } else {
-                        return Command::OpenBookInApp(BookIndex::BookID(loc), 0);
+                        return Ok(Command::OpenBookInApp(BookIndex::BookID(loc), 0));
                     }
                 }
             }
-            return if f {
+            Ok(if f {
                 Command::OpenBookInExplorer(BookIndex::Selected, 0)
             } else {
                 Command::OpenBookInApp(BookIndex::Selected, 0)
-            };
+            })
         }
-        _ => return Command::UnknownCommand,
-    };
-    Command::InvalidCommand
+        _ => Err(CommandError::UnknownCommand),
+    }
 }

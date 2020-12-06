@@ -130,11 +130,10 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                 })?;
             }
 
-            #[allow(clippy::single_match)]
             match self.get_input() {
                 Ok(true) => return Ok(terminal.clear()?),
                 _ => {
-                    // TODO: Handle errors here and remove clippy::single_match.
+                    // TODO: Handle errors here.
                 }
             }
         }

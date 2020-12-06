@@ -1,3 +1,4 @@
+#![allow(clippy::single_match)]
 mod app;
 mod database;
 mod record;
@@ -50,16 +51,17 @@ fn main() -> Result<(), ApplicationError> {
 
     if !command.is_empty() {
         for command in command.split(|v| v == "--") {
-            let command = parse_args(command.to_owned());
-            if command.requires_ui() {
-                println!(
-                    "The selected command ({:?}) requires opening the user interface.",
-                    command
-                );
-                return Ok(());
-            }
-            if !app.run_command(command)? {
-                return Ok(());
+            if let Ok(command) = parse_args(command.to_owned()) {
+                if command.requires_ui() {
+                    println!(
+                        "The selected command ({:?}) requires opening the user interface.",
+                        command
+                    );
+                    return Ok(());
+                }
+                if !app.run_command(command)? {
+                    return Ok(());
+                }
             }
         }
     }

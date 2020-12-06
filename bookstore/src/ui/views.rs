@@ -217,10 +217,16 @@ impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
 
                         self.state.curr_command.clear();
 
-                        if !app.run_command(parse_args(args))? {
-                            return Ok(ApplicationTask::Quit);
+                        match parse_args(args) {
+                            Ok(command) => {
+                                if !app.run_command(command)? {
+                                    return Ok(ApplicationTask::Quit);
+                                }
+                            }
+                            Err(_) => {
+                                // TODO: How should invalid commands be handled?
+                            }
                         }
-
                         return Ok(ApplicationTask::Update);
                     }
                     KeyCode::Tab | KeyCode::BackTab => {
