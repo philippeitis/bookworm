@@ -1,10 +1,11 @@
 use std::fs::File;
 use std::io::{BufReader, Error, Read};
+use std::ops::Range;
 use std::path::Path;
 
 use zip::{result::ZipError, ZipArchive};
 
-use regex::Regex;
+use regex::{bytes::Regex as ByteRegex, Regex};
 
 use quick_xml::{events::Event, Reader};
 
@@ -38,12 +39,12 @@ fn get_isbn(text: &str) -> Option<String> {
 
 // Same as above, but again, what kind of terrible human being would put escaped metadata tags in
 // their description? (Also, the first metadata tag being escaped is very, very unlikely).
-fn get_metadata(text: &str) -> Option<String> {
+fn get_metadata_byte_range(text: &[u8]) -> Option<Range<usize>> {
     lazy_static::lazy_static! {
-        static ref RE: Regex = Regex::new(r#"(?s:<(?:opf:)?metadata[^>]*>)(?s)(.*)(?-s)(?:</(?:opf:)?metadata>)"#).unwrap();
+        static ref RE: ByteRegex = ByteRegex::new(r#"(?s:<(?:opf:)?metadata[^>]*>)(?s)(.*)(?-s)(?:</(?:opf:)?metadata>)"#).unwrap();
     }
-    if let Some(val) = RE.captures(text).expect(text).get(0) {
-        Some(val.as_str().to_owned())
+    if let Some(val) = RE.find(text) {
+        Some(val.start()..val.end())
     } else {
         None
     }
@@ -147,11 +148,11 @@ impl EpubMetadata {
             return Err(EpubError::NoContainer);
         };
 
-        let metadata = if let Ok(mut root_file) = archive.by_name(&root_file) {
-            let mut buf = Vec::new();
-            root_file.read_to_end(&mut buf)?;
-            let s = String::from_utf8_lossy(&buf);
-            match get_metadata(s.as_ref()) {
+        let mut meta_buf = Vec::new();
+        let range = if let Ok(mut root_file) = archive.by_name(&root_file) {
+            root_file.read_to_end(&mut meta_buf)?;
+            // let s = String::from_utf8_lossy(&buf);
+            match get_metadata_byte_range(&meta_buf) {
                 Some(metadata) => metadata,
                 None => return Err(EpubError::NoMetadata),
             }
@@ -167,7 +168,7 @@ impl EpubMetadata {
         };
 
         {
-            let mut reader = Reader::from_str(&metadata);
+            let mut reader = Reader::from_reader(BufReader::new(&meta_buf[range]));
             reader.trim_text(true);
 
             let mut buf = Vec::new();
