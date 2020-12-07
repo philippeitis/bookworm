@@ -344,13 +344,15 @@ impl AppDatabase for BasicDatabase {
     where
         S: AsRef<path::Path>,
     {
-        let start = self.get_new_id()?;
+        let start_id = self.get_new_id()?;
+
+        // TODO: Look at libraries with parallel directory reading.
         let results = fs::read_dir(dir)?
-            .map(|res| res.map(|e| e.path()))
-            .collect::<Result<Vec<_>, std::io::Error>>()?
+            .filter_map(|res| res.map(|e| e.path()).ok())
+            .collect::<Vec<_>>()
             .par_iter()
             .enumerate()
-            .map(|(id, path)| Book::generate_from_file(path, start + (id as u32)))
+            .map(|(id, path)| Book::generate_from_file(path, start_id + (id as u32)))
             .collect::<Vec<_>>();
 
         let mut ids = vec![];
