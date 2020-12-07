@@ -107,12 +107,10 @@ impl BookType {
                         }
                     }
                 }
-
                 Ok(())
             }
             BookType::MOBI => {
                 let doc = MobiMetadata::from_path(&file_path)?;
-
                 if book.local_title.is_none() {
                     book.local_title = doc.title();
                 }
@@ -300,6 +298,7 @@ impl BookVariant {
                     .to_string(),
             );
         }
+
         Ok(book)
     }
 

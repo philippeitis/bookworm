@@ -9,6 +9,8 @@ use std::io::{stdout, Write};
 
 use crossterm::{event::DisableMouseCapture, event::EnableMouseCapture, execute};
 
+use clap::Clap;
+
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
@@ -16,8 +18,6 @@ use crate::app::parse_args;
 use crate::app::{App, ApplicationError, Settings};
 use crate::database::{AppDatabase, BasicDatabase};
 use crate::ui::AppInterface;
-
-use clap::Clap;
 
 #[derive(Clap)]
 #[clap(version = "0.1", author = "?")]
