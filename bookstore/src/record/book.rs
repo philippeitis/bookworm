@@ -26,7 +26,7 @@ pub(crate) enum BookType {
     Unsupported(OsString),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 /// Enumerates all potential errors that can occur when using a Book.
 pub(crate) enum BookError {
     FileError,
@@ -253,6 +253,15 @@ impl Book {
 }
 
 impl BookVariant {
+    /// Generates a book variant from the file at the specified `file_path`, and fills in
+    /// information from the metadata of the book.
+    ///
+    /// # Arguments
+    /// * ` file_path ` - The path to the file of interest.
+    ///
+    /// # Errors
+    /// Will return an error if the provided file_path does not lead to a file.
+    /// Will panic if the title can not be set.
     pub(crate) fn generate_from_file<S>(file_path: S) -> Result<Self, BookError>
     where
         S: AsRef<path::Path>,
@@ -287,9 +296,11 @@ impl BookVariant {
             description: None,
             id: None,
         };
+
         for (booktype, path) in paths {
             let _ = booktype.fill_in_metadata(&mut book, path);
         }
+
         if book.local_title == None {
             book.local_title = Some(
                 file_name
@@ -308,6 +319,11 @@ impl BookVariant {
 }
 
 impl Book {
+    /// Generates a book with the given ID - intended to be used as a placeholder
+    /// to allow reducing the run-time of specific operations.
+    ///
+    /// # Arguments
+    /// * ` id ` - the id to assign this book.
     pub(crate) fn with_id(id: u32) -> Book {
         Book {
             title: None,
@@ -319,6 +335,18 @@ impl Book {
         }
     }
 
+    /// Generates a book from the file at the specified `file_path`, and assigns the given ID
+    /// by default (note that the ID can not be changed).
+    /// To match books to their respective parsers, it is assumed that the extension is
+    /// the correct file format, case-insensitive.
+    /// Metadata will be generated from the file and corresponding parser.
+    ///
+    /// # Arguments
+    /// * ` file_path ` - The path to the file of interest.
+    /// * ` id ` - the id to set.
+    ///
+    /// # Errors
+    /// Will return an error if the provided file_path does not lead to a file.
     pub(crate) fn generate_from_file<S>(file_path: S, id: u32) -> Result<Book, BookError>
     where
         S: AsRef<path::Path>,
@@ -372,6 +400,17 @@ impl Book {
 }
 
 impl Book {
+    /// Sets specified columns, to the specified value. Titles will be stored directly,
+    /// authors will be stored as a list containing a single author.
+    /// ID and Variants can not be modified through set_column.
+    /// Series will be parsed to extract an index - strings in the form "series ... [num]"
+    /// will be parsed as ("series ...", num).
+    ///
+    /// All remaining arguments will be stored literally.
+    ///
+    /// # Arguments
+    /// * ` column ` - the column of interest.
+    /// * ` value ` - the value to store into the column.
     pub(crate) fn set_column<T: AsRef<str>>(
         &mut self,
         column: &ColumnIdentifier,
@@ -417,6 +456,15 @@ impl Book {
         Ok(())
     }
 
+    /// Compares the specified columns, by default using Rust's native string comparison
+    /// - missing fields will be compared as empty strings.
+    /// If ID is compared, numerical comparison will occur.
+    /// If Series is compared, the series will be compared first, with the index being used
+    /// as a tie-breaker.
+    ///
+    /// # Arguments
+    /// * ` other ` - The other book with column to compare.
+    /// * ` column ` - the column of interest.
     pub(crate) fn cmp_column(&self, other: &Self, column: &ColumnIdentifier) -> Ordering {
         // fn cmp_opt<T: std::cmp::Ord>(a: Option<T>, b: Option<T>) -> Ordering {
         //     if a == b {
@@ -469,6 +517,12 @@ impl Book {
 }
 
 impl Book {
+    /// Merges self with other, assuming that other is in fact a variant of self.
+    /// Missing metadata will be utilized from other, and `self` variants will be extended
+    /// to include `other` variants.
+    ///
+    /// # Arguments
+    /// * ` other ` - Another book with more useful metadata, to be merged with self
     pub(crate) fn merge_mut(&mut self, other: Self) {
         if self.title.is_none() {
             self.title = other.title;
@@ -509,3 +563,35 @@ impl fmt::Display for Book {
 }
 
 // TODO: Add support for various identifiers (eg. DOI, ISBN, raw links)
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_setting_columns() {
+        let mut book = Book::with_id(0);
+        let test_sets = [
+            ("title", "hello", Ok(()), "hello"),
+            ("authors", "world", Ok(()), "world"),
+            ("id", "5", Err(BookError::ImmutableColumnError), "0"),
+            ("series", "hello world", Ok(()), "hello world"),
+            ("series", "hello world [1.2]", Ok(()), "hello world [1.2]"),
+            ("random_tag", "random value", Ok(()), "random value"),
+        ];
+
+        for (col, new_value, result, expected) in &test_sets {
+            let col = col.to_owned().into();
+            match result {
+                Ok(_) => assert!(book.set_column(&col, new_value).is_ok()),
+                Err(err) => {
+                    let e = book.set_column(&col, new_value);
+                    assert!(e.is_err());
+                    let e = e.unwrap_err();
+                    assert_eq!(&e, err);
+                }
+            }
+            assert_eq!(book.get_column_or(&col, ""), expected.to_owned());
+        }
+    }
+}
