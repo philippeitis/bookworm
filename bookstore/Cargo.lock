@@ -674,11 +674,10 @@ dependencies = [
 
 [[package]]
 name = "mobi"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d040771d763f217334e09ed9d79b3bf9f4902f49364fce2b53183b8b5c625ad2"
+checksum = "bfeb025d6a4044ad4af5978591cd4b3f2d49efbd666ebec1d657de17bdb051b9"
 dependencies = [
- "byteorder",
  "encoding",
 ]
 
@@ -1486,9 +1485,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "0.5.8"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "543adf038106b64cfca4711c82c917d785e3540e04f7996554488f988ec43124"
+checksum = "cc2896475a242c41366941faa27264df2cb935185a92e059a004d0048feb2ac5"
 dependencies = [
  "byteorder",
  "bzip2",
