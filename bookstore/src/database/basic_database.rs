@@ -12,6 +12,7 @@ use unicase::UniCase;
 use crate::record::book::ColumnIdentifier;
 use crate::record::{Book, BookError};
 
+// TODO: Should we store column & string here?
 #[derive(Debug, Eq, PartialEq)]
 pub enum Matching {
     Regex,
@@ -77,6 +78,11 @@ impl BookMap {
         id
     }
 
+    /// Allocates the given ID as the largest in the database, if it exceeds the current
+    /// internal ID.
+    ///
+    /// # Arguments
+    /// * `id` - The id to allocate space for.
     fn allocate_id(&mut self, id: u32) {
         if id > self.max_id {
             self.max_id = id;
@@ -254,6 +260,15 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database fails.
     fn merge_similar(&mut self) -> Result<(), DatabaseError>;
 
+    /// Finds books, using the match to compare the specified column to the search string.
+    ///
+    /// # Arguments
+    /// * ` matching ` - The matching method
+    /// * ` column ` - The column to search over.
+    /// * ` search ` - The search query.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn find_matches<S: AsRef<str>, T: AsRef<str>>(
         &self,
         matching: Matching,
@@ -261,18 +276,59 @@ pub(crate) trait AppDatabase {
         search: T,
     ) -> Result<Vec<Book>, DatabaseError>;
 
+    /// Sorts books by comparing the specified column.
+    ///
+    /// # Arguments
+    /// * ` col ` - The column of interest.
+    /// * ` reverse ` - whether to sort in reverse order.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError>;
 
+    /// Returns the number of books stored internally.
     fn size(&self) -> usize;
 }
 
 pub(crate) trait IndexableDatabase: AppDatabase + Sized {
+    /// Gets the books in self as specified by absolute indices, respecting the current
+    /// ordering.
+    ///
+    /// # Arguments
+    /// * ` indices ` - the indices of the books to fetch
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn get_books_indexed(&self, indices: Range<usize>) -> Result<Vec<Book>, DatabaseError>;
 
+    /// Get the book at the current index, respecting the current ordering.
+    ///
+    /// # Arguments
+    /// * ` index ` - the index of the book to fetch
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails or the given index does not
+    /// exist.
     fn get_book_indexed(&self, index: usize) -> Result<Book, DatabaseError>;
 
+    /// Remove the book at the current index, respecting the current ordering.
+    ///
+    /// # Arguments
+    /// * ` index ` - the index of the book to remove
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn remove_book_indexed(&mut self, index: usize) -> Result<(), DatabaseError>;
 
+    /// Edit the book at the current index, respecting the current ordering.
+    ///
+    /// # Arguments
+    /// * ` index ` - the index of the book to remove
+    /// * ` column ` - the column to modify
+    /// * ` new_value ` - the value to set the column to.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
     fn edit_book_indexed<S: AsRef<str>, T: AsRef<str>>(
         &mut self,
         index: usize,
