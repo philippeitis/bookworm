@@ -115,18 +115,23 @@ impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
 
 pub(crate) struct BorderWidget {
     name: String,
+    pub(crate) saved: bool,
 }
 
 impl BorderWidget {
     pub(crate) fn new(name: String) -> Self {
-        BorderWidget { name }
+        BorderWidget { name, saved: true }
     }
 }
 
 impl<B: Backend> Widget<B> for BorderWidget {
     fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
         let block = Block::default()
-            .title(format!(" bookshop || {} ", self.name))
+            .title(format!(
+                " bookshop || {}{}",
+                self.name,
+                if self.saved { " " } else { " * " }
+            ))
             .borders(Borders::ALL);
 
         f.render_widget(block, chunk);

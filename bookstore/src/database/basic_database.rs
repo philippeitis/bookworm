@@ -113,6 +113,7 @@ pub(crate) struct BasicDatabase {
     /// All available columns. Case-insensitive.
     cols: HashSet<UniCase<String>>,
     len: usize,
+    saved: bool,
 }
 
 pub(crate) trait AppDatabase {
@@ -134,7 +135,7 @@ pub(crate) trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database can not be saved correctly.
-    fn save(&self) -> Result<(), DatabaseError>;
+    fn save(&mut self) -> Result<(), DatabaseError>;
 
     /// Returns a new ID which is larger than all previous IDs.
     fn get_new_id(&self) -> Result<u32, DatabaseError>;
@@ -284,10 +285,14 @@ pub(crate) trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError>;
+    fn sort_books_by_col(&mut self, col: &str, reverse: bool) -> Result<(), DatabaseError>;
 
     /// Returns the number of books stored internally.
     fn size(&self) -> usize;
+
+    /// Returns true if the internal database is persisted to file.
+    /// Note that at the moment, any write action will unset the saved state.
+    fn saved(&self) -> bool;
 }
 
 pub(crate) trait IndexableDatabase: AppDatabase + Sized {
@@ -337,6 +342,9 @@ pub(crate) trait IndexableDatabase: AppDatabase + Sized {
     ) -> Result<(), DatabaseError>;
 }
 
+// TODO: Saved currently returns false negatives - eg. sorting when already sorted is considered
+//  unsaving, so is editing book with exact same value, etc.
+
 impl AppDatabase for BasicDatabase {
     fn open<S>(file_path: S) -> Result<Self, DatabaseError>
     where
@@ -364,11 +372,18 @@ impl AppDatabase for BasicDatabase {
             )
         })?;
 
-        Ok(BasicDatabase { backend, cols, len })
+        Ok(BasicDatabase {
+            backend,
+            cols,
+            len,
+            saved: true,
+        })
     }
 
-    fn save(&self) -> Result<(), DatabaseError> {
-        Ok(self.backend.save()?)
+    fn save(&mut self) -> Result<(), DatabaseError> {
+        self.backend.save()?;
+        self.saved = true;
+        Ok(())
     }
 
     fn get_new_id(&self) -> Result<u32, DatabaseError> {
@@ -382,7 +397,10 @@ impl AppDatabase for BasicDatabase {
             db.books.insert(id, book);
             (id, db.books.len())
         })?;
+
         self.len = len;
+        self.saved = false;
+
         Ok(id)
     }
 
@@ -427,6 +445,8 @@ impl AppDatabase for BasicDatabase {
             db.books.len()
         })?;
 
+        self.saved = false;
+
         Ok((ids, errs))
     }
 
@@ -435,6 +455,9 @@ impl AppDatabase for BasicDatabase {
             db.books.shift_remove(&id);
             db.books.len()
         })?;
+
+        self.saved = false;
+
         Ok(())
     }
 
@@ -444,6 +467,9 @@ impl AppDatabase for BasicDatabase {
             db.books.retain(|id, _| !ids.contains(id));
             db.books.len()
         })?;
+
+        self.saved = false;
+
         Ok(())
     }
 
@@ -452,6 +478,8 @@ impl AppDatabase for BasicDatabase {
             db.books.clear();
             db.books.len()
         })?;
+
+        self.saved = false;
 
         Ok(())
     }
@@ -494,6 +522,7 @@ impl AppDatabase for BasicDatabase {
             None => Err(DatabaseError::BookNotFound(id)),
             Some(book) => Ok(book.set_column(&column.as_ref().into(), new_value)?),
         })??;
+        self.saved = false;
         self.cols.insert(UniCase::new(column.as_ref().to_owned()));
         Ok(())
     }
@@ -531,7 +560,7 @@ impl AppDatabase for BasicDatabase {
             db.books.retain(|_, book| book.get_id() != dummy_id);
             db.books.len()
         })?;
-
+        self.saved = false;
         Ok(())
     }
 
@@ -577,8 +606,8 @@ impl AppDatabase for BasicDatabase {
             })??)
     }
 
-    fn sort_books_by_col(&self, col: &str, reverse: bool) -> Result<(), DatabaseError> {
-        Ok(self.backend.write(|db| {
+    fn sort_books_by_col(&mut self, col: &str, reverse: bool) -> Result<(), DatabaseError> {
+        self.backend.write(|db| {
             let col = ColumnIdentifier::from(col);
 
             // Use some heuristic to sort in parallel when it would offer speedup -
@@ -594,11 +623,17 @@ impl AppDatabase for BasicDatabase {
             } else {
                 db.books.par_sort_by(|_, a, _, b| a.cmp_column(b, &col))
             }
-        })?)
+        })?;
+        self.saved = false;
+        Ok(())
     }
 
     fn size(&self) -> usize {
         self.len
+    }
+
+    fn saved(&self) -> bool {
+        self.saved
     }
 }
 
@@ -636,6 +671,8 @@ impl IndexableDatabase for BasicDatabase {
             db.books.len()
         })?;
 
+        self.saved = false;
+
         Ok(())
     }
 
@@ -654,6 +691,7 @@ impl IndexableDatabase for BasicDatabase {
             }
         })??;
 
+        self.saved = false;
         self.cols.insert(UniCase::new(column.as_ref().to_owned()));
         Ok(())
     }

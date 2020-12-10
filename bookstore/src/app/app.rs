@@ -203,10 +203,12 @@ impl<D: IndexableDatabase> App<D> {
                 unimplemented!("Searches not implemented yet.")
                 // self.matches = Some(self.db.find_matches(matching, &column, &pattern)?);
             }
-            Command::Write => self.db.inner().save()?,
+            Command::Write => self.db.write(|d| d.save())?,
+            // TODO: A warning pop-up when user is about to exit
+            //  with unsaved changes.
             Command::Quit => return Ok(false),
             Command::WriteAndQuit => {
-                self.db.inner().save()?;
+                self.db.write(|d| d.save())?;
                 return Ok(false);
             }
             Command::TryMergeAllBooks => {
@@ -455,5 +457,9 @@ impl<D: IndexableDatabase> App<D> {
     pub(crate) fn set_selected_columns(&mut self, cols: Vec<String>) {
         self.selected_cols = cols.into_iter().map(UniCase::new).collect();
         self.column_data = vec![vec![]; self.selected_cols.len()];
+    }
+
+    pub(crate) fn saved(&mut self) -> bool {
+        self.db.inner().saved()
     }
 }

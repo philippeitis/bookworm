@@ -114,6 +114,7 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
 
             if self.app.take_update() {
                 terminal.draw(|f| {
+                    self.border_widget.saved = self.app.saved();
                     self.border_widget.render_into_frame(f, f.size());
 
                     let chunk = {
