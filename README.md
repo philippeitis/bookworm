@@ -13,6 +13,7 @@ bookstore is a fast (hopefully) terminal based library management system (like C
   - Write and quit: `!wq`
   - Merging all books with matching metadata: `!m -a`
   - (Windows Only) Opening books in native file viewer or File Explorer: `!o [id]?` | `!o -f [id]?`
+  - Finding books with regex or case-sensitive string or default: `!f (-r|-c)? [column] [search_str]`
   - Supplying one or more commands from CLI: `bookstore [args] -- [command1] -- [command2] -- ...`
 - Hotkey navigation and interaction
   - Scrolling up and down using:
