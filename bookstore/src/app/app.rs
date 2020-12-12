@@ -190,7 +190,7 @@ impl<D: IndexableDatabase> App<D> {
             Command::SortColumn(column, rev) => {
                 self.update_selected_column(UniCase::new(column), rev);
             }
-            #[cfg(windows)]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             Command::OpenBookInApp(b, index) => {
                 if let Ok(b) = self.get_book(b) {
                     self.open_book(&b, index)?;
@@ -324,7 +324,7 @@ impl<D: IndexableDatabase> App<D> {
         None
     }
 
-    #[cfg(windows)]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     /// Opens the book in SumatraPDF on Windows.
     /// Other operating systems not currently supported
     ///
@@ -337,10 +337,21 @@ impl<D: IndexableDatabase> App<D> {
     /// or if the command itself fails.
     fn open_book(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
         if let Some(path) = Self::get_book_path(book, index) {
-            ProcessCommand::new("cmd.exe")
-                .args(&["/C", "start", "sumatrapdf"][..])
-                .arg(path)
-                .spawn()?;
+            #[cfg(target_os = "windows")]
+            {
+                ProcessCommand::new("cmd.exe")
+                    .args(&["/C", "start", "sumatrapdf"][..])
+                    .arg(path)
+                    .spawn()?;
+            }
+            #[cfg(target_os = "linux")]
+            {
+                ProcessCommand::new("xdg-open").arg(path).spawn()?;
+            }
+            #[cfg(target_os = "macos")]
+            {
+                ProcessCommand::new("open").arg(path).spawn()?;
+            }
         }
         Ok(())
     }
