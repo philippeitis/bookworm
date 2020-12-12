@@ -2,8 +2,9 @@ use crossterm::event::{Event, KeyCode, MouseEvent};
 
 use tui::backend::Backend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
-use tui::text::Span;
-use tui::widgets::{Block, List, ListItem, ListState};
+use tui::style::{Modifier, Style};
+use tui::text::{Span, Text};
+use tui::widgets::{Block, List, ListItem, ListState, Paragraph};
 use tui::Frame;
 
 use unicode_truncate::UnicodeTruncateStr;
@@ -16,9 +17,11 @@ use crate::database::{AppDatabase, IndexableDatabase};
 use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{BookWidget, CommandWidget, Widget};
 
+#[derive(Copy, Clone)]
 pub(crate) enum AppView {
-    ColumnView,
-    EditView,
+    Columns,
+    Edit,
+    Help,
 }
 
 pub(crate) enum ApplicationTask {
@@ -38,7 +41,7 @@ pub(crate) trait ResizableWidget<D: AppDatabase, B: Backend> {
     ///
     /// * ` f ` - A frame to render into.
     /// * ` chunk ` - A chunk to specify the size of the widget.
-    fn render_into_frame(&self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect);
+    fn render_into_frame(&mut self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect);
 }
 
 pub(crate) trait View<D: AppDatabase, B: Backend>: ResizableWidget<D, B> {
@@ -119,7 +122,7 @@ pub(crate) struct ColumnWidget {
 }
 
 impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
-    fn render_into_frame(&self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
+    fn render_into_frame(&mut self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
         let chunk = if let Ok(b) = app.selected_item() {
             let hchunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -197,7 +200,7 @@ impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
                 match event.code {
                     KeyCode::F(2) => {
                         if app.selected().is_some() {
-                            return Ok(ApplicationTask::SwitchView(AppView::EditView));
+                            return Ok(ApplicationTask::SwitchView(AppView::Edit));
                         }
                     }
                     KeyCode::Backspace => {
@@ -221,6 +224,9 @@ impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
                             Ok(command) => {
                                 if !app.run_command(command)? {
                                     return Ok(ApplicationTask::Quit);
+                                }
+                                if app.has_help_string() {
+                                    return Ok(ApplicationTask::SwitchView(AppView::Help));
                                 }
                             }
                             Err(_) => {
@@ -293,7 +299,7 @@ pub(crate) struct EditWidget {
 }
 
 impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
-    fn render_into_frame(&self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
+    fn render_into_frame(&mut self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
@@ -375,7 +381,7 @@ impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
                                 &self.edit.orig_value,
                             );
                         }
-                        return Ok(ApplicationTask::SwitchView(AppView::ColumnView));
+                        return Ok(ApplicationTask::SwitchView(AppView::Columns));
                     }
                     KeyCode::Esc => {
                         app.update_value(
@@ -383,7 +389,7 @@ impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
                             self.edit.selected,
                             &self.edit.orig_value,
                         );
-                        return Ok(ApplicationTask::SwitchView(AppView::ColumnView));
+                        return Ok(ApplicationTask::SwitchView(AppView::Columns));
                     }
                     KeyCode::Delete => {
                         // TODO: Add code to delete forwards
@@ -430,6 +436,105 @@ impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
             self.edit.selected,
             &self.edit.visible(),
         );
+        Ok(ApplicationTask::Update)
+    }
+
+    fn take_state(&mut self) -> UIState {
+        std::mem::take(&mut self.state)
+    }
+}
+
+pub(crate) struct HelpWidget {
+    pub(crate) state: UIState,
+    pub(crate) offset: usize,
+    pub(crate) height: usize,
+    pub(crate) window_height: usize,
+    pub(crate) help_string: &'static str,
+}
+
+impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget {
+    fn render_into_frame(&mut self, _app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
+        let vchunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
+            .split(chunk);
+
+        self.window_height = vchunks[0].height as usize;
+        let paragraph = Paragraph::new(self.help_string.to_string())
+            .scroll((self.offset as u16, 0))
+            .style(Style::default());
+
+        f.render_widget(paragraph, vchunks[0]);
+        let text = Text::styled(
+            "Press ESC to return".to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        );
+
+        f.render_widget(Paragraph::new(text), vchunks[1])
+    }
+}
+
+impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for HelpWidget {
+    fn handle_input(
+        &mut self,
+        event: Event,
+        _app: &mut App<D>,
+    ) -> Result<ApplicationTask, ApplicationError> {
+        match event {
+            Event::Resize(_, _) => return Ok(ApplicationTask::Update),
+            Event::Mouse(m) => match m {
+                MouseEvent::ScrollDown(_, _, _) => {
+                    self.offset = if self.state.nav_settings.inverted {
+                        self.offset.saturating_sub(self.state.nav_settings.scroll)
+                    } else {
+                        self.height
+                            .min(self.offset.saturating_add(self.state.nav_settings.scroll))
+                    };
+                }
+                MouseEvent::ScrollUp(_, _, _) => {
+                    self.offset = if self.state.nav_settings.inverted {
+                        self.height
+                            .min(self.offset.saturating_add(self.state.nav_settings.scroll))
+                    } else {
+                        self.offset.saturating_sub(self.state.nav_settings.scroll)
+                    };
+                }
+                _ => {
+                    return Ok(ApplicationTask::DoNothing);
+                }
+            },
+            Event::Key(event) => {
+                match event.code {
+                    KeyCode::Esc => return Ok(ApplicationTask::SwitchView(AppView::Columns)),
+                    // Scrolling
+                    KeyCode::Up => {
+                        self.offset = self.offset.saturating_sub(1);
+                    }
+                    KeyCode::Down => {
+                        self.offset = self
+                            .height
+                            .saturating_sub(self.window_height)
+                            .min(self.offset.saturating_add(1));
+                    }
+                    KeyCode::PageDown => {
+                        self.offset = self
+                            .height
+                            .saturating_sub(self.window_height)
+                            .min(self.offset.saturating_add(self.window_height));
+                    }
+                    KeyCode::PageUp => {
+                        self.offset = self.offset.saturating_sub(self.window_height);
+                    }
+                    KeyCode::Home => {
+                        self.offset = 0;
+                    }
+                    KeyCode::End => {
+                        self.offset = self.height.saturating_sub(self.window_height);
+                    }
+                    _ => return Ok(ApplicationTask::DoNothing),
+                }
+            }
+        }
         Ok(ApplicationTask::Update)
     }
 

@@ -1,6 +1,7 @@
 #[allow(clippy::module_inception)]
 pub mod app;
 pub mod autocomplete;
+mod help_strings;
 pub(crate) mod parser;
 pub mod settings;
 pub mod user_input;

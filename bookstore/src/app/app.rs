@@ -3,6 +3,7 @@ use std::{path::PathBuf, process::Command as ProcessCommand};
 
 use unicase::UniCase;
 
+use crate::app::help_strings::{help_strings, GENERAL_HELP};
 use crate::app::settings::SortSettings;
 use crate::app::{parser, BookIndex, Command};
 use crate::database::bookview::BookViewError;
@@ -69,7 +70,7 @@ pub(crate) struct App<D: AppDatabase> {
     db: SearchableBookView<D>,
     selected_cols: Vec<UniCase<String>>,
     column_data: Vec<Vec<String>>,
-
+    active_help_string: Option<&'static str>,
     // Actions to run on data
     sort_settings: SortSettings,
     column_update: ColumnUpdate,
@@ -85,6 +86,7 @@ impl<D: IndexableDatabase> App<D> {
             updated: true,
             column_update: ColumnUpdate::Regenerate,
             column_data: vec![],
+            active_help_string: None,
         }
     }
 
@@ -219,6 +221,16 @@ impl<D: IndexableDatabase> App<D> {
                 self.db.write(|db| db.merge_similar())?;
                 self.register_update();
                 self.column_update = ColumnUpdate::Regenerate;
+            }
+            Command::Help(flag) => {
+                if let Some(s) = help_strings(&flag) {
+                    self.active_help_string = Some(s);
+                } else {
+                    self.active_help_string = Some(GENERAL_HELP);
+                }
+            }
+            Command::GeneralHelp => {
+                self.active_help_string = Some(GENERAL_HELP);
             }
             #[cfg(not(windows))]
             _ => return Ok(true),
@@ -478,5 +490,13 @@ impl<D: IndexableDatabase> App<D> {
 
     pub(crate) fn pop_scope(&mut self) -> bool {
         self.modify_db(|db| db.pop_scope())
+    }
+
+    pub(crate) fn has_help_string(&self) -> bool {
+        self.active_help_string.is_some()
+    }
+
+    pub(crate) fn take_help_string(&mut self) -> &'static str {
+        std::mem::take(&mut self.active_help_string).unwrap_or(GENERAL_HELP)
     }
 }

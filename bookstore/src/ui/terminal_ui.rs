@@ -10,7 +10,7 @@ use crate::app::settings::{InterfaceStyle, NavigationSettings, Settings};
 use crate::app::user_input::{CommandString, EditState};
 use crate::app::{App, ApplicationError};
 use crate::database::{AppDatabase, IndexableDatabase};
-use crate::ui::views::{AppView, ApplicationTask, ColumnWidget, EditWidget, View};
+use crate::ui::views::{AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, View};
 use crate::ui::widgets::{BorderWidget, Widget};
 
 #[derive(Default)]
@@ -78,16 +78,24 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                         self.app.register_update();
                         let state = self.active_view.take_state();
                         match view {
-                            AppView::ColumnView => {
-                                self.active_view = Box::new(ColumnWidget { state })
-                            }
-                            AppView::EditView => {
+                            AppView::Columns => self.active_view = Box::new(ColumnWidget { state }),
+                            AppView::Edit => {
                                 if let Some(x) = self.app.selected() {
                                     self.active_view = Box::new(EditWidget {
                                         edit: EditState::new(&self.app.get_value(0, x), x),
                                         state,
                                     })
                                 }
+                            }
+                            AppView::Help => {
+                                let help_string = self.app.take_help_string();
+                                self.active_view = Box::new(HelpWidget {
+                                    state,
+                                    offset: 0,
+                                    height: help_string.lines().count(),
+                                    window_height: 0,
+                                    help_string,
+                                })
                             }
                         }
                     }

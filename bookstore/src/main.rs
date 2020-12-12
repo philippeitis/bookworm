@@ -62,6 +62,9 @@ fn main() -> Result<(), ApplicationError> {
                 if !app.run_command(command)? {
                     return Ok(());
                 }
+                if app.has_help_string() {
+                    println!("{}", app.take_help_string());
+                }
             }
         }
     }

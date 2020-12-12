@@ -33,6 +33,8 @@ pub enum Command {
     Write,
     WriteAndQuit,
     FindMatches(Search),
+    Help(String),
+    GeneralHelp,
 }
 
 pub enum CommandError {
@@ -43,15 +45,13 @@ pub enum CommandError {
 
 impl Command {
     pub(crate) fn requires_ui(&self) -> bool {
+        use Command::*;
         match self {
-            Command::DeleteBook(b) => b == &BookIndex::Selected,
-            Command::EditBook(b, _, _) => b == &BookIndex::Selected,
-            Command::OpenBookInApp(b, _) => b == &BookIndex::Selected,
-            Command::OpenBookInExplorer(b, _) => b == &BookIndex::Selected,
-            Command::AddColumn(_) => true,
-            Command::RemoveColumn(_) => true,
-            Command::SortColumn(_, _) => true,
-            Command::FindMatches(_) => true,
+            DeleteBook(b) => b == &BookIndex::Selected,
+            EditBook(b, _, _) => b == &BookIndex::Selected,
+            OpenBookInApp(b, _) => b == &BookIndex::Selected,
+            OpenBookInExplorer(b, _) => b == &BookIndex::Selected,
+            AddColumn(_) | RemoveColumn(_) | SortColumn(_, _) | FindMatches(_) => true,
             _ => false,
         }
     }
@@ -405,6 +405,14 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 Command::OpenBookInApp(BookIndex::Selected, 0)
             })
         }
+        "!h" => Ok(match flags.into_iter().next() {
+            Some(Flag::PositionalArg(args)) => Command::Help(
+                args.into_iter()
+                    .next()
+                    .ok_or(CommandError::InsufficientArguments)?,
+            ),
+            _ => Command::GeneralHelp,
+        }),
         _ => Err(CommandError::UnknownCommand),
     }
 }
