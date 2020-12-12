@@ -1,4 +1,4 @@
-#[cfg(windows)]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::{path::PathBuf, process::Command as ProcessCommand};
 
 use unicase::UniCase;
@@ -302,7 +302,6 @@ impl<D: IndexableDatabase> App<D> {
         Ok(())
     }
 
-    #[cfg(windows)]
     /// Returns the first available path amongst the variants of the book, or None if no such
     /// path exists.
     ///
