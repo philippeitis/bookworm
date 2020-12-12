@@ -7,8 +7,8 @@ use crate::app::settings::SortSettings;
 use crate::app::{parser, BookIndex, Command};
 use crate::database::bookview::BookViewError;
 use crate::database::{
-    AppDatabase, BookView, DatabaseError, IndexableDatabase, ScopedBookView, ScrollableBookView,
-    SearchedBookView,
+    AppDatabase, BookView, DatabaseError, IndexableDatabase, NestedBookView, ScrollableBookView,
+    SearchableBookView,
 };
 use crate::record::book::ColumnIdentifier;
 use crate::record::Book;
@@ -66,7 +66,7 @@ impl From<crossterm::ErrorKind> for ApplicationError {
 
 pub(crate) struct App<D: AppDatabase> {
     // Application data
-    db: SearchedBookView<D>,
+    db: SearchableBookView<D>,
     selected_cols: Vec<UniCase<String>>,
     column_data: Vec<Vec<String>>,
 
@@ -79,7 +79,7 @@ pub(crate) struct App<D: AppDatabase> {
 impl<D: IndexableDatabase> App<D> {
     pub(crate) fn new(db: D) -> Self {
         App {
-            db: SearchedBookView::new(db),
+            db: SearchableBookView::new(db),
             selected_cols: vec![],
             sort_settings: SortSettings::default(),
             updated: true,
@@ -381,7 +381,7 @@ impl<D: IndexableDatabase> App<D> {
         Ok(())
     }
 
-    fn modify_db(&mut self, f: impl Fn(&mut SearchedBookView<D>) -> bool) -> bool {
+    fn modify_db(&mut self, f: impl Fn(&mut SearchableBookView<D>) -> bool) -> bool {
         if f(&mut self.db) {
             self.register_update();
             self.column_update = ColumnUpdate::Regenerate;
