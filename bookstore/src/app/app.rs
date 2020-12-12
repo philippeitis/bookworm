@@ -199,9 +199,9 @@ impl<D: IndexableDatabase> App<D> {
                     self.open_book_in_dir(&b, index)?;
                 }
             }
-            Command::FindMatches(_matching, _column, _pattern) => {
-                unimplemented!("Searches not implemented yet.")
-                // self.matches = Some(self.db.find_matches(matching, &column, &pattern)?);
+            Command::FindMatches(_search) => {
+                self.updated = true;
+                self.column_update = ColumnUpdate::Regenerate;
             }
             Command::Write => self.db.write(|d| d.save())?,
             // TODO: A warning pop-up when user is about to exit

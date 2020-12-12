@@ -9,16 +9,9 @@ use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
+use crate::database::search::Search;
 use crate::record::book::ColumnIdentifier;
 use crate::record::{Book, BookError};
-
-// TODO: Should we store column & string here?
-#[derive(Debug, Eq, PartialEq)]
-pub enum Matching {
-    Regex,
-    CaseSensitive,
-    Default,
-}
 
 #[derive(Debug)]
 pub(crate) enum DatabaseError {
@@ -270,13 +263,9 @@ pub(crate) trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn find_matches<S: AsRef<str>, T: AsRef<str>>(
-        &self,
-        matching: Matching,
-        column: S,
-        search: T,
-    ) -> Result<Vec<Book>, DatabaseError>;
+    fn find_matches(&self, search: Search) -> Result<Vec<Book>, DatabaseError>;
 
+    // TODO: push this into bookview?
     /// Sorts books by comparing the specified column.
     ///
     /// # Arguments
@@ -564,39 +553,34 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn find_matches<S: AsRef<str>, T: AsRef<str>>(
-        &self,
-        matching: Matching,
-        column: S,
-        search: T,
-    ) -> Result<Vec<Book>, DatabaseError> {
-        let col = ColumnIdentifier::from(column);
-
+    fn find_matches(&self, search: Search) -> Result<Vec<Book>, DatabaseError> {
         Ok(self
             .backend
             .read(|db| -> Result<Vec<Book>, DatabaseError> {
                 let mut results = vec![];
-                match matching {
-                    Matching::Default => {
-                        let insensitive = search.as_ref().to_ascii_lowercase();
-                        for (_, book) in db.books.iter() {
-                            if insensitive.contains(&book.get_column_or(&col, "")) {
-                                results.push(book.clone());
-                            }
-                        }
-                    }
-                    Matching::CaseSensitive => {
-                        let sensitive = search.as_ref().to_owned();
-                        for (_, book) in db.books.iter() {
-                            if sensitive.contains(&book.get_column_or(&col, "")) {
-                                results.push(book.clone());
-                            }
-                        }
-                    }
-                    Matching::Regex => {
-                        let matcher = Regex::new(&search.as_ref())?;
+                match search {
+                    Search::Regex(column, search) => {
+                        let col = ColumnIdentifier::from(column);
+                        let matcher = Regex::new(search.as_str())?;
                         for (_, book) in db.books.iter() {
                             if matcher.is_match(&book.get_column_or(&col, "")) {
+                                results.push(book.clone());
+                            }
+                        }
+                    }
+                    Search::CaseSensitive(column, search) => {
+                        let col = ColumnIdentifier::from(column);
+                        for (_, book) in db.books.iter() {
+                            if book.get_column_or(&col, "").contains(&search) {
+                                results.push(book.clone());
+                            }
+                        }
+                    }
+                    Search::Default(column, search) => {
+                        let col = ColumnIdentifier::from(column);
+                        let insensitive = search.to_ascii_lowercase();
+                        for (_, book) in db.books.iter() {
+                            if insensitive.contains(&book.get_column_or(&col, "")) {
                                 results.push(book.clone());
                             }
                         }

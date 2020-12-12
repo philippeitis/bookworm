@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 extern crate shellwords;
 
-use crate::database::Matching;
+use crate::database::search::Search;
 
 #[derive(Debug)]
 pub enum Flag {
@@ -34,7 +34,7 @@ pub enum Command {
     Quit,
     Write,
     WriteAndQuit,
-    FindMatches(Matching, String, String),
+    FindMatches(Search),
 }
 
 pub enum CommandError {
@@ -53,7 +53,7 @@ impl Command {
             Command::AddColumn(_) => true,
             Command::RemoveColumn(_) => true,
             Command::SortColumn(_, _) => true,
-            Command::FindMatches(_, _, _) => true,
+            Command::FindMatches(_) => true,
             _ => false,
         }
     }
@@ -122,6 +122,23 @@ fn read_flags(args: Vec<String>) -> Vec<Flag> {
     flags
 }
 
+fn remove_string_quotes(mut s: String) -> String {
+    match s.chars().next() {
+        x @ Some('"') | x @ Some('\'') => match s.chars().last() {
+            y @ Some('"') | y @ Some('\'') => {
+                if x == y {
+                    s.remove(0);
+                    s.pop();
+                    s
+                } else {
+                    s
+                }
+            }
+            _ => s,
+        },
+        _ => s,
+    }
+}
 #[allow(dead_code)]
 /// Reads a string which acts as a command, splits into into its component words,
 /// and then parses the result into a command which can be run.
@@ -295,28 +312,25 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
         "!f" => match flags.into_iter().next() {
             Some(Flag::PositionalArg(args)) => {
                 let mut args = args.into_iter();
-                Ok(Command::FindMatches(
-                    Matching::Default,
+                Ok(Command::FindMatches(Search::Default(
                     args.next().ok_or_else(insuf)?,
-                    args.next().ok_or_else(insuf)?,
-                ))
+                    remove_string_quotes(args.next().ok_or_else(insuf)?),
+                )))
             }
             Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
                 "r" => {
                     let mut args = args.into_iter();
-                    Ok(Command::FindMatches(
-                        Matching::Regex,
+                    Ok(Command::FindMatches(Search::Regex(
                         args.next().ok_or_else(insuf)?,
-                        args.next().ok_or_else(insuf)?,
-                    ))
+                        remove_string_quotes(args.next().ok_or_else(insuf)?),
+                    )))
                 }
                 "c" => {
                     let mut args = args.into_iter();
-                    Ok(Command::FindMatches(
-                        Matching::CaseSensitive,
+                    Ok(Command::FindMatches(Search::CaseSensitive(
                         args.next().ok_or_else(insuf)?,
-                        args.next().ok_or_else(insuf)?,
-                    ))
+                        remove_string_quotes(args.next().ok_or_else(insuf)?),
+                    )))
                 }
                 _ => Err(CommandError::InvalidCommand),
             },
