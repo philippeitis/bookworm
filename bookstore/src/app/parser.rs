@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-extern crate shellwords;
-
 use crate::database::search::Search;
 
 #[derive(Debug)]
@@ -139,6 +137,7 @@ fn remove_string_quotes(mut s: String) -> String {
         _ => s,
     }
 }
+
 #[allow(dead_code)]
 /// Reads a string which acts as a command, splits into into its component words,
 /// and then parses the result into a command which can be run.
