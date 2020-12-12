@@ -120,9 +120,9 @@ pub(crate) trait AppDatabase {
     /// # Errors
     /// This function will return an error if the file can not be found, or the database
     /// is itself invalid.
-    fn open<S>(file_path: S) -> Result<Self, DatabaseError>
+    fn open<P>(file_path: P) -> Result<Self, DatabaseError>
     where
-        S: AsRef<path::Path>,
+        P: AsRef<path::Path>,
         Self: Sized;
 
     /// Saves the database to its original location.
@@ -152,9 +152,9 @@ pub(crate) trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails,
     /// the file does not exist, or can not be read.
-    fn read_book_from_file<S>(&mut self, file_path: S) -> Result<u32, DatabaseError>
+    fn read_book_from_file<P>(&mut self, file_path: P) -> Result<u32, DatabaseError>
     where
-        S: AsRef<path::Path>;
+        P: AsRef<path::Path>;
 
     /// Reads each book in the directory into the database, and returns a
     /// Vec of corresponding IDs as well as a Vec of paths and errors which
@@ -166,12 +166,12 @@ pub(crate) trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails,
     /// or the directory does not exist.
-    fn read_books_from_dir<S>(
+    fn read_books_from_dir<P>(
         &mut self,
-        dir: S,
+        dir: P,
     ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
     where
-        S: AsRef<path::Path>;
+        P: AsRef<path::Path>;
 
     /// Removes the book with the given ID. If no book with the given ID exists, no change occurs.
     ///
@@ -241,11 +241,11 @@ pub(crate) trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
+    fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: u32,
-        column: S,
-        new_value: T,
+        column: S0,
+        new_value: S1,
     ) -> Result<(), DatabaseError>;
 
     /// Merges all books with matching titles and authors, skipping everything else, with no
@@ -324,11 +324,11 @@ pub(crate) trait IndexableDatabase: AppDatabase + Sized {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn edit_book_indexed<S: AsRef<str>, T: AsRef<str>>(
+    fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         index: usize,
-        column: S,
-        new_value: T,
+        column: S0,
+        new_value: S1,
     ) -> Result<(), DatabaseError>;
 }
 
@@ -336,9 +336,9 @@ pub(crate) trait IndexableDatabase: AppDatabase + Sized {
 //  unsaving, so is editing book with exact same value, etc.
 
 impl AppDatabase for BasicDatabase {
-    fn open<S>(file_path: S) -> Result<Self, DatabaseError>
+    fn open<P>(file_path: P) -> Result<Self, DatabaseError>
     where
-        S: AsRef<path::Path>,
+        P: AsRef<path::Path>,
     {
         let backend = FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)?;
         let (cols, len) = backend.read(|db| {
@@ -394,19 +394,19 @@ impl AppDatabase for BasicDatabase {
         Ok(id)
     }
 
-    fn read_book_from_file<S>(&mut self, file_path: S) -> Result<u32, DatabaseError>
+    fn read_book_from_file<P>(&mut self, file_path: P) -> Result<u32, DatabaseError>
     where
-        S: AsRef<path::Path>,
+        P: AsRef<path::Path>,
     {
         self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?)
     }
 
-    fn read_books_from_dir<S>(
+    fn read_books_from_dir<P>(
         &mut self,
-        dir: S,
+        dir: P,
     ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
     where
-        S: AsRef<path::Path>,
+        P: AsRef<path::Path>,
     {
         let start_id = self.get_new_id()?;
 
@@ -502,11 +502,11 @@ impl AppDatabase for BasicDatabase {
         self.cols.contains(col)
     }
 
-    fn edit_book_with_id<S: AsRef<str>, T: AsRef<str>>(
+    fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: u32,
-        column: S,
-        new_value: T,
+        column: S0,
+        new_value: S1,
     ) -> Result<(), DatabaseError> {
         self.backend.write(|db| match db.books.get_mut(&id) {
             None => Err(DatabaseError::BookNotFound(id)),
@@ -661,11 +661,11 @@ impl IndexableDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn edit_book_indexed<S: AsRef<str>, T: AsRef<str>>(
+    fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         index: usize,
-        column: S,
-        new_value: T,
+        column: S0,
+        new_value: S1,
     ) -> Result<(), DatabaseError> {
         self.backend.write(|db| {
             if let Some((_, book)) = db.books.get_index_mut(index) {

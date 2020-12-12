@@ -45,10 +45,10 @@ pub(crate) trait BookView<D: AppDatabase> {
 
     fn remove_selected_book(&mut self) -> Result<(), BookViewError>;
 
-    fn edit_selected_book<S: AsRef<str>, T: AsRef<str>>(
+    fn edit_selected_book<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        col: S,
-        new_val: T,
+        col: S0,
+        new_val: S1,
     ) -> Result<(), BookViewError>;
 
     fn inner(&self) -> &D;
@@ -138,10 +138,10 @@ impl<D: IndexableDatabase> BookView<D> for BasicBookView<D> {
         Ok(self.write(|db| db.remove_book_indexed(index))?)
     }
 
-    fn edit_selected_book<S: AsRef<str>, T: AsRef<str>>(
+    fn edit_selected_book<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        col: S,
-        new_val: T,
+        col: S0,
+        new_val: S1,
     ) -> Result<(), BookViewError> {
         Ok(self
             .db

@@ -123,10 +123,10 @@ impl<D: IndexableDatabase> BookView<D> for SearchedBookView<D> {
         }
     }
 
-    fn edit_selected_book<S: AsRef<str>, T: AsRef<str>>(
+    fn edit_selected_book<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        col: S,
-        new_val: T,
+        col: S0,
+        new_val: S1,
     ) -> Result<(), BookViewError> {
         let book = match self.scopes.last() {
             None => {

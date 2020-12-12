@@ -78,9 +78,9 @@ impl BookType {
 
     /// Fills in the metadata for book, using self to determine which file format file_path is
     /// in.
-    fn fill_in_metadata<S>(&self, book: &mut BookVariant, file_path: S) -> Result<(), BookError>
+    fn fill_in_metadata<P>(&self, book: &mut BookVariant, file_path: P) -> Result<(), BookError>
     where
-        S: AsRef<path::Path>,
+        P: AsRef<path::Path>,
     {
         match self {
             BookType::EPUB => {
@@ -210,10 +210,10 @@ impl Book {
         self.extended_tags.as_ref()
     }
 
-    pub(crate) fn get_column_or<T: AsRef<str>>(
+    pub(crate) fn get_column_or<S: AsRef<str>>(
         &self,
         column: &ColumnIdentifier,
-        default: T,
+        default: S,
     ) -> String {
         match column {
             ColumnIdentifier::Title => self
@@ -262,9 +262,9 @@ impl BookVariant {
     /// # Errors
     /// Will return an error if the provided file_path does not lead to a file.
     /// Will panic if the title can not be set.
-    pub(crate) fn generate_from_file<S>(file_path: S) -> Result<Self, BookError>
+    pub(crate) fn generate_from_file<P>(file_path: P) -> Result<Self, BookError>
     where
-        S: AsRef<path::Path>,
+        P: AsRef<path::Path>,
     {
         // let file = File::open(file_path.clone()).map_err(|_e| BookError::FileError)?;
         // let data = file.metadata().map_err(|_e| BookError::MetadataError)?;
@@ -347,9 +347,9 @@ impl Book {
     ///
     /// # Errors
     /// Will return an error if the provided file_path does not lead to a file.
-    pub(crate) fn generate_from_file<S>(file_path: S, id: u32) -> Result<Book, BookError>
+    pub(crate) fn generate_from_file<P>(file_path: P, id: u32) -> Result<Book, BookError>
     where
-        S: AsRef<path::Path>,
+        P: AsRef<path::Path>,
     {
         let mut variants = vec![];
         let file_path = {
@@ -411,10 +411,10 @@ impl Book {
     /// # Arguments
     /// * ` column ` - the column of interest.
     /// * ` value ` - the value to store into the column.
-    pub(crate) fn set_column<T: AsRef<str>>(
+    pub(crate) fn set_column<S: AsRef<str>>(
         &mut self,
         column: &ColumnIdentifier,
-        value: T,
+        value: S,
     ) -> Result<(), BookError> {
         let value = value.as_ref();
         match column {
