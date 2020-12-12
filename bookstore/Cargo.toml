@@ -22,6 +22,7 @@ toml = "0.5.7"
 itertools = "0.9.0"
 mobi = "0.5.1"
 rayon = "1.5.0"
+sublime_fuzzy = "0.6.0"
 indexmap = { version = "1.6.0", default-features = false, features = ['serde-1', 'rayon'] }
 
 # Epub parsing dependencies.

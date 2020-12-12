@@ -1,5 +1,6 @@
 use indexmap::IndexMap;
 use regex::Regex;
+use sublime_fuzzy::best_match;
 
 use crate::database::basic_database::IndexableDatabase;
 use crate::database::bookview::BookViewError;
@@ -240,16 +241,15 @@ impl<D: IndexableDatabase> ScopedBookView<D> for SearchedBookView<D> {
             Search::CaseSensitive(column, search) => {
                 let col = ColumnIdentifier::from(column);
                 for (_, book) in books.iter() {
-                    if book.get_column_or(&col, "").contains(&search) {
+                    if best_match(&search, &book.get_column_or(&col, "")).is_some() {
                         results.insert(book.get_id(), book.clone());
                     }
                 }
             }
             Search::Default(column, search) => {
                 let col = ColumnIdentifier::from(column);
-                let insensitive = search.to_ascii_lowercase();
                 for (_, book) in books.iter() {
-                    if book.get_column_or(&col, "").contains(&insensitive) {
+                    if best_match(&search, &book.get_column_or(&col, "")).is_some() {
                         results.insert(book.get_id(), book.clone());
                     }
                 }

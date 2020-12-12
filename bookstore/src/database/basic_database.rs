@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use regex::{Error as RegexError, Regex};
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
+use sublime_fuzzy::best_match;
 use unicase::UniCase;
 
 use crate::database::search::Search;
@@ -571,7 +572,7 @@ impl AppDatabase for BasicDatabase {
                     Search::CaseSensitive(column, search) => {
                         let col = ColumnIdentifier::from(column);
                         for (_, book) in db.books.iter() {
-                            if book.get_column_or(&col, "").contains(&search) {
+                            if best_match(&search, &book.get_column_or(&col, "")).is_some() {
                                 results.push(book.clone());
                             }
                         }
@@ -580,7 +581,7 @@ impl AppDatabase for BasicDatabase {
                         let col = ColumnIdentifier::from(column);
                         let insensitive = search.to_ascii_lowercase();
                         for (_, book) in db.books.iter() {
-                            if insensitive.contains(&book.get_column_or(&col, "")) {
+                            if best_match(&insensitive, &book.get_column_or(&col, "")).is_some() {
                                 results.push(book.clone());
                             }
                         }

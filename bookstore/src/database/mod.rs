@@ -7,7 +7,7 @@ pub(crate) mod scopedbookview;
 pub(crate) mod search;
 
 pub(crate) use basic_database::{AppDatabase, BasicDatabase, DatabaseError, IndexableDatabase};
-pub(crate) use bookview::{BasicBookView, BookView, ScrollableBookView};
+pub(crate) use bookview::{BookView, ScrollableBookView};
 pub(crate) use scopedbookview::{ScopedBookView, SearchedBookView};
 
 #[cfg(cloud)]

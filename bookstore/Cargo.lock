@@ -91,6 +91,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shellwords",
+ "sublime_fuzzy",
  "tempfile",
  "toml",
  "tui",
@@ -1164,6 +1165,12 @@ name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
+
+[[package]]
+name = "sublime_fuzzy"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdac3d983d073c19487ba1f5e16eda43e9c6e50aa895d87110d0febe389b66b9"
 
 [[package]]
 name = "syn"
