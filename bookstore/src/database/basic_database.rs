@@ -609,7 +609,7 @@ impl AppDatabase for BasicDatabase {
                 db.books.par_sort_by(|_, a, _, b| a.cmp_column(b, &col))
             }
         })?;
-        self.saved = false;
+
         Ok(())
     }
 
