@@ -1,16 +1,31 @@
 use crate::database::basic_database::IndexableDatabase;
 use crate::database::{AppDatabase, DatabaseError, PageCursor};
-use crate::record::Book;
+use crate::record::{Book, BookError};
+use regex::Error as RegexError;
 
 #[derive(Debug)]
 pub(crate) enum BookViewError {
     Database(DatabaseError),
     NoBookSelected,
+    SearchError,
+    BookError,
 }
 
 impl From<DatabaseError> for BookViewError {
     fn from(e: DatabaseError) -> Self {
         BookViewError::Database(e)
+    }
+}
+
+impl From<RegexError> for BookViewError {
+    fn from(_: RegexError) -> Self {
+        BookViewError::SearchError
+    }
+}
+
+impl From<BookError> for BookViewError {
+    fn from(_: BookError) -> Self {
+        BookViewError::BookError
     }
 }
 
@@ -175,7 +190,7 @@ impl<D: AppDatabase> BasicBookView<D> {
             if s == self.cursor.window_size() && s != 0 {
                 self.cursor.select(Some(s - 1));
             }
-        };
+        }
     }
 }
 

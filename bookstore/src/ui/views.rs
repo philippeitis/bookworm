@@ -244,8 +244,9 @@ impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
                         };
                     }
                     KeyCode::Esc => {
-                        self.state.curr_command.clear();
                         app.deselect();
+                        self.state.curr_command.clear();
+                        app.pop_scope();
                     }
                     KeyCode::Delete => {
                         if self.state.curr_command.is_empty() {

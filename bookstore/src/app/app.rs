@@ -7,7 +7,8 @@ use crate::app::settings::SortSettings;
 use crate::app::{parser, BookIndex, Command};
 use crate::database::bookview::BookViewError;
 use crate::database::{
-    AppDatabase, BasicBookView, BookView, DatabaseError, IndexableDatabase, ScrollableBookView,
+    AppDatabase, BookView, DatabaseError, IndexableDatabase, ScopedBookView, ScrollableBookView,
+    SearchedBookView,
 };
 use crate::record::book::ColumnIdentifier;
 use crate::record::Book;
@@ -65,7 +66,7 @@ impl From<crossterm::ErrorKind> for ApplicationError {
 
 pub(crate) struct App<D: AppDatabase> {
     // Application data
-    db: BasicBookView<D>,
+    db: SearchedBookView<D>,
     selected_cols: Vec<UniCase<String>>,
     column_data: Vec<Vec<String>>,
 
@@ -78,7 +79,7 @@ pub(crate) struct App<D: AppDatabase> {
 impl<D: IndexableDatabase> App<D> {
     pub(crate) fn new(db: D) -> Self {
         App {
-            db: BasicBookView::new(db),
+            db: SearchedBookView::new(db),
             selected_cols: vec![],
             sort_settings: SortSettings::default(),
             updated: true,
@@ -169,12 +170,14 @@ impl<D: IndexableDatabase> App<D> {
             }
             Command::AddBookFromFile(f) => {
                 self.db.write(|db| db.read_book_from_file(&f))?;
+                self.updated = true;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::AddBooksFromDir(dir) => {
                 // TODO: Handle failed reads.
                 self.db.write(|db| db.read_books_from_dir(&dir))?;
+                self.updated = true;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
@@ -199,7 +202,8 @@ impl<D: IndexableDatabase> App<D> {
                     self.open_book_in_dir(&b, index)?;
                 }
             }
-            Command::FindMatches(_search) => {
+            Command::FindMatches(search) => {
+                self.db.push_scope(search)?;
                 self.updated = true;
                 self.column_update = ColumnUpdate::Regenerate;
             }
@@ -368,7 +372,7 @@ impl<D: IndexableDatabase> App<D> {
         Ok(())
     }
 
-    fn modify_db(&mut self, f: impl Fn(&mut BasicBookView<D>) -> bool) -> bool {
+    fn modify_db(&mut self, f: impl Fn(&mut SearchedBookView<D>) -> bool) -> bool {
         if f(&mut self.db) {
             self.register_update();
             self.column_update = ColumnUpdate::Regenerate;
@@ -461,5 +465,9 @@ impl<D: IndexableDatabase> App<D> {
 
     pub(crate) fn saved(&mut self) -> bool {
         self.db.inner().saved()
+    }
+
+    pub(crate) fn pop_scope(&mut self) -> bool {
+        self.modify_db(|db| db.pop_scope())
     }
 }
