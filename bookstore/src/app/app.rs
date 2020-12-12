@@ -325,8 +325,7 @@ impl<D: IndexableDatabase> App<D> {
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-    /// Opens the book in SumatraPDF on Windows.
-    /// Other operating systems not currently supported
+    /// Opens the book in the native system viewer.
     ///
     /// # Arguments
     ///
@@ -340,7 +339,7 @@ impl<D: IndexableDatabase> App<D> {
             #[cfg(target_os = "windows")]
             {
                 ProcessCommand::new("cmd.exe")
-                    .args(&["/C", "start", "sumatrapdf"][..])
+                    .args(&["/C", "start", "explorer"])
                     .arg(path)
                     .spawn()?;
             }
