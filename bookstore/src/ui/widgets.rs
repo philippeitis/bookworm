@@ -92,18 +92,16 @@ impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
         }
 
         if let Some(variants) = self.book.get_variants() {
-            let mut added_section = false;
+            if !variants.is_empty() {
+                data.extend(Text::raw("\nVariant paths:"));
+            }
             for variant in variants {
-                if let Some(paths) = variant.get_paths() {
-                    if !added_section && !paths.is_empty() {
-                        added_section = true;
-                        data.extend(Text::raw("\nVariant paths:"));
-                    }
-                    for (booktype, path) in paths {
-                        let s = format!("{:?}: {}", booktype, path.display().to_string());
-                        data.extend(Text::styled(s, field_exists));
-                    }
-                }
+                let s = format!(
+                    "{:?}: {}",
+                    variant.book_type(),
+                    variant.path().display().to_string()
+                );
+                data.extend(Text::styled(s, field_exists));
             }
         }
 

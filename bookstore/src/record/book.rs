@@ -23,6 +23,7 @@ pub(crate) enum BookType {
     EPUB,
     MOBI,
     PDF,
+    // TODO: AZW3, DJVU, DOC, RTF, custom extensions?
     Unsupported(OsString),
 }
 
@@ -75,69 +76,6 @@ impl BookType {
             BookType::Unsupported(so.to_os_string())
         }
     }
-
-    /// Fills in the metadata for book, using self to determine which file format file_path is
-    /// in.
-    fn fill_in_metadata<P>(&self, book: &mut BookVariant, file_path: P) -> Result<(), BookError>
-    where
-        P: AsRef<path::Path>,
-    {
-        match self {
-            BookType::EPUB => {
-                let metadata = EpubMetadata::open(file_path)?;
-
-                if book.local_title.is_none() {
-                    book.local_title = metadata.title;
-                }
-
-                if book.additional_authors.is_none() {
-                    if let Some(author) = metadata.author {
-                        book.additional_authors = Some(vec![unravel_author(&author)]);
-                    }
-                }
-
-                if book.language.is_none() {
-                    book.language = metadata.language;
-                }
-
-                if book.identifier.is_none() {
-                    if let Some(isbn) = metadata.isbn {
-                        if let Ok(isbn) = ISBN::from_str(&isbn) {
-                            book.identifier = Some(Identifier::ISBN(isbn));
-                        }
-                    }
-                }
-                Ok(())
-            }
-            BookType::MOBI => {
-                let doc = MobiMetadata::from_path(&file_path)?;
-                if book.local_title.is_none() {
-                    book.local_title = doc.title();
-                }
-
-                if book.additional_authors.is_none() {
-                    if let Some(author) = doc.author() {
-                        book.additional_authors = Some(vec![unravel_author(&author)]);
-                    }
-                }
-
-                if book.language.is_none() {
-                    book.language = doc.language();
-                }
-
-                if book.identifier.is_none() {
-                    if let Some(isbn) = doc.isbn() {
-                        if let Ok(isbn) = ISBN::from_str(&isbn) {
-                            book.identifier = Some(Identifier::ISBN(isbn));
-                        }
-                    }
-                }
-
-                Ok(())
-            }
-            b => Err(BookError::UnsupportedExtension(b.clone())),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -179,9 +117,11 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub(crate) struct BookVariant {
+    book_type: BookType,
+    path: path::PathBuf,
+
     local_title: Option<String>,
     identifier: Option<Identifier>,
-    paths: Option<Vec<(BookType, path::PathBuf)>>,
     language: Option<String>,
     additional_authors: Option<Vec<String>>,
     translators: Option<Vec<String>>,
@@ -285,11 +225,11 @@ impl BookVariant {
             return Err(BookError::FileError);
         };
         let book_type = BookType::new(ext);
-        let paths = vec![(book_type, path.to_owned())];
         let mut book = BookVariant {
+            book_type,
+            path: path.to_owned(),
             local_title: None,
             identifier: None,
-            paths: Some(paths.clone()),
             language: None,
             additional_authors: None,
             translators: None,
@@ -297,11 +237,9 @@ impl BookVariant {
             id: None,
         };
 
-        for (booktype, path) in paths {
-            let _ = booktype.fill_in_metadata(&mut book, path);
-        }
+        let _ = book.fill_in_metadata();
 
-        if book.local_title == None {
+        if book.local_title.is_none() {
             book.local_title = Some(
                 file_name
                     .to_str()
@@ -313,8 +251,72 @@ impl BookVariant {
         Ok(book)
     }
 
-    pub(crate) fn get_paths(&self) -> &Option<Vec<(BookType, path::PathBuf)>> {
-        &self.paths
+    /// Fills in the metadata for book, using self to determine which file format file_path is
+    /// in.
+    fn fill_in_metadata(&mut self) -> Result<(), BookError> {
+        match &self.book_type {
+            BookType::EPUB => {
+                let metadata = EpubMetadata::open(&self.path)?;
+
+                if self.local_title.is_none() {
+                    self.local_title = metadata.title;
+                }
+
+                if self.additional_authors.is_none() {
+                    if let Some(author) = metadata.author {
+                        self.additional_authors = Some(vec![unravel_author(&author)]);
+                    }
+                }
+
+                if self.language.is_none() {
+                    self.language = metadata.language;
+                }
+
+                if self.identifier.is_none() {
+                    if let Some(isbn) = metadata.isbn {
+                        if let Ok(isbn) = ISBN::from_str(&isbn) {
+                            self.identifier = Some(Identifier::ISBN(isbn));
+                        }
+                    }
+                }
+                Ok(())
+            }
+            BookType::MOBI => {
+                let doc = MobiMetadata::from_path(&self.path)?;
+                if self.local_title.is_none() {
+                    self.local_title = doc.title();
+                }
+
+                if self.additional_authors.is_none() {
+                    if let Some(author) = doc.author() {
+                        self.additional_authors = Some(vec![unravel_author(&author)]);
+                    }
+                }
+
+                if self.language.is_none() {
+                    self.language = doc.language();
+                }
+
+                if self.identifier.is_none() {
+                    if let Some(isbn) = doc.isbn() {
+                        if let Ok(isbn) = ISBN::from_str(&isbn) {
+                            self.identifier = Some(Identifier::ISBN(isbn));
+                        }
+                    }
+                }
+
+                Ok(())
+            }
+            b => Err(BookError::UnsupportedExtension(b.clone())),
+        }
+    }
+
+    pub(crate) fn path(&self) -> &path::Path {
+        self.path.as_ref()
+    }
+
+    pub(crate) fn book_type(&self) -> &BookType {
+        &self.book_type
     }
 }
 

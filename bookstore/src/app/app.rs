@@ -319,18 +319,7 @@ impl<D: IndexableDatabase> App<D> {
     ///
     /// * ` book ` - The book to find a path for.
     fn get_book_path(book: &Book, index: usize) -> Option<PathBuf> {
-        let mut seen = 0;
-        if let Some(variants) = book.get_variants() {
-            for variant in variants {
-                if let Some(paths) = variant.get_paths() {
-                    if let Some((_, path)) = paths.get(index - seen) {
-                        return Some(path.to_owned());
-                    }
-                    seen += paths.len();
-                }
-            }
-        }
-        None
+        Some(book.get_variants()?.get(index)?.path().to_owned())
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
