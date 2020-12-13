@@ -15,3 +15,10 @@ file = "books.db"
 [navigation]
 scroll = 5
 inverted = false
+
+# TODO: Support loading WASM to read metadata.
+# https://github.com/wasmerio/wasmer-rust-example
+#[read_extensions]
+#[read_extensions.azw3]             # name
+#extensions = ["azw3"]              # supported extensions
+#path = "path/to/extension.wasm"    # path to extension

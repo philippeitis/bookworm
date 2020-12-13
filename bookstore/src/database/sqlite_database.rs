@@ -1,6 +1,6 @@
 use std::collections::hash_map::RandomState;
 use std::collections::HashSet;
-use std::ops::Range;
+use std::ops::{Bound, RangeBounds};
 use std::path;
 use std::path::Path;
 
@@ -196,7 +196,27 @@ impl AppDatabase for SQLiteDatabase {
 }
 
 impl IndexableDatabase for SQLiteDatabase {
-    fn get_books_indexed(&self, indices: Range<usize>) -> Result<Vec<Book>, DatabaseError> {
+    fn get_books_indexed(
+        &self,
+        indices: impl RangeBounds<usize>,
+    ) -> Result<Vec<Book>, DatabaseError> {
+        let start = match indices.start_bound() {
+            Bound::Included(i) => *i,
+            Bound::Excluded(i) => *i + 1,
+            Bound::Unbounded => 0,
+        }
+        .min(self.len.saturating_sub(1));
+
+        let end = match indices.end_bound() {
+            Bound::Included(i) => *i + 1,
+            Bound::Excluded(i) => *i,
+            Bound::Unbounded => usize::MAX,
+        }
+        .min(self.len);
+
+        let offset = start;
+        let len = end.saturating_sub(start);
+
         unimplemented!()
     }
 

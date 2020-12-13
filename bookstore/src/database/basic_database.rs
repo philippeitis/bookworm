@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::ops::Range;
+use std::ops::{Bound, RangeBounds};
 use std::path;
 
 use indexmap::IndexMap;
@@ -258,7 +258,10 @@ pub(crate) trait IndexableDatabase: AppDatabase + Sized {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn get_books_indexed(&self, indices: Range<usize>) -> Result<Vec<Book>, DatabaseError>;
+    fn get_books_indexed(
+        &self,
+        indices: impl RangeBounds<usize>,
+    ) -> Result<Vec<Book>, DatabaseError>;
 
     /// Get the book at the current index, respecting the current ordering.
     ///
@@ -555,9 +558,26 @@ impl AppDatabase for BasicDatabase {
 }
 
 impl IndexableDatabase for BasicDatabase {
-    fn get_books_indexed(&self, indices: Range<usize>) -> Result<Vec<Book>, DatabaseError> {
+    fn get_books_indexed(
+        &self,
+        indices: impl RangeBounds<usize>,
+    ) -> Result<Vec<Book>, DatabaseError> {
+        let start = match indices.start_bound() {
+            Bound::Included(i) => *i,
+            Bound::Excluded(i) => *i + 1,
+            Bound::Unbounded => 0,
+        }
+        .min(self.len.saturating_sub(1));
+
+        let end = match indices.end_bound() {
+            Bound::Included(i) => *i + 1,
+            Bound::Excluded(i) => *i,
+            Bound::Unbounded => usize::MAX,
+        }
+        .min(self.len);
+
         Ok(self.backend.read(|db| {
-            indices
+            (start..end)
                 .map(|i| db.books.get_index(i))
                 .filter_map(|b| b)
                 .map(|b| b.1.clone())
