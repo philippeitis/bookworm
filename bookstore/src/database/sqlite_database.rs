@@ -17,29 +17,31 @@ const CREATE_BOOKS: &str = r#"CREATE TABLE `books` (
 `title` TEXT DEFAULT NULL,
 `series_name` TEXT DEFAULT NULL,
 `series_id` NUM DEFAULT NULL
-)"#;
+);"#;
 
-const CREATE_AUTHORS: &str = r#"CREATE TABLE `authors` (
-`book_id` INTEGER,
-`author` TEXT
-)"#;
-
-const CREATE_EXTENDED_TAGS: &str = r#"CREATE TABLE `authors` (
-`book_id` INTEGER,
+// Authors are stored here as well.
+const CREATE_EXTENDED_TAGS: &str = r#"CREATE TABLE `extended_tags` (
 `tag_name` TEXT,
-`tag_value` TEXT
-)"#;
+`tag_value` TEXT,
+`book_id` INTEGER NOT NULL,
+FOREIGN KEY(book_id) REFERENCES books(book_id)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
+);"#;
 
-const CREATE_VARIANTS: &str = r#"CREATE TABLE `authors` (
-`book_id` INTEGER,
+const CREATE_VARIANTS: &str = r#"CREATE TABLE `variants` (
 `book_type` TEXT,
 `path` TEXT,
 `local_title` TEXT DEFAULT NULL,
 `identifier` TEXT DEFAULT NULL,
 `language` TEXT DEFAULT NULL,
 `description` TEXT DEFAULT NULL,
-`id` INTEGER DEFAULT NULL
-)"#;
+`id` INTEGER DEFAULT NULL,
+`book_id` INTEGER NOT NULL,
+FOREIGN KEY(book_id) REFERENCES books(book_id)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
+);"#;
 
 struct SQLiteDatabase {
     backend: SqliteConnection,
