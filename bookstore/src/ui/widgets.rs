@@ -68,12 +68,12 @@ impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
         let field_exists = Style::default().add_modifier(Modifier::BOLD);
         let field_not_provided = Style::default();
 
-        let mut data = if let Some(t) = &self.book.title {
+        let mut data = if let Some(t) = self.book.get_title() {
             Text::styled(t, field_exists)
         } else {
             Text::styled("No title provided", field_not_provided)
         };
-        if let Some(t) = &self.book.authors {
+        if let Some(t) = self.book.get_authors() {
             let mut s = String::from("By: ");
             s.push_str(&t.join(", "));
             data.extend(Text::styled(s, field_exists));

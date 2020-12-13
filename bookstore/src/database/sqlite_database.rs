@@ -74,10 +74,6 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn get_new_id(&self) -> Result<u32, DatabaseError> {
-        unimplemented!()
-    }
-
     fn insert_book(&mut self, book: Book) -> Result<u32, DatabaseError> {
         unimplemented!()
     }

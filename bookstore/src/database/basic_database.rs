@@ -11,7 +11,7 @@ use sublime_fuzzy::best_match;
 use unicase::UniCase;
 
 use crate::database::search::Search;
-use crate::record::book::ColumnIdentifier;
+use crate::record::book::{ColumnIdentifier, RawBook};
 use crate::record::{Book, BookError};
 
 #[derive(Debug)]
@@ -72,17 +72,6 @@ impl BookMap {
         id
     }
 
-    /// Allocates the given ID as the largest in the database, if it exceeds the current
-    /// internal ID.
-    ///
-    /// # Arguments
-    /// * `id` - The id to allocate space for.
-    fn allocate_id(&mut self, id: u32) {
-        if id > self.max_id {
-            self.max_id = id;
-        }
-    }
-
     /// Return a monotonically increasing ID to use for a new
     /// book.
     ///
@@ -131,18 +120,14 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database can not be saved correctly.
     fn save(&mut self) -> Result<(), DatabaseError>;
 
-    /// Returns a new ID which is larger than all previous IDs.
-    fn get_new_id(&self) -> Result<u32, DatabaseError>;
-
-    /// Inserts the given book into the database. If the book does not have an ID, it is given
-    /// an ID equal to the largest ID in the database so far, plus one.
+    /// Inserts the given book into the database, setting the ID automatically.
     ///
     /// # Arguments
     /// * ` book ` - A book to be stored.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn insert_book(&mut self, book: Book) -> Result<u32, DatabaseError>;
+    fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError>;
 
     /// Reads the book at the given location into the database, and returns the book's ID.
     ///
@@ -376,14 +361,10 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn get_new_id(&self) -> Result<u32, DatabaseError> {
-        Ok(self.backend.write(|db| db.new_id())?)
-    }
-
-    fn insert_book(&mut self, book: Book) -> Result<u32, DatabaseError> {
+    fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError> {
         let (id, len) = self.backend.write(|db| {
-            let id = book.get_id();
-            db.allocate_id(id);
+            let id = db.new_id();
+            let book = Book::from_raw_book(book, id);
             db.books.insert(id, book);
             (id, db.books.len())
         })?;
@@ -398,7 +379,7 @@ impl AppDatabase for BasicDatabase {
     where
         P: AsRef<path::Path>,
     {
-        self.insert_book(Book::generate_from_file(file_path, self.get_new_id()?)?)
+        self.insert_book(RawBook::generate_from_file(file_path)?)
     }
 
     fn read_books_from_dir<P>(
@@ -408,15 +389,12 @@ impl AppDatabase for BasicDatabase {
     where
         P: AsRef<path::Path>,
     {
-        let start_id = self.get_new_id()?;
-
         // TODO: Look at libraries with parallel directory reading.
         let results = fs::read_dir(dir)?
             .filter_map(|res| res.map(|e| e.path()).ok())
             .collect::<Vec<_>>()
             .par_iter()
-            .enumerate()
-            .map(|(id, path)| Book::generate_from_file(path, start_id + (id as u32)))
+            .map(RawBook::generate_from_file)
             .collect::<Vec<_>>();
 
         let mut ids = vec![];
@@ -425,8 +403,8 @@ impl AppDatabase for BasicDatabase {
         self.len = self.backend.write(|db| {
             results.into_iter().for_each(|result| match result {
                 Ok(book) => {
-                    let id = book.get_id();
-                    db.allocate_id(id);
+                    let id = db.new_id();
+                    let book = Book::from_raw_book(book, id);
                     db.books.insert(id, book);
                     ids.push(id);
                 }
@@ -707,52 +685,41 @@ mod test {
     fn test_adding_book() {
         let mut db = temp_db();
 
-        let id = db.get_new_id();
-        assert!(id.is_ok());
-        let id = id.unwrap();
-        assert_eq!(id, 0);
-
-        let book = Book::with_id(id);
+        let book = RawBook::default();
         let res = db.insert_book(book.clone());
         assert!(res.is_ok());
-        assert_eq!(res.unwrap(), id);
-        let fetched = db.get_book(id);
+        assert_eq!(res.unwrap(), 0);
+        let fetched = db.get_book(0);
         assert!(fetched.is_ok());
-        assert_eq!(fetched.unwrap(), book);
+        assert_eq!(fetched.unwrap().inner().to_owned(), book);
     }
 
     #[test]
     fn test_adding_2_books() {
         let mut db = temp_db();
 
-        let id0 = db.get_new_id();
-        assert!(id0.is_ok());
-        let id0 = id0.unwrap();
-        assert_eq!(id0, 0);
-        let book0 = Book::with_id(id0);
-
-        let id1 = db.get_new_id();
-        assert!(id1.is_ok());
-        let id1 = id1.unwrap();
-        assert_eq!(id1, 1);
-        let book1 = Book::with_id(id1);
+        let a = ColumnIdentifier::Series;
+        let mut book0 = Book::with_id(0);
+        book0.set_column(&a, "hello world [1]").unwrap();
+        let mut book1 = Book::with_id(1);
+        book1.set_column(&a, "hello world [2]").unwrap();
 
         assert_ne!(book0, book1);
 
-        let res = db.insert_book(book1.clone());
+        let res = db.insert_book(book0.inner().to_owned());
         assert!(res.is_ok());
-        assert_eq!(res.unwrap(), id1);
+        assert_eq!(res.unwrap(), 0);
 
-        let res = db.insert_book(book0.clone());
+        let res = db.insert_book(book1.inner().to_owned());
         assert!(res.is_ok());
-        assert_eq!(res.unwrap(), id0);
+        assert_eq!(res.unwrap(), 1);
 
-        let fetched1 = db.get_book(id1);
+        let fetched1 = db.get_book(1);
         assert!(fetched1.is_ok());
         let fetched1 = fetched1.unwrap();
         assert_eq!(fetched1, book1);
 
-        let fetched0 = db.get_book(id0);
+        let fetched0 = db.get_book(0);
         assert!(fetched0.is_ok());
         let fetched0 = fetched0.unwrap();
         assert_eq!(fetched0, book0);

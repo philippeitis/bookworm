@@ -17,14 +17,14 @@ pub(crate) enum Identifier {
     ISBN(ISBN),
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-/// Enumerates all supported book types.
-pub(crate) enum BookType {
-    EPUB,
-    MOBI,
-    PDF,
-    // TODO: AZW3, DJVU, DOC, RTF, custom extensions?
-    Unsupported(OsString),
+fn unravel_author(author: &str) -> String {
+    if let Some(i) = author.find(',') {
+        let (a, b) = author.split_at(i);
+        let b = b.trim_start_matches(',').trim_start_matches(' ');
+        format!("{} {}", b, a)
+    } else {
+        author.to_owned()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -47,14 +47,14 @@ impl From<EpubError> for BookError {
     }
 }
 
-fn unravel_author(author: &str) -> String {
-    if let Some(i) = author.find(',') {
-        let (a, b) = author.split_at(i);
-        let b = b.trim_start_matches(',').trim_start_matches(' ');
-        format!("{} {}", b, a)
-    } else {
-        author.to_owned()
-    }
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+/// Enumerates all supported book types.
+pub(crate) enum BookType {
+    EPUB,
+    MOBI,
+    PDF,
+    // TODO: AZW3, DJVU, DOC, RTF, custom extensions?
+    Unsupported(OsString),
 }
 
 // TODO: Implement timeout to prevent crashing if reading explodes.
@@ -76,20 +76,6 @@ impl BookType {
             BookType::Unsupported(so.to_os_string())
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-/// The struct which contains the major fields a book will have, a set of variants,
-/// which corresponds to particular file formats of this book (eg. a EPUB and MOBI version),
-/// or even differing realizations of the book (eg. a French and English of the same book).
-/// Contains an unique ID, and provides storage for additional tags which are not specified here.
-pub(crate) struct Book {
-    pub(crate) title: Option<String>,
-    pub(crate) authors: Option<Vec<String>>,
-    pub(crate) series: Option<(String, Option<f32>)>,
-    variants: Option<Vec<BookVariant>>,
-    id: u32,
-    extended_tags: Option<HashMap<String, String>>,
 }
 
 /// Identifies the columns a Book provides.
@@ -127,69 +113,6 @@ pub(crate) struct BookVariant {
     translators: Option<Vec<String>>,
     description: Option<String>,
     id: Option<u32>,
-}
-
-impl Book {
-    pub(crate) fn get_authors(&self) -> Option<&[String]> {
-        self.authors.as_deref()
-    }
-
-    pub(crate) fn get_title(&self) -> Option<&str> {
-        self.title.as_deref()
-    }
-
-    pub(crate) fn get_series(&self) -> Option<&(String, Option<f32>)> {
-        self.series.as_ref()
-    }
-
-    pub(crate) fn get_variants(&self) -> Option<&[BookVariant]> {
-        self.variants.as_deref()
-    }
-
-    pub(crate) fn get_extended_columns(&self) -> Option<&HashMap<String, String>> {
-        self.extended_tags.as_ref()
-    }
-
-    pub(crate) fn get_column_or<S: AsRef<str>>(
-        &self,
-        column: &ColumnIdentifier,
-        default: S,
-    ) -> String {
-        match column {
-            ColumnIdentifier::Title => self
-                .get_title()
-                .clone()
-                .unwrap_or_else(|| default.as_ref())
-                .to_owned(),
-            ColumnIdentifier::Author => match self.get_authors() {
-                None => default.as_ref().to_owned(),
-                Some(authors) => authors.join(", "),
-            },
-            ColumnIdentifier::Series => {
-                if let Some((series_name, nth_in_series)) = self.get_series() {
-                    if let Some(nth_in_series) = nth_in_series {
-                        format!("{} [{}]", series_name, nth_in_series)
-                    } else {
-                        series_name.clone()
-                    }
-                } else {
-                    default.as_ref().to_owned()
-                }
-            }
-            ColumnIdentifier::ID => self.id.to_string(),
-            ColumnIdentifier::ExtendedTag(x) => {
-                if let Some(d) = &self.extended_tags {
-                    match d.get(x) {
-                        None => default.as_ref().to_owned(),
-                        Some(s) => s.to_owned(),
-                    }
-                } else {
-                    default.as_ref().to_owned()
-                }
-            }
-            ColumnIdentifier::Variants => default.as_ref().to_owned(),
-        }
-    }
 }
 
 impl BookVariant {
@@ -320,23 +243,20 @@ impl BookVariant {
     }
 }
 
-impl Book {
-    /// Generates a book with the given ID - intended to be used as a placeholder
-    /// to allow reducing the run-time of specific operations.
-    ///
-    /// # Arguments
-    /// * ` id ` - the id to assign this book.
-    pub(crate) fn with_id(id: u32) -> Book {
-        Book {
-            title: None,
-            authors: None,
-            series: None,
-            variants: None,
-            id,
-            extended_tags: None,
-        }
-    }
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+/// The struct which contains the major fields a book will have, a set of variants,
+/// which corresponds to particular file formats of this book (eg. a EPUB and MOBI version),
+/// or even differing realizations of the book (eg. a French and English of the same book).
+/// Also provides storage for additional tags which are not specified here.
+pub(crate) struct RawBook {
+    pub(crate) title: Option<String>,
+    pub(crate) authors: Option<Vec<String>>,
+    pub(crate) series: Option<(String, Option<f32>)>,
+    variants: Option<Vec<BookVariant>>,
+    extended_tags: Option<HashMap<String, String>>,
+}
 
+impl RawBook {
     /// Generates a book from the file at the specified `file_path`, and assigns the given ID
     /// by default (note that the ID can not be changed).
     /// To match books to their respective parsers, it is assumed that the extension is
@@ -349,7 +269,7 @@ impl Book {
     ///
     /// # Errors
     /// Will return an error if the provided file_path does not lead to a file.
-    pub(crate) fn generate_from_file<P>(file_path: P, id: u32) -> Result<Book, BookError>
+    pub(crate) fn generate_from_file<P>(file_path: P) -> Result<RawBook, BookError>
     where
         P: AsRef<path::Path>,
     {
@@ -371,12 +291,11 @@ impl Book {
             variants.push(variant);
         }
 
-        let mut book = Book {
+        let mut book = RawBook {
             title: None,
             authors: None,
             series: None,
             variants: Some(variants.clone()),
-            id,
             extended_tags: None,
         };
 
@@ -395,13 +314,71 @@ impl Book {
 
         Ok(book)
     }
+}
 
-    pub(crate) fn get_id(&self) -> u32 {
-        self.id
+impl RawBook {
+    pub(crate) fn get_authors(&self) -> Option<&[String]> {
+        self.authors.as_deref()
+    }
+
+    pub(crate) fn get_title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    pub(crate) fn get_series(&self) -> Option<&(String, Option<f32>)> {
+        self.series.as_ref()
+    }
+
+    pub(crate) fn get_variants(&self) -> Option<&[BookVariant]> {
+        self.variants.as_deref()
+    }
+
+    pub(crate) fn get_extended_columns(&self) -> Option<&HashMap<String, String>> {
+        self.extended_tags.as_ref()
+    }
+
+    pub(crate) fn get_column_or<S: AsRef<str>>(
+        &self,
+        column: &ColumnIdentifier,
+        default: S,
+    ) -> String {
+        match column {
+            ColumnIdentifier::Title => self
+                .get_title()
+                .clone()
+                .unwrap_or_else(|| default.as_ref())
+                .to_owned(),
+            ColumnIdentifier::Author => match self.get_authors() {
+                None => default.as_ref().to_owned(),
+                Some(authors) => authors.join(", "),
+            },
+            ColumnIdentifier::Series => {
+                if let Some((series_name, nth_in_series)) = self.get_series() {
+                    if let Some(nth_in_series) = nth_in_series {
+                        format!("{} [{}]", series_name, nth_in_series)
+                    } else {
+                        series_name.clone()
+                    }
+                } else {
+                    default.as_ref().to_owned()
+                }
+            }
+            ColumnIdentifier::ExtendedTag(x) => {
+                if let Some(d) = &self.extended_tags {
+                    match d.get(x) {
+                        None => default.as_ref().to_owned(),
+                        Some(s) => s.to_owned(),
+                    }
+                } else {
+                    default.as_ref().to_owned()
+                }
+            }
+            _ => default.as_ref().to_owned(),
+        }
     }
 }
 
-impl Book {
+impl RawBook {
     /// Sets specified columns, to the specified value. Titles will be stored directly,
     /// authors will be stored as a list containing a single author.
     /// ID and Variants can not be modified through set_column.
@@ -483,7 +460,6 @@ impl Book {
         // }
 
         match column {
-            ColumnIdentifier::ID => self.get_id().cmp(&other.get_id()),
             ColumnIdentifier::Series => {
                 let s_series = self.get_series();
                 let o_series = other.get_series();
@@ -513,12 +489,13 @@ impl Book {
                     Ordering::Less
                 }
             }
+            ColumnIdentifier::ID => Ordering::Equal,
             c => self.get_column_or(c, "").cmp(&other.get_column_or(c, "")),
         }
     }
 }
 
-impl Book {
+impl RawBook {
     /// Merges self with other, assuming that other is in fact a variant of self.
     /// Missing metadata will be utilized from other, and `self` variants will be extended
     /// to include `other` variants.
@@ -554,9 +531,138 @@ impl Book {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+/// A raw_book, with an associated ID.
+pub(crate) struct Book {
+    id: u32,
+    raw_book: RawBook,
+}
+
+impl Book {
+    pub(crate) fn get_authors(&self) -> Option<&[String]> {
+        self.raw_book.get_authors()
+    }
+
+    pub(crate) fn get_title(&self) -> Option<&str> {
+        self.raw_book.get_title()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_series(&self) -> Option<&(String, Option<f32>)> {
+        self.raw_book.get_series()
+    }
+
+    pub(crate) fn get_variants(&self) -> Option<&[BookVariant]> {
+        self.raw_book.get_variants()
+    }
+
+    pub(crate) fn get_extended_columns(&self) -> Option<&HashMap<String, String>> {
+        self.raw_book.get_extended_columns()
+    }
+
+    pub(crate) fn get_column_or<S: AsRef<str>>(
+        &self,
+        column: &ColumnIdentifier,
+        default: S,
+    ) -> String {
+        match column {
+            ColumnIdentifier::ID => self.id.to_string(),
+            x => self.raw_book.get_column_or(x, default),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn inner(&self) -> &RawBook {
+        &self.raw_book
+    }
+}
+
+impl Book {
+    /// Generates a book with the given ID - intended to be used as a placeholder
+    /// to allow reducing the run-time of specific operations.
+    ///
+    /// # Arguments
+    /// * ` id ` - the id to assign this book.
+    pub(crate) fn with_id(id: u32) -> Book {
+        Book {
+            id,
+            raw_book: RawBook::default(),
+        }
+    }
+
+    /// Generates a book from the file at the specified `file_path`, and assigns the given ID
+    /// by default (note that the ID can not be changed).
+    /// To match books to their respective parsers, it is assumed that the extension is
+    /// the correct file format, case-insensitive.
+    /// Metadata will be generated from the file and corresponding parser.
+    ///
+    /// # Arguments
+    /// * ` file_path ` - The path to the file of interest.
+    /// * ` id ` - the id to set.
+    ///
+    /// # Errors
+    /// Will return an error if the provided file_path does not lead to a file.
+    pub(crate) fn from_raw_book(raw_book: RawBook, id: u32) -> Book {
+        Book { id, raw_book }
+    }
+
+    pub(crate) fn get_id(&self) -> u32 {
+        self.id
+    }
+}
+
+impl Book {
+    /// Sets specified columns, to the specified value. Titles will be stored directly,
+    /// authors will be stored as a list containing a single author.
+    /// ID and Variants can not be modified through set_column.
+    /// Series will be parsed to extract an index - strings in the form "series ... [num]"
+    /// will be parsed as ("series ...", num).
+    ///
+    /// All remaining arguments will be stored literally.
+    ///
+    /// # Arguments
+    /// * ` column ` - the column of interest.
+    /// * ` value ` - the value to store into the column.
+    pub(crate) fn set_column<S: AsRef<str>>(
+        &mut self,
+        column: &ColumnIdentifier,
+        value: S,
+    ) -> Result<(), BookError> {
+        self.raw_book.set_column(column, value)
+    }
+
+    /// Compares the specified columns, by default using Rust's native string comparison
+    /// - missing fields will be compared as empty strings.
+    /// If ID is compared, numerical comparison will occur.
+    /// If Series is compared, the series will be compared first, with the index being used
+    /// as a tie-breaker.
+    ///
+    /// # Arguments
+    /// * ` other ` - The other book with column to compare.
+    /// * ` column ` - the column of interest.
+    pub(crate) fn cmp_column(&self, other: &Self, column: &ColumnIdentifier) -> Ordering {
+        match column {
+            ColumnIdentifier::ID => self.get_id().cmp(&other.get_id()),
+            col => self.raw_book.cmp_column(&other.raw_book, col),
+        }
+    }
+}
+
+impl Book {
+    /// Merges self with other, assuming that other is in fact a variant of self.
+    /// Missing metadata will be utilized from other, and `self` variants will be extended
+    /// to include `other` variants.
+    ///
+    /// # Arguments
+    /// * ` other ` - Another book with more useful metadata, to be merged with self
+    pub(crate) fn merge_mut(&mut self, other: Self) {
+        self.raw_book.merge_mut(other.raw_book)
+    }
+}
+
 impl fmt::Display for Book {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(title) = &self.title {
+        if let Some(title) = &self.raw_book.title {
             write!(f, "{}", title)
         } else {
             write!(f, "")
