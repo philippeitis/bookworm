@@ -1,9 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::{fs, path};
+use std::path;
 
 use indexmap::IndexMap;
-use rayon::prelude::*;
 use regex::{Error as RegexError, Regex};
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
@@ -129,34 +128,14 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database fails.
     fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError>;
 
-    /// Reads the book at the given location into the database, and returns the book's ID.
+    /// Stores each book into the database, and returns a Vec of corresponding IDs.
     ///
     /// # Arguments
-    /// * ` file_path ` - The path to the book to be read.
+    /// * ` books ` - One or more books to be stored.
     ///
     /// # Errors
-    /// This function will return an error if the database fails,
-    /// the file does not exist, or can not be read.
-    fn read_book_from_file<P>(&mut self, file_path: P) -> Result<u32, DatabaseError>
-    where
-        P: AsRef<path::Path>;
-
-    /// Reads each book in the directory into the database, and returns a
-    /// Vec of corresponding IDs as well as a Vec of paths and errors which
-    /// occurred while trying to read them.
-    ///
-    /// # Arguments
-    /// * ` dir ` - A path to directories containing books to load.
-    ///
-    /// # Errors
-    /// This function will return an error if the database fails,
-    /// or the directory does not exist.
-    fn read_books_from_dir<P>(
-        &mut self,
-        dir: P,
-    ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
-    where
-        P: AsRef<path::Path>;
+    /// This function will return an error if the database fails
+    fn insert_books(&mut self, books: Vec<RawBook>) -> Result<Vec<u32>, DatabaseError>;
 
     /// Removes the book with the given ID. If no book with the given ID exists, no change occurs.
     ///
@@ -375,47 +354,22 @@ impl AppDatabase for BasicDatabase {
         Ok(id)
     }
 
-    fn read_book_from_file<P>(&mut self, file_path: P) -> Result<u32, DatabaseError>
-    where
-        P: AsRef<path::Path>,
-    {
-        self.insert_book(RawBook::generate_from_file(file_path)?)
-    }
-
-    fn read_books_from_dir<P>(
-        &mut self,
-        dir: P,
-    ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
-    where
-        P: AsRef<path::Path>,
-    {
-        // TODO: Look at libraries with parallel directory reading.
-        let results = fs::read_dir(dir)?
-            .filter_map(|res| res.map(|e| e.path()).ok())
-            .collect::<Vec<_>>()
-            .par_iter()
-            .map(RawBook::generate_from_file)
-            .collect::<Vec<_>>();
-
+    fn insert_books(&mut self, books: Vec<RawBook>) -> Result<Vec<u32>, DatabaseError> {
         let mut ids = vec![];
-        let mut errs = vec![];
 
         self.len = self.backend.write(|db| {
-            results.into_iter().for_each(|result| match result {
-                Ok(book) => {
-                    let id = db.new_id();
-                    let book = Book::from_raw_book(book, id);
-                    db.books.insert(id, book);
-                    ids.push(id);
-                }
-                Err(e) => errs.push(e.into()),
+            books.into_iter().for_each(|book| {
+                let id = db.new_id();
+                let book = Book::from_raw_book(book, id);
+                db.books.insert(id, book);
+                ids.push(id);
             });
             db.books.len()
         })?;
 
         self.saved = false;
 
-        Ok((ids, errs))
+        Ok(ids)
     }
 
     fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError> {

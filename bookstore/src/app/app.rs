@@ -1,6 +1,8 @@
+use std::{fs, path::Path};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::{path::PathBuf, process::Command as ProcessCommand};
 
+use rayon::prelude::*;
 use unicase::UniCase;
 
 use crate::app::help_strings::{help_strings, GENERAL_HELP};
@@ -11,8 +13,8 @@ use crate::database::{
     AppDatabase, BookView, DatabaseError, IndexableDatabase, NestedBookView, ScrollableBookView,
     SearchableBookView,
 };
-use crate::record::book::ColumnIdentifier;
-use crate::record::Book;
+use crate::record::book::{ColumnIdentifier, RawBook};
+use crate::record::{Book, BookError};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum ColumnUpdate {
@@ -24,17 +26,18 @@ pub(crate) enum ColumnUpdate {
 
 #[derive(Debug)]
 pub(crate) enum ApplicationError {
-    IoError(std::io::Error),
-    TerminalError(crossterm::ErrorKind),
-    DatabaseError(DatabaseError),
-    BookViewError(BookViewError),
+    IO(std::io::Error),
+    Terminal(crossterm::ErrorKind),
+    Book(BookError),
+    Database(DatabaseError),
+    BookView(BookViewError),
     NoBookSelected,
     Err(()),
 }
 
 impl From<std::io::Error> for ApplicationError {
     fn from(e: std::io::Error) -> Self {
-        ApplicationError::IoError(e)
+        ApplicationError::IO(e)
     }
 }
 
@@ -46,7 +49,17 @@ impl From<()> for ApplicationError {
 
 impl From<DatabaseError> for ApplicationError {
     fn from(e: DatabaseError) -> Self {
-        ApplicationError::DatabaseError(e)
+        match e {
+            DatabaseError::Io(e) => ApplicationError::IO(e),
+            DatabaseError::Book(e) => ApplicationError::Book(e),
+            e => ApplicationError::Database(e),
+        }
+    }
+}
+
+impl From<BookError> for ApplicationError {
+    fn from(e: BookError) -> Self {
+        ApplicationError::Book(e)
     }
 }
 
@@ -54,15 +67,26 @@ impl From<BookViewError> for ApplicationError {
     fn from(e: BookViewError) -> Self {
         match e {
             BookViewError::NoBookSelected => ApplicationError::NoBookSelected,
-            x => ApplicationError::BookViewError(x),
+            x => ApplicationError::BookView(x),
         }
     }
 }
 
 impl From<crossterm::ErrorKind> for ApplicationError {
     fn from(e: crossterm::ErrorKind) -> Self {
-        ApplicationError::TerminalError(e)
+        ApplicationError::Terminal(e)
     }
+}
+
+fn books_in_dir<P: AsRef<Path>>(dir: P) -> Result<Vec<RawBook>, std::io::Error> {
+    // TODO: Look at libraries with parallel directory reading.
+    //  Handle errored reads somehow.
+    Ok(fs::read_dir(dir)?
+        .filter_map(|res| res.map(|e| e.path()).ok())
+        .collect::<Vec<_>>()
+        .par_iter()
+        .filter_map(|path| RawBook::generate_from_file(path).ok())
+        .collect::<Vec<_>>())
 }
 
 pub(crate) struct App<D: AppDatabase> {
@@ -171,14 +195,15 @@ impl<D: IndexableDatabase> App<D> {
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::AddBookFromFile(f) => {
-                self.bv.write(|db| db.read_book_from_file(&f))?;
+                self.bv
+                    .write(|db| db.insert_book(RawBook::generate_from_file(&f)?))?;
                 self.updated = true;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::AddBooksFromDir(dir) => {
                 // TODO: Handle failed reads.
-                self.bv.write(|db| db.read_books_from_dir(&dir))?;
+                self.bv.write(|db| db.insert_books(books_in_dir(&dir)?))?;
                 self.updated = true;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;

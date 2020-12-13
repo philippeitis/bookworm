@@ -117,20 +117,7 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn read_book_from_file<P>(&mut self, file_path: P) -> Result<u32, DatabaseError>
-    where
-        P: AsRef<path::Path>,
-    {
-        self.insert_book(RawBook::generate_from_file(file_path)?)
-    }
-
-    fn read_books_from_dir<P>(
-        &mut self,
-        dir: P,
-    ) -> Result<(Vec<u32>, Vec<DatabaseError>), DatabaseError>
-    where
-        P: AsRef<path::Path>,
-    {
+    fn insert_books(&mut self, books: Vec<RawBook>) -> Result<Vec<u32>, DatabaseError> {
         unimplemented!()
     }
 
