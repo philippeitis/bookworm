@@ -84,24 +84,17 @@ impl PageCursor {
 
     /// Returns the selected value.
     pub(crate) fn selected(&self) -> Option<usize> {
-        if let Some(ind) = self.selected {
-            if self.window_size == 0 {
-                Some(0)
-            } else {
-                Some(ind)
-            }
+        let ind = self.selected?;
+        if self.window_size == 0 {
+            Some(0)
         } else {
-            None
+            Some(ind)
         }
     }
 
     /// Returns the selected value, if one is selected.
     pub(crate) fn selected_index(&self) -> Option<usize> {
-        if let Some(ind) = self.selected {
-            Some(self.top_index + ind)
-        } else {
-            None
-        }
+        Some(self.selected? + self.top_index)
     }
 
     /// Moves the selected cursor down if it exists, otherwise, creates a new cursor at the bottom.

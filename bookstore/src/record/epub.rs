@@ -15,30 +15,15 @@ fn get_root_file_byte_range(text: &[u8]) -> Option<Range<usize>> {
     lazy_static::lazy_static! {
         static ref RE: ByteRegex = ByteRegex::new(r#"(?:<rootfile )(?:[^>]*)(?:full-path=")([^"]*)(?:"[^>]*>)"#).unwrap();
     }
-    if let Some(captures) = RE.captures(text) {
-        if let Some(val) = captures.get(1) {
-            Some(val.start()..val.end())
-        } else {
-            None
-        }
-    } else {
-        None
-    }
+    let range = RE.captures(text)?.get(1)?;
+    Some(range.start()..range.end())
 }
 
 fn get_isbn(text: &str) -> Option<String> {
     lazy_static::lazy_static! {
         static ref RE: Regex = Regex::new(r#"(?:urn:isbn:)?([\d-]*)"#).unwrap();
     }
-    if let Some(captures) = RE.captures(text) {
-        if let Some(val) = captures.get(1) {
-            Some(val.as_str().to_owned())
-        } else {
-            None
-        }
-    } else {
-        None
-    }
+    Some(RE.captures(text)?.get(1)?.as_str().to_owned())
 }
 
 // Same as above, but again, what kind of terrible human being would put escaped metadata tags in
@@ -47,11 +32,8 @@ fn get_metadata_byte_range(text: &[u8]) -> Option<Range<usize>> {
     lazy_static::lazy_static! {
         static ref RE: ByteRegex = ByteRegex::new(r#"(?s:<(?:opf:)?metadata[^>]*>)(?s)(.*)(?-s)(?:</(?:opf:)?metadata>)"#).unwrap();
     }
-    if let Some(val) = RE.find(text) {
-        Some(val.start()..val.end())
-    } else {
-        None
-    }
+    let val = RE.find(text)?;
+    Some(val.start()..val.end())
 }
 
 pub enum EpubError {
