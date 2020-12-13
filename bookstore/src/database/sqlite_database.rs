@@ -4,16 +4,18 @@ use std::ops::Range;
 use std::path;
 use std::path::Path;
 
+use itertools::Itertools;
+use sqlx::migrate::MigrateDatabase;
 use sqlx::{Connection, Sqlite, SqliteConnection};
 use unicase::UniCase;
 
 use crate::database::search::Search;
 use crate::database::{AppDatabase, DatabaseError, IndexableDatabase};
+use crate::record::book::RawBook;
 use crate::record::Book;
-use sqlx::migrate::MigrateDatabase;
 
 const CREATE_BOOKS: &str = r#"CREATE TABLE `books` (
-`book_id` INTEGER PRIMARY KEY UNIQUE,
+`book_id` INTEGER PRIMARY KEY,
 `title` TEXT DEFAULT NULL,
 `series_name` TEXT DEFAULT NULL,
 `series_id` NUM DEFAULT NULL
@@ -43,6 +45,43 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON DELETE CASCADE
 );"#;
 
+const UPDATE_SERIES: &str = r#"CREATE TABLE `variants` (
+`book_type` TEXT,
+`path` TEXT,
+`local_title` TEXT DEFAULT NULL,
+`identifier` TEXT DEFAULT NULL,
+`language` TEXT DEFAULT NULL,
+`description` TEXT DEFAULT NULL,
+`id` INTEGER DEFAULT NULL,
+`book_id` INTEGER NOT NULL,
+FOREIGN KEY(book_id) REFERENCES books(book_id)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
+);"#;
+
+const FETCH_ID: &str = r#"SELECT * FROM {} WHERE book_id = {}";"#;
+const FETCH_IDS: &str = r#"SELECT * FROM {} WHERE book_id IN ({}, )";"#;
+const DELETE_BOOK: &str = r#"DELETE FROM books WHERE book_id = {}"#;
+const DELETE_BOOKS: &str = r#"DELETE FROM books WHERE book_id IN ({},)"#;
+const DELETE_ALL: &str = r#"DELETE FROM books"#;
+const EDIT_BOOK_BY_ID: &str = r#"UPDATE {} SET {} = {} WHERE book_id = {}"#;
+const GET_ALL_COLUMNS: &str = r#"SELECT DISTINCT tag_name FROM extended_tags"#;
+
+// TODO: FIND_MATCHES_* - look at SQLite FTS5.
+// TODO: MERGE_SIMILAR?
+const FIND_MATCHES_REGEX: &str = r#"SELECT * FROM {} WHERE {} REGEXP {};"#;
+const GET_SIZE: &str = r#"SELECT COUNT(*) FROM books;"#;
+
+const FETCH_SINGLE_INDEX: &str = r#"SELECT * FROM {} ORDER BY {} {} LIMIT 1 OFFSET {};"#;
+//                               all values         ascending or descending
+//                                  |     table   column  |  number of books
+//                                  v      v           v  v        v    start index
+const FETCH_RANGE_INDEX: &str = r#"SELECT * FROM {} ORDER BY {} {} LIMIT {} OFFSET {};"#;
+const FETCH_ALL: &str = r#"SELECT * FROM {} ORDER BY {} {};"#;
+const DELETE_BOOK_INDEX: &str = r#"DELETE FROM books ORDER BY {} {} LIMIT 1 OFFSET {}#;
+const DELETE_BOOKS_INDEX: &str = r#"DELETE FROM books ORDER BY {} {} LIMIT {} OFFSET {}"#;
+const EDIT_BOOK_BY_INDEX: &str = r#"UPDATE {} SET {} = {} WHERE book_id = {} LIMIT 1 OFFSET {}"#;
+
 struct SQLiteDatabase {
     backend: SqliteConnection,
     /// All available columns. Case-insensitive.
@@ -71,10 +110,10 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     fn save(&mut self) -> Result<(), DatabaseError> {
-        unimplemented!()
+        Ok(())
     }
 
-    fn insert_book(&mut self, book: Book) -> Result<u32, DatabaseError> {
+    fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError> {
         unimplemented!()
     }
 
@@ -82,7 +121,7 @@ impl AppDatabase for SQLiteDatabase {
     where
         P: AsRef<path::Path>,
     {
-        unimplemented!()
+        self.insert_book(RawBook::generate_from_file(file_path)?)
     }
 
     fn read_books_from_dir<P>(
@@ -96,35 +135,47 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError> {
+        // let query = format!("DELETE FROM books WHERE book_id = {}", id);
+        // let data = sqlx::query!("DELETE FROM books WHERE book_id = ?", id);
         unimplemented!()
     }
 
     fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError> {
+        // let query = format!("DELETE FROM books WHERE book_id IN ({})", ids.iter().join(", "));
+        // let data = sqlx::query!("DELETE FROM books WHERE book_id IN ?", ids);
         unimplemented!()
     }
 
     fn clear(&mut self) -> Result<(), DatabaseError> {
+        // let query = format!("DELETE FROM books");
+        // let data = sqlx::query!("DELETE FROM books");
         unimplemented!()
     }
 
     fn get_book(&self, id: u32) -> Result<Book, DatabaseError> {
+        //     let query = format!("SELECT * FROM books WHERE book_id = {}", id);
+        //     let data = sqlx::query!("SELECT * FROM books WHERE book_id = ?", id);
         unimplemented!()
     }
 
     fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Book>>, DatabaseError> {
+        // let query = format!("SELECT * FROM books WHERE book_id IN ({})", ids.iter().join(", "));
+        // let data = sqlx::query!("SELECT * FROM books WHERE book_id IN ?", ids);
         unimplemented!()
     }
 
     fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError> {
+        // let query = format!("SELECT * FROM {} ORDER BY {} {}");
+        // let data = sqlx::query!("SELECT * FROM {} ORDER BY ? ?");
         unimplemented!()
     }
 
     fn get_available_columns(&self) -> &HashSet<UniCase<String>, RandomState> {
-        unimplemented!()
+        &self.cols
     }
 
     fn has_column(&self, col: &UniCase<String>) -> bool {
-        unimplemented!()
+        self.cols.contains(col)
     }
 
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
@@ -133,6 +184,8 @@ impl AppDatabase for SQLiteDatabase {
         column: S0,
         new_value: S1,
     ) -> Result<(), DatabaseError> {
+        // let query = format!("UPDATE {} SET {} = {} WHERE book_id = {}");
+        // let data = sqlx::query!("SELECT * FROM {} ORDER BY ? ?");
         unimplemented!()
     }
 
@@ -144,16 +197,14 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn sort_books_by_col(&mut self, col: &str, reverse: bool) -> Result<(), DatabaseError> {
-        unimplemented!()
-    }
+    fn sort_books_by_col(&mut self, col: &str, reverse: bool) -> Result<(), DatabaseError> {}
 
     fn size(&self) -> usize {
-        unimplemented!()
+        self.len
     }
 
     fn saved(&self) -> bool {
-        unimplemented!()
+        true
     }
 }
 
