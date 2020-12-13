@@ -223,7 +223,6 @@ impl PageCursor {
         }
     }
 
-    #[allow(dead_code)]
     /// Sets height internally and adjusts the window settings.
     pub(crate) fn refresh_height(&mut self, height: usize) {
         self.height = height;
