@@ -67,7 +67,7 @@ impl From<crossterm::ErrorKind> for ApplicationError {
 
 pub(crate) struct App<D: AppDatabase> {
     // Application data
-    db: SearchableBookView<D>,
+    bv: SearchableBookView<D>,
     selected_cols: Vec<UniCase<String>>,
     column_data: Vec<Vec<String>>,
     active_help_string: Option<&'static str>,
@@ -80,7 +80,7 @@ pub(crate) struct App<D: AppDatabase> {
 impl<D: IndexableDatabase> App<D> {
     pub(crate) fn new(db: D) -> Self {
         App {
-            db: SearchableBookView::new(db),
+            bv: SearchableBookView::new(db),
             selected_cols: vec![],
             sort_settings: SortSettings::default(),
             updated: true,
@@ -100,7 +100,7 @@ impl<D: IndexableDatabase> App<D> {
     }
 
     pub(crate) fn selected_item(&self) -> Result<Book, ApplicationError> {
-        Ok(self.db.get_selected_book()?)
+        Ok(self.bv.get_selected_book()?)
     }
 
     pub(crate) fn edit_selected_book_with_column<S: AsRef<str>>(
@@ -108,21 +108,21 @@ impl<D: IndexableDatabase> App<D> {
         column: usize,
         new_value: S,
     ) -> Result<(), ApplicationError> {
-        self.db
+        self.bv
             .edit_selected_book(&self.selected_cols[column], new_value)?;
         self.register_update();
         Ok(())
     }
 
     pub(crate) fn remove_selected_book(&mut self) -> Result<(), ApplicationError> {
-        self.db.remove_selected_book()?;
+        self.bv.remove_selected_book()?;
         self.register_update();
         self.column_update = ColumnUpdate::Regenerate;
         Ok(())
     }
 
     pub(crate) fn selected(&self) -> Option<usize> {
-        self.db.selected()
+        self.bv.selected()
     }
 
     /// Gets the book that selected by the BookIndex,
@@ -133,8 +133,8 @@ impl<D: IndexableDatabase> App<D> {
     /// * ` b ` - A BookIndex which either represents an exact ID, or the selected book.
     pub(crate) fn get_book(&self, b: BookIndex) -> Result<Book, ApplicationError> {
         match b {
-            BookIndex::Selected => Ok(self.db.get_selected_book()?),
-            BookIndex::BookID(id) => Ok(self.db.get_book(id)?),
+            BookIndex::Selected => Ok(self.bv.get_selected_book()?),
+            BookIndex::BookID(id) => Ok(self.bv.get_book(id)?),
         }
     }
 
@@ -151,34 +151,34 @@ impl<D: IndexableDatabase> App<D> {
         match command {
             Command::DeleteBook(b) => {
                 match b {
-                    BookIndex::Selected => self.db.remove_selected_book()?,
-                    BookIndex::BookID(id) => self.db.remove_book(id)?,
+                    BookIndex::Selected => self.bv.remove_selected_book()?,
+                    BookIndex::BookID(id) => self.bv.remove_book(id)?,
                 };
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::DeleteAll => {
-                self.db.write(|db| db.clear())?;
+                self.bv.write(|db| db.clear())?;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::EditBook(b, field, new_value) => {
                 match b {
-                    BookIndex::Selected => self.db.edit_selected_book(field, new_value)?,
+                    BookIndex::Selected => self.bv.edit_selected_book(field, new_value)?,
                     BookIndex::BookID(id) => self
-                        .db
+                        .bv
                         .write(|db| db.edit_book_with_id(id, &field, &new_value))?,
                 };
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::AddBookFromFile(f) => {
-                self.db.write(|db| db.read_book_from_file(&f))?;
+                self.bv.write(|db| db.read_book_from_file(&f))?;
                 self.updated = true;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
             Command::AddBooksFromDir(dir) => {
                 // TODO: Handle failed reads.
-                self.db.write(|db| db.read_books_from_dir(&dir))?;
+                self.bv.write(|db| db.read_books_from_dir(&dir))?;
                 self.updated = true;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
@@ -205,20 +205,20 @@ impl<D: IndexableDatabase> App<D> {
                 }
             }
             Command::FindMatches(search) => {
-                self.db.push_scope(search)?;
+                self.bv.push_scope(search)?;
                 self.updated = true;
                 self.column_update = ColumnUpdate::Regenerate;
             }
-            Command::Write => self.db.write(|d| d.save())?,
+            Command::Write => self.bv.write(|d| d.save())?,
             // TODO: A warning pop-up when user is about to exit
             //  with unsaved changes.
             Command::Quit => return Ok(false),
             Command::WriteAndQuit => {
-                self.db.write(|d| d.save())?;
+                self.bv.write(|d| d.save())?;
                 return Ok(false);
             }
             Command::TryMergeAllBooks => {
-                self.db.write(|db| db.merge_similar())?;
+                self.bv.write(|db| db.merge_similar())?;
                 self.register_update();
                 self.column_update = ColumnUpdate::Regenerate;
             }
@@ -245,7 +245,7 @@ impl<D: IndexableDatabase> App<D> {
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
     fn update_selected_column(&mut self, mut word: UniCase<String>, reverse: bool) {
-        match word.as_str() {
+        match word.to_ascii_lowercase().as_str() {
             "author" => word = UniCase::from(String::from("authors")),
             _ => {}
         }
@@ -263,12 +263,10 @@ impl<D: IndexableDatabase> App<D> {
         match &self.column_update {
             ColumnUpdate::Regenerate => {
                 self.updated = true;
-                self.column_data = (0..self.selected_cols.len())
-                    .into_iter()
-                    .map(|_| Vec::with_capacity(self.db.window_size()))
-                    .collect();
+                self.column_data =
+                    vec![Vec::with_capacity(self.bv.window_size()); self.selected_cols.len()];
 
-                if self.db.window_size() == 0 {
+                if self.bv.window_size() == 0 {
                     self.column_update = ColumnUpdate::NoUpdate;
                     return Ok(());
                 }
@@ -279,7 +277,7 @@ impl<D: IndexableDatabase> App<D> {
                     .map(|col| ColumnIdentifier::from(col.as_str()))
                     .collect::<Vec<_>>();
 
-                for b in self.db.get_books_cursored()? {
+                for b in self.bv.get_books_cursored()? {
                     for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
                         column.push(b.get_column_or(&col, ""));
                     }
@@ -287,11 +285,11 @@ impl<D: IndexableDatabase> App<D> {
             }
             ColumnUpdate::AddColumn(word) => {
                 self.updated = true;
-                if self.db.inner().has_column(&word) && !self.selected_cols.contains(&word) {
+                if self.bv.inner().has_column(&word) && !self.selected_cols.contains(&word) {
                     self.selected_cols.push(word.clone());
                     let column_string = ColumnIdentifier::from(word.as_str());
                     self.column_data.push(
-                        self.db
+                        self.bv
                             .get_books_cursored()?
                             .iter()
                             .map(|book| book.get_column_or(&column_string, ""))
@@ -394,7 +392,7 @@ impl<D: IndexableDatabase> App<D> {
     }
 
     fn modify_db(&mut self, f: impl Fn(&mut SearchableBookView<D>) -> bool) -> bool {
-        if f(&mut self.db) {
+        if f(&mut self.bv) {
             self.register_update();
             self.column_update = ColumnUpdate::Regenerate;
             true
@@ -441,7 +439,7 @@ impl<D: IndexableDatabase> App<D> {
 
     pub(crate) fn apply_sort(&mut self) -> Result<(), DatabaseError> {
         if !self.sort_settings.is_sorted {
-            self.db.sort_by_column(
+            self.bv.sort_by_column(
                 self.sort_settings.column.as_str(),
                 self.sort_settings.reverse,
             )?;
@@ -455,12 +453,7 @@ impl<D: IndexableDatabase> App<D> {
     }
 
     pub(crate) fn refresh_window_size(&mut self, size: usize) -> bool {
-        if self.db.window_size() != size {
-            self.db.refresh_window_size(size);
-            true
-        } else {
-            false
-        }
+        self.bv.refresh_window_size(size)
     }
 
     pub(crate) fn set_column_update(&mut self, column_update: ColumnUpdate) {
@@ -485,7 +478,7 @@ impl<D: IndexableDatabase> App<D> {
     }
 
     pub(crate) fn saved(&mut self) -> bool {
-        self.db.inner().saved()
+        self.bv.inner().saved()
     }
 
     pub(crate) fn pop_scope(&mut self) -> bool {

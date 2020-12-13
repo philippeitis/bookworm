@@ -57,7 +57,7 @@ pub(crate) trait BookView<D: AppDatabase> {
 
     fn inner(&self) -> &D;
 
-    fn refresh_window_size(&mut self, size: usize);
+    fn refresh_window_size(&mut self, size: usize) -> bool;
 
     fn window_size(&self) -> usize;
 
@@ -244,12 +244,13 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         &self.db
     }
 
-    fn refresh_window_size(&mut self, size: usize) {
+    fn refresh_window_size(&mut self, size: usize) -> bool {
         self.scopes
             .iter_mut()
             .map(|(a, _)| a)
             .chain(std::iter::once(&mut self.root_cursor))
-            .for_each(|a| a.refresh_window_size(size))
+            .map(|a| a.refresh_window_size(size))
+            .fold(false, |a, b| a | b)
     }
 
     fn window_size(&self) -> usize {
@@ -296,45 +297,40 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
     fn push_scope(&mut self, search: Search) -> Result<(), BookViewError> {
         let mut results = IndexMap::new();
-        if self.scopes.is_empty() {
-            for book in self.db.find_matches(search)?.into_iter() {
-                results.insert(book.get_id(), book);
-            }
 
-            self.scopes.push((
-                PageCursor::new(self.root_cursor.window_size(), results.len()),
-                results,
-            ));
-            return Ok(());
-        }
-
-        let (_, books) = self.scopes.last().unwrap();
-        match search {
-            Search::Regex(column, search) => {
-                let col = ColumnIdentifier::from(column);
-                let matcher = Regex::new(search.as_str())?;
-                for (_, book) in books.iter() {
-                    if matcher.is_match(&book.get_column_or(&col, "")) {
-                        results.insert(book.get_id(), book.clone());
-                    }
+        match self.scopes.last() {
+            None => {
+                for book in self.db.find_matches(search)?.into_iter() {
+                    results.insert(book.get_id(), book);
                 }
             }
-            Search::CaseSensitive(column, search) => {
-                let col = ColumnIdentifier::from(column);
-                for (_, book) in books.iter() {
-                    if best_match(&search, &book.get_column_or(&col, "")).is_some() {
-                        results.insert(book.get_id(), book.clone());
+            Some((_, books)) => match search {
+                Search::Regex(column, search) => {
+                    let col = ColumnIdentifier::from(column);
+                    let matcher = Regex::new(search.as_str())?;
+                    for (_, book) in books.iter() {
+                        if matcher.is_match(&book.get_column_or(&col, "")) {
+                            results.insert(book.get_id(), book.clone());
+                        }
                     }
                 }
-            }
-            Search::Default(column, search) => {
-                let col = ColumnIdentifier::from(column);
-                for (_, book) in books.iter() {
-                    if best_match(&search, &book.get_column_or(&col, "")).is_some() {
-                        results.insert(book.get_id(), book.clone());
+                Search::CaseSensitive(column, search) => {
+                    let col = ColumnIdentifier::from(column);
+                    for (_, book) in books.iter() {
+                        if best_match(&search, &book.get_column_or(&col, "")).is_some() {
+                            results.insert(book.get_id(), book.clone());
+                        }
                     }
                 }
-            }
+                Search::Default(column, search) => {
+                    let col = ColumnIdentifier::from(column);
+                    for (_, book) in books.iter() {
+                        if best_match(&search, &book.get_column_or(&col, "")).is_some() {
+                            results.insert(book.get_id(), book.clone());
+                        }
+                    }
+                }
+            },
         }
 
         self.scopes.push((

@@ -234,7 +234,7 @@ impl PageCursor {
     /// If a selection exists, and the window size increases, the selected item in the data remains
     /// the same, and the start of the window moves up. If the window size decreases, the start of
     /// the window moves down, but the selected value does not change.
-    pub(crate) fn refresh_window_size(&mut self, window_size: usize) {
+    pub(crate) fn refresh_window_size(&mut self, window_size: usize) -> bool {
         let old_size = self.window_size;
         self.window_size = window_size;
         if let Some(ind) = self.selected {
@@ -266,6 +266,7 @@ impl PageCursor {
             }
         }
         self.refresh();
+        old_size != self.window_size
     }
 
     /// Gets the window size.

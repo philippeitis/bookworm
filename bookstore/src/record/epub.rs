@@ -11,12 +11,16 @@ use quick_xml::{events::Event, Reader};
 
 // Not robust if string is escaped, but at the same time, who would do such a terrible thing in the
 // root file?
-fn get_root_file(text: &str) -> Option<String> {
+fn get_root_file_byte_range(text: &[u8]) -> Option<Range<usize>> {
     lazy_static::lazy_static! {
-        static ref RE: Regex = Regex::new(r#"(?:<rootfile )(?:[^>]*)(?:full-path=")([^"]*)(?:"[^>]*>)"#).unwrap();
+        static ref RE: ByteRegex = ByteRegex::new(r#"(?:<rootfile )(?:[^>]*)(?:full-path=")([^"]*)(?:"[^>]*>)"#).unwrap();
     }
-    if let Some(val) = RE.captures(text).expect(text).get(1) {
-        Some(val.as_str().to_owned())
+    if let Some(captures) = RE.captures(text) {
+        if let Some(val) = captures.get(1) {
+            Some(val.start()..val.end())
+        } else {
+            None
+        }
     } else {
         None
     }
@@ -121,8 +125,6 @@ impl EpubMetadata {
     pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self, EpubError> {
         let mut buf = BufReader::new(File::open(path)?);
         let mut archive = ZipArchive::new(&mut buf)?;
-        // let mut file_names: Vec<_> = archive.file_names().map(|s| s.to_string()).collect();
-        // println!("{}", file_names.join(", "));
 
         // if let Ok(mut mime) = archive.by_name("mimetype") {
         //     let expected = b"application/epub+zip".to_vec();
@@ -139,9 +141,9 @@ impl EpubMetadata {
         let root_file = if let Ok(mut meta_inf) = archive.by_name("META-INF/container.xml") {
             let mut buf = Vec::new();
             meta_inf.read_to_end(&mut buf)?;
-            let s = String::from_utf8_lossy(&buf);
-            match get_root_file(s.as_ref()) {
-                Some(root_file) => root_file,
+            // let s = String::from_utf8_lossy(&buf);
+            match get_root_file_byte_range(&buf) {
+                Some(range) => String::from_utf8_lossy(&buf[range]).into_owned(),
                 None => return Err(EpubError::NoRootFile),
             }
         } else {
@@ -151,7 +153,6 @@ impl EpubMetadata {
         let mut meta_buf = Vec::new();
         let range = if let Ok(mut root_file) = archive.by_name(&root_file) {
             root_file.read_to_end(&mut meta_buf)?;
-            // let s = String::from_utf8_lossy(&buf);
             match get_metadata_byte_range(&meta_buf) {
                 Some(metadata) => metadata,
                 None => return Err(EpubError::NoMetadata),
@@ -167,104 +168,96 @@ impl EpubMetadata {
             isbn: None,
         };
 
-        {
-            let mut reader = Reader::from_reader(BufReader::new(&meta_buf[range]));
-            reader.trim_text(true);
+        let mut reader = Reader::from_reader(BufReader::new(&meta_buf[range]));
+        reader.trim_text(true);
 
-            let mut buf = Vec::new();
+        let mut buf = Vec::new();
 
-            let mut seen = FieldSeen::None;
-            // The `Reader` does not implement `Iterator` because it outputs borrowed data (`Cow`s)
-            loop {
-                match reader.read_event(&mut buf) {
-                    Ok(Event::Start(ref e)) => {
-                        // println!(
-                        //     "{} attributes values: {:?}",
-                        //     String::from_utf8_lossy(e.name()),
-                        //     e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
-                        // );
-                        seen = match e.name() {
-                            b"dc:creator" => FieldSeen::Author,
-                            b"dc:title" => FieldSeen::Title,
-                            b"dc:identifier" => {
-                                let mut id = None;
-                                let mut scheme = None;
-                                for a in e.attributes().filter_map(|a| a.ok()) {
-                                    match a.key {
-                                        b"opf:scheme" => {
-                                            scheme =
-                                                Some(String::from_utf8_lossy(&a.value).into_owned())
-                                        }
-                                        b"id" => {
-                                            id =
-                                                Some(String::from_utf8_lossy(&a.value).into_owned())
-                                        }
-                                        _ => {}
+        let mut seen = FieldSeen::None;
+        loop {
+            match reader.read_event(&mut buf)? {
+                Event::Start(ref e) => {
+                    // println!(
+                    //     "{} attributes values: {:?}",
+                    //     String::from_utf8_lossy(e.name()),
+                    //     e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
+                    // );
+                    seen = match e.name() {
+                        b"dc:creator" => FieldSeen::Author,
+                        b"dc:title" => FieldSeen::Title,
+                        b"dc:identifier" => {
+                            let mut id = None;
+                            let mut scheme = None;
+                            for a in e.attributes().filter_map(|a| a.ok()) {
+                                match a.key {
+                                    b"opf:scheme" => {
+                                        scheme =
+                                            Some(String::from_utf8_lossy(&a.value).into_owned())
                                     }
+                                    b"id" => {
+                                        id = Some(String::from_utf8_lossy(&a.value).into_owned())
+                                    }
+                                    _ => {}
                                 }
-                                FieldSeen::Identifier(match scheme {
-                                    None => match id {
-                                        None => IdentifierScheme::Unknown,
-                                        Some(val) => match val.to_ascii_lowercase().as_str() {
-                                            "uuid_id" => IdentifierScheme::UUID,
-                                            "isbn" => IdentifierScheme::ISBN,
-                                            _ => IdentifierScheme::Unknown,
-                                        },
-                                    },
+                            }
+                            FieldSeen::Identifier(match scheme {
+                                None => match id {
+                                    None => IdentifierScheme::Unknown,
                                     Some(val) => match val.to_ascii_lowercase().as_str() {
-                                        "amazon" => IdentifierScheme::Amazon,
-                                        "barnesnoble" => IdentifierScheme::BarnesNoble,
-                                        "calibre" => IdentifierScheme::Calibre,
-                                        "edelweiss" => IdentifierScheme::EdelWeiss,
-                                        "ff" => IdentifierScheme::FF,
-                                        "goodreads" => IdentifierScheme::GoodReads,
-                                        "google" => IdentifierScheme::Google,
+                                        "uuid_id" => IdentifierScheme::UUID,
                                         "isbn" => IdentifierScheme::ISBN,
-                                        "mobi-asin" => IdentifierScheme::MOBIASIN,
-                                        "sonybookid" => IdentifierScheme::SonyBookID,
-                                        "uri" => IdentifierScheme::URI,
-                                        "url" => IdentifierScheme::URL,
-                                        "urn" => IdentifierScheme::URN,
-                                        "uuid" => IdentifierScheme::UUID,
                                         _ => IdentifierScheme::Unknown,
                                     },
-                                })
-                            }
-                            b"dc:language" => FieldSeen::Language,
-                            b"dc:publisher" => FieldSeen::Publisher,
-                            _ => FieldSeen::None,
+                                },
+                                Some(val) => match val.to_ascii_lowercase().as_str() {
+                                    "amazon" => IdentifierScheme::Amazon,
+                                    "barnesnoble" => IdentifierScheme::BarnesNoble,
+                                    "calibre" => IdentifierScheme::Calibre,
+                                    "edelweiss" => IdentifierScheme::EdelWeiss,
+                                    "ff" => IdentifierScheme::FF,
+                                    "goodreads" => IdentifierScheme::GoodReads,
+                                    "google" => IdentifierScheme::Google,
+                                    "isbn" => IdentifierScheme::ISBN,
+                                    "mobi-asin" => IdentifierScheme::MOBIASIN,
+                                    "sonybookid" => IdentifierScheme::SonyBookID,
+                                    "uri" => IdentifierScheme::URI,
+                                    "url" => IdentifierScheme::URL,
+                                    "urn" => IdentifierScheme::URN,
+                                    "uuid" => IdentifierScheme::UUID,
+                                    _ => IdentifierScheme::Unknown,
+                                },
+                            })
                         }
+                        b"dc:language" => FieldSeen::Language,
+                        b"dc:publisher" => FieldSeen::Publisher,
+                        _ => FieldSeen::None,
                     }
-                    Ok(Event::Text(e)) => {
-                        // TODO: Remove unwrap
-                        let val = e.unescape_and_decode(&reader)?;
-                        // println!("{}", val);
-                        match seen {
-                            FieldSeen::Author => {
-                                new_obj.author = Some(val);
-                            }
-                            FieldSeen::Title => {
-                                new_obj.title = Some(val);
-                            }
-                            FieldSeen::Publisher => {}
-                            FieldSeen::Identifier(scheme) => match scheme {
-                                IdentifierScheme::ISBN => new_obj.isbn = get_isbn(&val),
-                                _ => {}
-                            },
-                            FieldSeen::Language => {
-                                new_obj.language = Some(val);
-                            }
-                            FieldSeen::None => {}
-                        }
-                    }
-                    Ok(Event::Eof) => break, // exits the loop when reaching end of file
-                    Err(e) => panic!("Error at position {}: {:?}", reader.buffer_position(), e),
-                    _ => (), // There are several other `Event`s we do not consider here
                 }
-
-                // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
-                buf.clear();
+                Event::Text(e) => {
+                    let val = e.unescape_and_decode(&reader)?;
+                    match seen {
+                        FieldSeen::Author => {
+                            new_obj.author = Some(val);
+                        }
+                        FieldSeen::Title => {
+                            new_obj.title = Some(val);
+                        }
+                        FieldSeen::Publisher => {}
+                        FieldSeen::Identifier(scheme) => match scheme {
+                            IdentifierScheme::ISBN => new_obj.isbn = get_isbn(&val),
+                            _ => {}
+                        },
+                        FieldSeen::Language => {
+                            new_obj.language = Some(val);
+                        }
+                        FieldSeen::None => {}
+                    }
+                }
+                Event::Eof => break,
+                _ => {}
             }
+
+            buf.clear();
         }
 
         Ok(new_obj)
