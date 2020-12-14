@@ -7,31 +7,32 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-
 # UI
 clap = "3.0.0-beta.2"
 tui = { version = "0.13", default-features = false, features = ['crossterm'] }
 unicode-truncate = "0.1.1"
-
 crossterm = "0.18.2"
 shellwords = "1.1.0"
+html2text = "0.2.1"
+
+# Core app
+serde = { version = "1.0", features = ["derive"] }
 glob = "0.3.0"
-unicase = "2.6.0"
 toml = "0.5.7"
+unicase = "2.6.0"
 itertools = "0.9.0"
-mobi = "0.5.1"
 rayon = "1.5.0"
 sublime_fuzzy = "0.6.0"
 indexmap = { version = "1.6.0", default-features = false, features = ['serde-1', 'rayon'] }
+jwalk = "0.5.1"
 
-# Epub parsing dependencies.
+# Book parsing dependencies.
 zip = "0.5.9"
 regex = "1.4.2"
 lazy_static = "1.4.0"
 quick-xml = "0.20.0"
+mobi = "0.5.1"
 
-html2text = "0.2.1"
 
 google-drive3 = { version = "*", optional = true }
 hyper = { version = "^0.10", optional = true }
@@ -40,16 +41,20 @@ serde_json = { version = "^1.0", optional = true }
 yup-oauth2 = { version = "^1.0", optional = true }
 
 rustbreak = { version = "2", features = ["ron_enc"] }
-sqlx = { version = "0.4.0", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
 
+# Likely SQLx dependencies.
+sqlx = { version = "0.4.1", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
+tokio = { version = "0.3.5", features = ["macros", "rt-multi-thread"], optional = true }
+async-trait = { version = "0.1.42", optional = true }
+crossbeam = { version = "0.8.0", optional = true }
+
+[features]
+cloud = ["google-drive3", "hyper", "hyper-rustls", "serde_json", "yup-oauth2"]
+sqlite = ["sqlx", "tokio", "async-trait", "crossbeam"]
 
 [dev-dependencies]
 tempfile = "3.1.0"
 rand = "0.7.3"
-
-[features]
-cloud = ["google-drive3", "hyper", "hyper-rustls", "serde_json", "yup-oauth2"]
-sqlite = ["sqlx"]
 
 [profile.release]
 lto = true
