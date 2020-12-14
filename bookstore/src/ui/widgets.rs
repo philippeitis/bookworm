@@ -64,6 +64,7 @@ impl<'a> BookWidget<'a> {
 }
 
 impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
+    // TODO: This doesn't seem to do line wraps correctly?
     fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
         let field_exists = Style::default().add_modifier(Modifier::BOLD);
         let field_not_provided = Style::default();
@@ -73,13 +74,21 @@ impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
         } else {
             Text::styled("No title provided", field_not_provided)
         };
+
         if let Some(t) = self.book.get_authors() {
             let mut s = String::from("By: ");
             s.push_str(&t.join(", "));
             data.extend(Text::styled(s, field_exists));
         } else {
-            data.extend(Text::styled("No author provided", field_not_provided))
-        };
+            data.extend(Text::styled("No author provided", field_not_provided));
+        }
+
+        // TODO: Many of these appear as HTML, so parsing it into HTML
+        //  is a good idea.
+        if let Some(t) = self.book.get_description() {
+            data.extend(Text::styled("\n", field_exists));
+            data.extend(Text::styled(t, field_exists));
+        }
 
         if let Some(columns) = self.book.get_extended_columns() {
             data.extend(Text::raw("\nTags provided:"));
