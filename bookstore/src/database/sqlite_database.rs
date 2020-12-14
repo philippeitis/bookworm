@@ -2,7 +2,6 @@ use std::collections::hash_map::RandomState;
 use std::collections::HashSet;
 use std::ops::{Bound, RangeBounds};
 use std::path;
-use std::path::Path;
 
 use itertools::Itertools;
 use sqlx::migrate::MigrateDatabase;
@@ -45,20 +44,6 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON DELETE CASCADE
 );"#;
 
-const UPDATE_SERIES: &str = r#"CREATE TABLE `variants` (
-`book_type` TEXT,
-`path` TEXT,
-`local_title` TEXT DEFAULT NULL,
-`identifier` TEXT DEFAULT NULL,
-`language` TEXT DEFAULT NULL,
-`description` TEXT DEFAULT NULL,
-`id` INTEGER DEFAULT NULL,
-`book_id` INTEGER NOT NULL,
-FOREIGN KEY(book_id) REFERENCES books(book_id)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE
-);"#;
-
 const FETCH_ID: &str = r#"SELECT * FROM {} WHERE book_id = {}";"#;
 const FETCH_IDS: &str = r#"SELECT * FROM {} WHERE book_id IN ({}, )";"#;
 const DELETE_BOOK: &str = r#"DELETE FROM books WHERE book_id = {}"#;
@@ -82,7 +67,7 @@ const DELETE_BOOK_INDEX: &str = r#"DELETE FROM books ORDER BY {} {} LIMIT 1 OFFS
 const DELETE_BOOKS_INDEX: &str = r#"DELETE FROM books ORDER BY {} {} LIMIT {} OFFSET {}"#;
 const EDIT_BOOK_BY_INDEX: &str = r#"UPDATE {} SET {} = {} WHERE book_id = {} LIMIT 1 OFFSET {}"#;
 
-struct SQLiteDatabase {
+pub(crate) struct SQLiteDatabase {
     backend: SqliteConnection,
     /// All available columns. Case-insensitive.
     cols: HashSet<UniCase<String>>,
@@ -90,6 +75,14 @@ struct SQLiteDatabase {
     saved: bool,
 }
 
+// TODO: Should we read everything into in-memory cache so that we can return
+//  books synchronously?
+//  Eg. Changes mirrored to internal cache, then written into SQLite
+//  db via another process?
+//  Would push writes to queue:
+//  DELETE_ALL should clear queue, since everything will be deleted.
+//  DELETE_BOOK_ID should clear anything that overwrites given book, except when
+//  an ordering is enforced in previous command.
 impl AppDatabase for SQLiteDatabase {
     fn open<P>(file_path: P) -> Result<Self, DatabaseError>
     where
@@ -110,7 +103,7 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     fn save(&mut self) -> Result<(), DatabaseError> {
-        Ok(())
+        unimplemented!()
     }
 
     fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError> {
@@ -123,25 +116,34 @@ impl AppDatabase for SQLiteDatabase {
 
     fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError> {
         // let query = format!("DELETE FROM books WHERE book_id = {}", id);
-        // let data = sqlx::query!("DELETE FROM books WHERE book_id = ?", id);
+        // let idx = id as i64;
+        // let data = sqlx::query!("DELETE FROM books WHERE book_id = ?", idx)
+        //     .fetch_all(&mut self.backend)
+        //     .await?;
         unimplemented!()
     }
 
     fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError> {
         // let query = format!("DELETE FROM books WHERE book_id IN ({})", ids.iter().join(", "));
-        // let data = sqlx::query!("DELETE FROM books WHERE book_id IN ?", ids);
+        // let query = sqlx::query(&query).execute(&mut self.backend).await?;
+        // let ids = ids.into_iter().map(|id| id as i64).collect::<Vec<_>>();
+        // let data = sqlx::query("DELETE FROM books WHERE book_id IN (?)", ids.as_slice());
         unimplemented!()
     }
 
     fn clear(&mut self) -> Result<(), DatabaseError> {
         // let query = format!("DELETE FROM books");
-        // let data = sqlx::query!("DELETE FROM books");
+        // let data = sqlx::query!("DELETE FROM books")
+        //     .fetch_all(&mut self.backend)
+        //     .await?;
         unimplemented!()
     }
 
     fn get_book(&self, id: u32) -> Result<Book, DatabaseError> {
         //     let query = format!("SELECT * FROM books WHERE book_id = {}", id);
-        //     let data = sqlx::query!("SELECT * FROM books WHERE book_id = ?", id);
+        // let data = sqlx::query!("SELECT * FROM books WHERE book_id = ?", id)
+        //     .fetch_all(&mut self.backend)
+        //     .await?;
         unimplemented!()
     }
 

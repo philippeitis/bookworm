@@ -6,6 +6,8 @@ use indexmap::IndexMap;
 use regex::{Error as RegexError, Regex};
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "sqlite")]
+use sqlx::Error as SQLError;
 use sublime_fuzzy::best_match;
 use unicase::UniCase;
 
@@ -16,22 +18,19 @@ use crate::record::{Book, BookError};
 #[derive(Debug)]
 pub(crate) enum DatabaseError {
     Io(std::io::Error),
-    RegexError(RegexError),
+    Regex(RegexError),
     Book(BookError),
-    Backend(RustbreakError),
     BookNotFound(u32),
     IndexOutOfBounds(usize),
+    #[cfg(not(feature = "sqlite"))]
+    Backend(RustbreakError),
+    #[cfg(feature = "sqlite")]
+    Backend(SQLError),
 }
 
 impl From<std::io::Error> for DatabaseError {
     fn from(e: std::io::Error) -> Self {
         DatabaseError::Io(e)
-    }
-}
-
-impl From<RustbreakError> for DatabaseError {
-    fn from(e: RustbreakError) -> Self {
-        DatabaseError::Backend(e)
     }
 }
 
@@ -43,7 +42,21 @@ impl From<BookError> for DatabaseError {
 
 impl From<RegexError> for DatabaseError {
     fn from(e: RegexError) -> Self {
-        DatabaseError::RegexError(e)
+        DatabaseError::Regex(e)
+    }
+}
+
+#[cfg(not(feature = "sqlite"))]
+impl From<RustbreakError> for DatabaseError {
+    fn from(e: RustbreakError) -> Self {
+        DatabaseError::Backend(e)
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl From<SQLError> for DatabaseError {
+    fn from(e: SQLError) -> Self {
+        DatabaseError::Backend(e)
     }
 }
 

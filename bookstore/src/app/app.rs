@@ -3,6 +3,8 @@ use std::{fs, path::Path};
 use std::{path::PathBuf, process::Command as ProcessCommand};
 
 use rayon::prelude::*;
+#[cfg(feature = "sqlite")]
+use sqlx::Error as SQLError;
 use unicase::UniCase;
 
 use crate::app::help_strings::{help_strings, GENERAL_HELP};
@@ -33,6 +35,8 @@ pub(crate) enum ApplicationError {
     BookView(BookViewError),
     NoBookSelected,
     Err(()),
+    #[cfg(feature = "sqlite")]
+    SQL(SQLError),
 }
 
 impl From<std::io::Error> for ApplicationError {
@@ -75,6 +79,13 @@ impl From<BookViewError> for ApplicationError {
 impl From<crossterm::ErrorKind> for ApplicationError {
     fn from(e: crossterm::ErrorKind) -> Self {
         ApplicationError::Terminal(e)
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl From<SQLError> for ApplicationError {
+    fn from(e: SQLError) -> Self {
+        ApplicationError::SQL(e)
     }
 }
 

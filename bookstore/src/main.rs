@@ -16,7 +16,7 @@ use tui::Terminal;
 
 use crate::app::parse_args;
 use crate::app::{App, ApplicationError, Settings};
-use crate::database::{AppDatabase, BasicDatabase};
+use crate::database::{AppDatabase, Database};
 use crate::ui::AppInterface;
 
 #[derive(Clap)]
@@ -45,7 +45,7 @@ fn main() -> Result<(), ApplicationError> {
     };
 
     let settings = Settings::open(opts.settings).unwrap_or_default();
-    let db = BasicDatabase::open(opts.database)?;
+    let db = Database::open(opts.database)?;
 
     let mut app = App::new(db);
 
