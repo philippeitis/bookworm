@@ -6,7 +6,8 @@ FLAGS:
     -r: The given directory should be recursively navigated.
 
 ARGUMENTS:
-<path>: A relative path to the location of interest.
+-d: A relative path to the location of interest.
+-r <depth>: (Optional) The maximum depth from which books will be retrieved. If not specified, only files in directory root will be read. If specified without a depth, depth is set to 255.
 "#;
 
 pub const WRITE_FILE_HELP_STRING: &str = r#"USAGE:

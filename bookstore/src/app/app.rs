@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::path::Path;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::{path::PathBuf, process::Command as ProcessCommand};
 
@@ -89,16 +89,44 @@ impl From<SQLError> for ApplicationError {
     }
 }
 
-fn books_in_dir<P: AsRef<Path>>(dir: P) -> Result<Vec<RawBook>, std::io::Error> {
+// 0.75
+fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::io::Error> {
     // TODO: Look at libraries with parallel directory reading.
     //  Handle errored reads somehow.
-    Ok(fs::read_dir(dir)?
+    let start = std::time::Instant::now();
+    let res = jwalk::WalkDir::new(dir)
+        .min_depth(0)
+        .max_depth(depth as usize)
+        .into_iter()
         .filter_map(|res| res.map(|e| e.path()).ok())
         .collect::<Vec<_>>()
         .par_iter()
         .filter_map(|path| RawBook::generate_from_file(path).ok())
-        .collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    let elapsed = start.elapsed().as_secs_f32();
+    println!("{}", elapsed);
+    Ok(res)
 }
+
+// fn books_in_dir<P: AsRef<Path>>(dir: P) -> Result<Vec<RawBook>, std::io::Error> {
+//     // TODO: Look at libraries with parallel directory reading.
+//     //  Handle errored reads somehow.
+//     use futures::future::join_all;
+//     use futures::executor::block_on;
+//
+//     let start = std::time::Instant::now();
+//     let books = block_on(join_all(fs::read_dir(dir)?
+//         .filter_map(|res| res.map(|e| e.path()).ok())
+//         .map(|p| async move { RawBook::generate_from_file(p) })))
+//         .into_iter()
+//         .filter_map(|x| x.ok())
+//         .collect();
+//
+//     let elapsed = start.elapsed().as_secs_f32();
+//     println!("{}", elapsed);
+//
+//     Ok(books)
+// }
 
 pub(crate) struct App<D: AppDatabase> {
     // Application data
@@ -212,9 +240,10 @@ impl<D: IndexableDatabase> App<D> {
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;
             }
-            Command::AddBooksFromDir(dir) => {
+            Command::AddBooksFromDir(dir, depth) => {
                 // TODO: Handle failed reads.
-                self.bv.write(|db| db.insert_books(books_in_dir(&dir)?))?;
+                self.bv
+                    .write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
                 self.updated = true;
                 self.sort_settings.is_sorted = false;
                 self.column_update = ColumnUpdate::Regenerate;

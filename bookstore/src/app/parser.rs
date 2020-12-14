@@ -25,7 +25,7 @@ pub enum Command {
     DeleteAll,
     EditBook(BookIndex, String, String),
     AddBookFromFile(PathBuf),
-    AddBooksFromDir(PathBuf),
+    AddBooksFromDir(PathBuf, u8),
     AddColumn(String),
     RemoveColumn(String),
     SortColumn(String, bool),
@@ -167,18 +167,26 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
         "!wq" => Ok(Command::WriteAndQuit),
         "!a" => {
             let mut d = false;
+            let mut depth = 1;
             let mut path_exists = false;
             let mut path = PathBuf::new();
 
             for flag in flags {
                 match flag {
                     Flag::Flag(c) => match c.as_str() {
+                        "r" => {
+                            depth = 255;
+                        }
                         "d" => {
                             d = true;
                         }
                         _ => {}
                     },
                     Flag::FlagWithArgument(c, args) => match c.as_str() {
+                        "r" => match u8::from_str(&args[0]) {
+                            Ok(i) => depth = i,
+                            Err(_) => return Err(CommandError::InvalidCommand),
+                        },
                         "d" => {
                             d = true;
                             path_exists = true;
@@ -194,7 +202,7 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             }
             if path_exists {
                 Ok(if d {
-                    Command::AddBooksFromDir(path)
+                    Command::AddBooksFromDir(path, depth)
                 } else {
                     Command::AddBookFromFile(path)
                 })
@@ -419,7 +427,7 @@ mod test {
 
         assert_eq!(
             parse_args(args).unwrap(),
-            Command::AddBooksFromDir(PathBuf::from("hello world"))
+            Command::AddBooksFromDir(PathBuf::from("hello world"), 1)
         )
     }
 }
