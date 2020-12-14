@@ -7,7 +7,6 @@ use tui::Frame;
 
 use crate::app::user_input::CommandString;
 use crate::record::Book;
-use crate::ui::scrollable_text::BlindOffset;
 
 pub(crate) trait Widget<B: Backend> {
     /// Renders the widget into the frame, using the provided space.

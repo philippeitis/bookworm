@@ -418,16 +418,42 @@ mod test {
     use std::path::PathBuf;
 
     #[test]
-    fn test_flag_at_end_read() {
+    fn test_add_command() {
         let args = vec![
-            String::from("!a"),
-            String::from("hello world"),
-            String::from("-d"),
+            (
+                vec!["!a", "hello world", "-d"],
+                Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
+            ),
+            (
+                vec!["!a", "-d", "hello world"],
+                Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
+            ),
+            (
+                vec!["!a", "-d", "hello world", "-r", "1"],
+                Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
+            ),
+            (
+                vec!["!a", "-r", "1", "-d", "hello world"],
+                Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
+            ),
+            (
+                vec!["!a", "-d", "hello world", "-r"],
+                Command::AddBooksFromDir(PathBuf::from("hello world"), 255),
+            ),
+            (
+                vec!["!a", "-r", "-d", "hello world"],
+                Command::AddBooksFromDir(PathBuf::from("hello world"), 255),
+            ),
+            (
+                vec!["!a", "hello world"],
+                Command::AddBookFromFile(PathBuf::from("hello world")),
+            ),
         ];
 
-        assert_eq!(
-            parse_args(args).unwrap(),
-            Command::AddBooksFromDir(PathBuf::from("hello world"), 1)
-        )
+        for (args, command) in args {
+            let args: Vec<_> = args.into_iter().map(|s| s.to_owned()).collect();
+            let res = parse_args(args.clone()).unwrap();
+            assert_eq!(res, command, "from {:?} expected {:?}", args, command);
+        }
     }
 }
