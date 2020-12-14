@@ -39,6 +39,7 @@ pub(crate) struct RawBook {
     pub(crate) title: Option<String>,
     pub(crate) authors: Option<Vec<String>>,
     pub(crate) series: Option<(String, Option<f32>)>,
+    pub(crate) description: Option<String>,
     variants: Option<Vec<BookVariant>>,
     extended_tags: Option<HashMap<String, String>>,
 }
@@ -84,18 +85,20 @@ impl RawBook {
             series: None,
             variants: Some(variants.clone()),
             extended_tags: None,
+            description: None,
         };
 
         for variant in variants.iter() {
-            if book.title == None {
-                if let Some(title) = variant.local_title.clone() {
-                    book.title = Some(title);
-                }
+            if book.title.is_none() {
+                book.title = variant.local_title.clone();
             }
-            if book.authors == None {
-                if let Some(authors) = variant.additional_authors.clone() {
-                    book.authors = Some(authors);
-                }
+
+            if book.authors.is_none() {
+                book.authors = variant.additional_authors.clone();
+            }
+
+            if book.description.is_none() {
+                book.description = variant.description.clone();
             }
         }
 

@@ -324,7 +324,7 @@ impl AppDatabase for BasicDatabase {
         let (cols, len) = backend.read(|db| {
             let mut c = HashSet::new();
 
-            for &col in &["title", "authors", "series", "id"] {
+            for &col in &["title", "authors", "series", "id", "description"] {
                 c.insert(col);
             }
 
@@ -661,11 +661,14 @@ mod test {
     #[test]
     fn test_open() {
         let db = temp_db();
-        let base_cols = ["title", "authors", "id", "series"];
-        assert!(db.cols.eq(&base_cols
-            .iter()
-            .map(|&c| UniCase::new(c.to_owned()))
-            .collect()));
+        let base_cols = ["title", "authors", "id", "series", "description"];
+        assert_eq!(
+            db.cols,
+            base_cols
+                .iter()
+                .map(|&c| UniCase::new(c.to_owned()))
+                .collect()
+        );
     }
 
     #[test]

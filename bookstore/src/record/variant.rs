@@ -153,14 +153,11 @@ impl BookVariant {
                         }
                     }
                 }
+
                 Ok(())
             }
             BookType::MOBI => {
                 let doc = MobiMetadata::from_path(&self.path)?;
-                if self.local_title.is_none() {
-                    self.local_title = doc.title();
-                }
-
                 if self.additional_authors.is_none() {
                     if let Some(author) = doc.author() {
                         self.additional_authors = Some(vec![unravel_author(&author)]);
@@ -176,6 +173,18 @@ impl BookVariant {
                         if let Ok(isbn) = ISBN::from_str(&isbn) {
                             self.identifier = Some(Identifier::ISBN(isbn));
                         }
+                    }
+                }
+
+                if self.description.is_none() {
+                    self.description = doc.description();
+                }
+
+                if self.local_title.is_none() {
+                    if doc.title().is_none() {
+                        self.local_title = Some(doc.name);
+                    } else {
+                        self.local_title = doc.title();
                     }
                 }
 
