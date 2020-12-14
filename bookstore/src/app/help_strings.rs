@@ -84,7 +84,7 @@ FLAGS:
 -f: Open the book in the native file explorer. Windows only.
 
 ARGUMENTS:
-<book> (Optional): The book to open. If not specified, opens the selected item.
+<book>: (Optional) The book to open. If not specified, opens the selected item.
 <index>: (Optional) The index of the variant to open.
 "#;
 
