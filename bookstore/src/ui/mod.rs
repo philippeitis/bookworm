@@ -1,3 +1,4 @@
+mod scrollable_text;
 pub(crate) mod terminal_ui;
 pub(crate) mod views;
 pub mod widgets;

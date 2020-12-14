@@ -11,6 +11,7 @@ use crate::app::settings::{InterfaceStyle, NavigationSettings, Settings};
 use crate::app::user_input::{CommandString, EditState};
 use crate::app::{App, ApplicationError};
 use crate::database::IndexableDatabase;
+use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
 use crate::ui::views::{
     AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
 };
@@ -64,6 +65,9 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                     curr_command: CommandString::new(),
                     selected_column: 0,
                 },
+                had_selected: false,
+                offset: BlindOffset::new(),
+                book_area: Default::default(),
             }),
         })
     }
@@ -87,7 +91,14 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                         self.app.register_update();
                         let state = self.active_view.take_state();
                         match view {
-                            AppView::Columns => self.active_view = Box::new(ColumnWidget { state }),
+                            AppView::Columns => {
+                                self.active_view = Box::new(ColumnWidget {
+                                    state,
+                                    had_selected: false,
+                                    offset: BlindOffset::new(),
+                                    book_area: Default::default(),
+                                })
+                            }
                             AppView::Edit => {
                                 if let Some(x) = self.app.selected() {
                                     self.active_view = Box::new(EditWidget {
@@ -100,10 +111,7 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                                 let help_string = self.app.take_help_string();
                                 self.active_view = Box::new(HelpWidget {
                                     state,
-                                    offset: 0,
-                                    height: help_string.lines().count(),
-                                    window_height: 0,
-                                    help_string,
+                                    text: ScrollableText::new(help_string),
                                 })
                             }
                         }

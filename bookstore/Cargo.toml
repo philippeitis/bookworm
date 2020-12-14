@@ -31,6 +31,8 @@ regex = "1.4.2"
 lazy_static = "1.4.0"
 quick-xml = "0.20.0"
 
+html2text = "0.2.1"
+
 google-drive3 = { version = "*", optional = true }
 hyper = { version = "^0.10", optional = true }
 hyper-rustls = { version = "^0.6", optional = true }

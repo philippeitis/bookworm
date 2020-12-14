@@ -7,6 +7,7 @@ use tui::Frame;
 
 use crate::app::user_input::CommandString;
 use crate::record::Book;
+use crate::ui::scrollable_text::BlindOffset;
 
 pub(crate) trait Widget<B: Backend> {
     /// Renders the widget into the frame, using the provided space.
@@ -53,71 +54,55 @@ impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
     }
 }
 
-pub(crate) struct BookWidget<'a> {
-    book: &'a Book,
-}
+pub(crate) fn book_to_widget_text(book: &Book, width: usize) -> Text {
+    let field_exists = Style::default().add_modifier(Modifier::BOLD);
+    let field_not_provided = Style::default();
 
-impl<'a> BookWidget<'a> {
-    pub(crate) fn new(book: &'a Book) -> Self {
-        BookWidget { book }
+    let mut data = if let Some(t) = book.get_title() {
+        Text::styled(t, field_exists)
+    } else {
+        Text::styled("No title provided", field_not_provided)
+    };
+
+    if let Some(a) = book.get_authors() {
+        let mut s = String::from("By: ");
+        s.push_str(&a.join(", "));
+        data.extend(Text::styled(s, field_exists));
+    } else {
+        data.extend(Text::styled("No author provided", field_not_provided));
     }
-}
 
-impl<'a, B: Backend> Widget<B> for BookWidget<'a> {
-    // TODO: This doesn't seem to do line wraps correctly?
-    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
-        let field_exists = Style::default().add_modifier(Modifier::BOLD);
-        let field_not_provided = Style::default();
+    if let Some(d) = book.get_description() {
+        data.extend(Text::styled("\n", field_exists));
+        // TODO: Make this look nice.
+        data.extend(Text::raw(html2text::from_read(d.as_bytes(), width)));
+    }
 
-        let mut data = if let Some(t) = self.book.get_title() {
-            Text::styled(t, field_exists)
-        } else {
-            Text::styled("No title provided", field_not_provided)
-        };
+    if let Some(columns) = book.get_extended_columns() {
+        data.extend(Text::raw("\nTags provided:"));
+        for (key, value) in columns.iter() {
+            data.extend(Text::styled(
+                [key.as_str(), value.as_str()].join(": "),
+                field_exists,
+            ));
+        }
+    }
 
-        if let Some(t) = self.book.get_authors() {
-            let mut s = String::from("By: ");
-            s.push_str(&t.join(", "));
+    if let Some(variants) = book.get_variants() {
+        if !variants.is_empty() {
+            data.extend(Text::raw("\nVariant paths:"));
+        }
+        for variant in variants {
+            let s = format!(
+                "{:?}: {}",
+                variant.book_type(),
+                variant.path().display().to_string()
+            );
             data.extend(Text::styled(s, field_exists));
-        } else {
-            data.extend(Text::styled("No author provided", field_not_provided));
         }
-
-        // TODO: Many of these appear as HTML, so parsing it into HTML
-        //  is a good idea.
-        if let Some(t) = self.book.get_description() {
-            data.extend(Text::styled("\n", field_exists));
-            data.extend(Text::styled(t, field_exists));
-        }
-
-        if let Some(columns) = self.book.get_extended_columns() {
-            data.extend(Text::raw("\nTags provided:"));
-            for (key, value) in columns.iter() {
-                data.extend(Text::styled(
-                    [key.as_str(), value.as_str()].join(": "),
-                    field_exists,
-                ));
-            }
-        }
-
-        if let Some(variants) = self.book.get_variants() {
-            if !variants.is_empty() {
-                data.extend(Text::raw("\nVariant paths:"));
-            }
-            for variant in variants {
-                let s = format!(
-                    "{:?}: {}",
-                    variant.book_type(),
-                    variant.path().display().to_string()
-                );
-                data.extend(Text::styled(s, field_exists));
-            }
-        }
-
-        let p = Paragraph::new(data);
-
-        f.render_widget(p, chunk);
     }
+
+    data
 }
 
 pub(crate) struct BorderWidget {

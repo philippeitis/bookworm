@@ -13,8 +13,9 @@ use crate::app::parse_args;
 use crate::app::user_input::EditState;
 use crate::app::{App, ApplicationError};
 use crate::database::IndexableDatabase;
+use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
 use crate::ui::terminal_ui::UIState;
-use crate::ui::widgets::{BookWidget, CommandWidget, Widget};
+use crate::ui::widgets::{book_to_widget_text, CommandWidget, Widget};
 
 #[derive(Copy, Clone)]
 pub(crate) enum AppView {
@@ -120,6 +121,9 @@ fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
 
 pub(crate) struct ColumnWidget {
     pub(crate) state: UIState,
+    pub(crate) had_selected: bool,
+    pub(crate) offset: BlindOffset,
+    pub(crate) book_area: Rect,
 }
 
 impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
@@ -134,13 +138,24 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
 
     fn render_into_frame(&mut self, app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
         let chunk = if let Ok(b) = app.selected_item() {
+            self.had_selected = true;
             let hchunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
                 .split(chunk);
-            BookWidget::new(&b).render_into_frame(f, hchunks[1]);
+
+            self.book_area = hchunks[1];
+            let book_text =
+                book_to_widget_text(&b, self.book_area.width.saturating_sub(1) as usize);
+            self.offset
+                .refresh_window_height(self.book_area.height as usize);
+            let offset = self.offset.offset_with_height(book_text.lines.len());
+            let p = Paragraph::new(book_text).scroll((offset as u16, 0));
+            f.render_widget(p, self.book_area);
+
             hchunks[0]
         } else {
+            self.had_selected = false;
             chunk
         };
 
@@ -171,6 +186,10 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
     }
 }
 
+fn inside_rect(rect: Rect, col: u16, row: u16) -> bool {
+    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
+}
+
 impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
     fn handle_input(
         &mut self,
@@ -180,18 +199,38 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::Update),
             Event::Mouse(m) => match m {
-                MouseEvent::ScrollDown(_, _, _) => {
-                    if self.state.nav_settings.inverted {
-                        app.scroll_up(self.state.nav_settings.scroll);
+                MouseEvent::ScrollDown(c, r, _) => {
+                    let inverted = self.state.nav_settings.inverted;
+                    let scroll = self.state.nav_settings.scroll;
+                    if inside_rect(self.book_area, c, r) {
+                        if inverted {
+                            self.offset.scroll_up(scroll);
+                        } else {
+                            self.offset.scroll_down(scroll);
+                        }
                     } else {
-                        app.scroll_down(self.state.nav_settings.scroll);
+                        if inverted {
+                            app.scroll_up(scroll);
+                        } else {
+                            app.scroll_down(scroll);
+                        }
                     }
                 }
-                MouseEvent::ScrollUp(_, _, _) => {
-                    if self.state.nav_settings.inverted {
-                        app.scroll_down(self.state.nav_settings.scroll);
+                MouseEvent::ScrollUp(c, r, _) => {
+                    let inverted = self.state.nav_settings.inverted;
+                    let scroll = self.state.nav_settings.scroll;
+                    if inside_rect(self.book_area, c, r) {
+                        if inverted {
+                            self.offset.scroll_down(scroll);
+                        } else {
+                            self.offset.scroll_up(scroll);
+                        }
                     } else {
-                        app.scroll_up(self.state.nav_settings.scroll);
+                        if inverted {
+                            app.scroll_down(scroll);
+                        } else {
+                            app.scroll_up(scroll);
+                        }
                     }
                 }
                 _ => {
@@ -454,10 +493,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget {
 
 pub(crate) struct HelpWidget {
     pub(crate) state: UIState,
-    pub(crate) offset: usize,
-    pub(crate) height: usize,
-    pub(crate) window_height: usize,
-    pub(crate) help_string: &'static str,
+    pub(crate) text: ScrollableText,
 }
 
 impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget {
@@ -471,9 +507,9 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget 
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        self.window_height = vchunks[0].height as usize;
-        let paragraph = Paragraph::new(self.help_string.to_string())
-            .scroll((self.offset as u16, 0))
+        self.text.refresh_window_height(vchunks[0].height as usize);
+        let paragraph = Paragraph::new(self.text.text().clone())
+            .scroll((self.text.offset() as u16, 0))
             .style(Style::default());
 
         f.render_widget(paragraph, vchunks[0]);
@@ -496,19 +532,17 @@ impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
             Event::Resize(_, _) => return Ok(ApplicationTask::Update),
             Event::Mouse(m) => match m {
                 MouseEvent::ScrollDown(_, _, _) => {
-                    self.offset = if self.state.nav_settings.inverted {
-                        self.offset.saturating_sub(self.state.nav_settings.scroll)
+                    if self.state.nav_settings.inverted {
+                        self.text.scroll_up(self.state.nav_settings.scroll)
                     } else {
-                        self.height
-                            .min(self.offset.saturating_add(self.state.nav_settings.scroll))
+                        self.text.scroll_down(self.state.nav_settings.scroll)
                     };
                 }
                 MouseEvent::ScrollUp(_, _, _) => {
-                    self.offset = if self.state.nav_settings.inverted {
-                        self.height
-                            .min(self.offset.saturating_add(self.state.nav_settings.scroll))
+                    if self.state.nav_settings.inverted {
+                        self.text.scroll_down(self.state.nav_settings.scroll)
                     } else {
-                        self.offset.saturating_sub(self.state.nav_settings.scroll)
+                        self.text.scroll_up(self.state.nav_settings.scroll)
                     };
                 }
                 _ => {
@@ -521,28 +555,22 @@ impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
                     KeyCode::Esc => return Ok(ApplicationTask::SwitchView(AppView::Columns)),
                     // Scrolling
                     KeyCode::Up => {
-                        self.offset = self.offset.saturating_sub(1);
+                        self.text.scroll_up(1);
                     }
                     KeyCode::Down => {
-                        self.offset = self
-                            .height
-                            .saturating_sub(self.window_height)
-                            .min(self.offset.saturating_add(1));
+                        self.text.scroll_down(1);
                     }
                     KeyCode::PageDown => {
-                        self.offset = self
-                            .height
-                            .saturating_sub(self.window_height)
-                            .min(self.offset.saturating_add(self.window_height));
+                        self.text.page_down();
                     }
                     KeyCode::PageUp => {
-                        self.offset = self.offset.saturating_sub(self.window_height);
+                        self.text.page_up();
                     }
                     KeyCode::Home => {
-                        self.offset = 0;
+                        self.text.home();
                     }
                     KeyCode::End => {
-                        self.offset = self.height.saturating_sub(self.window_height);
+                        self.text.end();
                     }
                     _ => return Ok(ApplicationTask::DoNothing),
                 }
