@@ -71,6 +71,7 @@ pub struct EpubMetadata {
     pub author: Option<String>,
     pub language: Option<String>,
     pub isbn: Option<String>,
+    pub description: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -98,6 +99,7 @@ enum FieldSeen {
     Publisher,
     Identifier(IdentifierScheme),
     Language,
+    Description,
     None,
 }
 
@@ -148,6 +150,7 @@ impl EpubMetadata {
             author: None,
             language: None,
             isbn: None,
+            description: None,
         };
 
         let mut reader = Reader::from_reader(BufReader::new(&meta_buf[range]));
@@ -212,6 +215,7 @@ impl EpubMetadata {
                         }
                         b"dc:language" => FieldSeen::Language,
                         b"dc:publisher" => FieldSeen::Publisher,
+                        b"dc:description" => FieldSeen::Description,
                         _ => FieldSeen::None,
                     }
                 }
@@ -231,6 +235,9 @@ impl EpubMetadata {
                         },
                         FieldSeen::Language => {
                             new_obj.language = Some(val);
+                        }
+                        FieldSeen::Description => {
+                            new_obj.description = Some(val);
                         }
                         FieldSeen::None => {}
                     }

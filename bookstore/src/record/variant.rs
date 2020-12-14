@@ -146,6 +146,10 @@ impl BookVariant {
                     self.language = metadata.language;
                 }
 
+                if self.description.is_none() {
+                    self.description = metadata.description;
+                }
+
                 if self.identifier.is_none() {
                     if let Some(isbn) = metadata.isbn {
                         if let Ok(isbn) = ISBN::from_str(&isbn) {

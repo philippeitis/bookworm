@@ -14,6 +14,7 @@ pub(crate) enum ColumnIdentifier {
     Series,
     ID,
     Variants,
+    Description,
     ExtendedTag(String),
 }
 
@@ -25,6 +26,7 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
             "series" => Self::Series,
             "id" => Self::ID,
             "variant" | "variants" => Self::Variants,
+            "description" => Self::Description,
             _ => Self::ExtendedTag(val.as_ref().to_owned()),
         }
     }
@@ -127,6 +129,10 @@ impl RawBook {
         self.extended_tags.as_ref()
     }
 
+    pub(crate) fn get_description(&self) -> Option<&String> {
+        self.description.as_ref()
+    }
+
     pub(crate) fn get_column_or<S: AsRef<str>>(
         &self,
         column: &ColumnIdentifier,
@@ -151,6 +157,13 @@ impl RawBook {
                     }
                 } else {
                     default.as_ref().to_owned()
+                }
+            }
+            ColumnIdentifier::Description => {
+                if let Some(desc) = &self.description {
+                    desc.clone()
+                } else {
+                    default.as_ref().to_string()
                 }
             }
             ColumnIdentifier::ExtendedTag(x) => {
@@ -189,6 +202,9 @@ impl RawBook {
         match column {
             ColumnIdentifier::Title => {
                 self.title = Some(value.to_owned());
+            }
+            ColumnIdentifier::Description => {
+                self.description = Some(value.to_owned());
             }
             ColumnIdentifier::Author => {
                 self.authors = Some(vec![value.to_owned()]);
@@ -348,6 +364,10 @@ impl Book {
 
     pub(crate) fn get_extended_columns(&self) -> Option<&HashMap<String, String>> {
         self.raw_book.get_extended_columns()
+    }
+
+    pub(crate) fn get_description(&self) -> Option<&String> {
+        self.raw_book.get_description()
     }
 
     pub(crate) fn get_column_or<S: AsRef<str>>(
