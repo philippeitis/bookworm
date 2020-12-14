@@ -5,9 +5,12 @@ use crate::database::search::Search;
 
 #[derive(Debug)]
 pub enum Flag {
+    /// Flag followed by another flag or nothing.
     Flag(String),
+    /// Flag followed by non-flag arguments.
     FlagWithArgument(String, Vec<String>),
-    PositionalArg(Vec<String>),
+    /// Arguments appearing without preceeding flag.
+    StartingArguments(Vec<String>),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -16,7 +19,7 @@ pub enum BookIndex {
     BookID(u32),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Command {
     DeleteBook(BookIndex),
     DeleteAll,
@@ -37,6 +40,7 @@ pub enum Command {
     GeneralHelp,
 }
 
+#[derive(Debug)]
 pub enum CommandError {
     UnknownCommand,
     InsufficientArguments,
@@ -77,13 +81,11 @@ fn read_flags(args: Vec<String>) -> Vec<Flag> {
     let mut last_flag_valid = false;
     let mut flag = String::new();
     let mut flag_args = vec![];
-    let mut ended = false;
 
     let mut v_iter = args.into_iter();
     v_iter.next();
 
     for v in v_iter {
-        ended = false;
         if v.starts_with('-') {
             if last_flag_valid {
                 if flag_args.is_empty() {
@@ -91,10 +93,9 @@ fn read_flags(args: Vec<String>) -> Vec<Flag> {
                 } else {
                     flags.push(Flag::FlagWithArgument(flag, flag_args));
                     flag_args = vec![];
-                    ended = true;
                 }
             } else if !flag_args.is_empty() {
-                flags.push(Flag::PositionalArg(flag_args));
+                flags.push(Flag::StartingArguments(flag_args));
                 flag_args = vec![];
             }
 
@@ -105,16 +106,14 @@ fn read_flags(args: Vec<String>) -> Vec<Flag> {
         }
     }
 
-    if !ended {
-        if last_flag_valid {
-            if !flag_args.is_empty() {
-                flags.push(Flag::FlagWithArgument(flag, flag_args));
-            } else {
-                flags.push(Flag::Flag(flag));
-            }
+    if last_flag_valid {
+        if !flag_args.is_empty() {
+            flags.push(Flag::FlagWithArgument(flag, flag_args));
         } else {
-            flags.push(Flag::PositionalArg(flag_args));
+            flags.push(Flag::Flag(flag));
         }
+    } else {
+        flags.push(Flag::StartingArguments(flag_args));
     }
 
     flags
@@ -173,26 +172,23 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
 
             for flag in flags {
                 match flag {
-                    Flag::Flag(c) => {
-                        d |= c == "d";
-                        if d && path_exists {
-                            return Ok(Command::AddBooksFromDir(path));
+                    Flag::Flag(c) => match c.as_str() {
+                        "d" => {
+                            d = true;
                         }
-                    }
-                    Flag::FlagWithArgument(c, args) => {
-                        d |= c == "d";
-                        if d {
-                            return Ok(Command::AddBooksFromDir(PathBuf::from(&args[0])));
-                        }
-                    }
-                    Flag::PositionalArg(args) => {
-                        if !path_exists {
+                        _ => {}
+                    },
+                    Flag::FlagWithArgument(c, args) => match c.as_str() {
+                        "d" => {
+                            d = true;
                             path_exists = true;
                             path = PathBuf::from(&args[0]);
                         }
-                        if d {
-                            return Ok(Command::AddBooksFromDir(path));
-                        }
+                        _ => {}
+                    },
+                    Flag::StartingArguments(args) => {
+                        path_exists = true;
+                        path = PathBuf::from(&args[0]);
                     }
                 };
             }
@@ -216,7 +212,7 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                             Err(CommandError::InvalidCommand)
                         }
                     }
-                    Flag::PositionalArg(args) => {
+                    Flag::StartingArguments(args) => {
                         if let Ok(i) = u32::from_str(args[0].as_str()) {
                             Ok(Command::DeleteBook(BookIndex::BookID(i)))
                         } else {
@@ -230,7 +226,7 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             }
         }
         "!e" => match flags.into_iter().next() {
-            Some(Flag::PositionalArg(args)) => {
+            Some(Flag::StartingArguments(args)) => {
                 let mut args = args.into_iter();
                 let a = args.next().ok_or_else(insuf)?;
                 let b = args.next().ok_or_else(insuf)?;
@@ -279,18 +275,9 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                             ));
                         }
                     }
-                    Flag::PositionalArg(args) => {
-                        if d {
-                            return Ok(Command::SortColumn(
-                                args.into_iter().next().ok_or_else(insuf)?,
-                                true,
-                            ));
-                        }
-
-                        if !col_exists {
-                            col_exists = true;
-                            col = args.into_iter().next().ok_or_else(insuf)?;
-                        }
+                    Flag::StartingArguments(args) => {
+                        col_exists = true;
+                        col = args.into_iter().next().ok_or_else(insuf)?;
                     }
                 };
             }
@@ -302,14 +289,14 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             }
         }
         "!c" => match flags.into_iter().next() {
-            Some(Flag::PositionalArg(args)) => Ok(Command::AddColumn(
+            Some(Flag::StartingArguments(args)) => Ok(Command::AddColumn(
                 args.into_iter().next().ok_or_else(insuf)?,
             )),
             Some(Flag::Flag(arg)) => Ok(Command::RemoveColumn(arg)),
             _ => Err(CommandError::InvalidCommand),
         },
         "!f" => match flags.into_iter().next() {
-            Some(Flag::PositionalArg(args)) => {
+            Some(Flag::StartingArguments(args)) => {
                 let mut args = args.into_iter();
                 Ok(Command::FindMatches(Search::Default(
                     args.next().ok_or_else(insuf)?,
@@ -367,7 +354,7 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                         }
                         return Err(CommandError::InvalidCommand);
                     }
-                    Flag::PositionalArg(args) => {
+                    Flag::StartingArguments(args) => {
                         let mut args = args.into_iter();
 
                         if let Some(l) = args.next() {
@@ -406,7 +393,7 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             })
         }
         "!h" => Ok(match flags.into_iter().next() {
-            Some(Flag::PositionalArg(args)) => Command::Help(
+            Some(Flag::StartingArguments(args)) => Command::Help(
                 args.into_iter()
                     .next()
                     .ok_or(CommandError::InsufficientArguments)?,
@@ -414,5 +401,25 @@ pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             _ => Command::GeneralHelp,
         }),
         _ => Err(CommandError::UnknownCommand),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_flag_at_end_read() {
+        let args = vec![
+            String::from("!a"),
+            String::from("hello world"),
+            String::from("-d"),
+        ];
+
+        assert_eq!(
+            parse_args(args).unwrap(),
+            Command::AddBooksFromDir(PathBuf::from("hello world"))
+        )
     }
 }
