@@ -9,11 +9,10 @@ use tui::Frame;
 
 use unicode_truncate::UnicodeTruncateStr;
 
-use crate::app::app::ColumnUpdate;
 use crate::app::parse_args;
 use crate::app::user_input::EditState;
 use crate::app::{App, ApplicationError};
-use crate::database::{AppDatabase, IndexableDatabase};
+use crate::database::IndexableDatabase;
 use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{BookWidget, CommandWidget, Widget};
 
@@ -33,18 +32,20 @@ pub(crate) enum ApplicationTask {
 
 // TODO: when https://github.com/crossterm-rs/crossterm/issues/507 is resolved,
 //  use code to allow a Resizable trait for EditWidget and ColumnWidget.
+pub(crate) trait ResizableWidget<D: IndexableDatabase, B: Backend> {
+    // TODO: Consider AppCommand enum? Could be used to do other things as well?
+    fn allocate_chunk(&self, chunk: Rect) -> Option<usize>;
 
-pub(crate) trait ResizableWidget<D: AppDatabase, B: Backend> {
     /// Renders the widget into the frame, using the provided space.
     ///
     /// # Arguments
     ///
     /// * ` f ` - A frame to render into.
     /// * ` chunk ` - A chunk to specify the size of the widget.
-    fn render_into_frame(&mut self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect);
+    fn render_into_frame(&mut self, app: &App<D>, f: &mut Frame<B>, chunk: Rect);
 }
 
-pub(crate) trait View<D: AppDatabase, B: Backend>: ResizableWidget<D, B> {
+pub(crate) trait InputHandler<D: IndexableDatabase> {
     /// Renders the widget into the frame, using the provided space.
     ///
     /// # Arguments
@@ -121,8 +122,17 @@ pub(crate) struct ColumnWidget {
     pub(crate) state: UIState,
 }
 
-impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
-    fn render_into_frame(&mut self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
+impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
+    fn allocate_chunk(&self, chunk: Rect) -> Option<usize> {
+        let vchunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
+            .split(chunk);
+        let curr_height = usize::from(vchunks[0].height);
+        Some(curr_height.saturating_sub(1))
+    }
+
+    fn render_into_frame(&mut self, app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
         let chunk = if let Ok(b) = app.selected_item() {
             let hchunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -138,13 +148,6 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
-
-        let curr_height = usize::from(vchunks[0].height);
-
-        if app.refresh_window_size(curr_height.saturating_sub(1)) {
-            app.set_column_update(ColumnUpdate::Regenerate);
-            let _ = app.update_column_data();
-        }
 
         let chunk = vchunks[0];
         let hchunks = split_chunk_into_columns(chunk, app.num_cols() as u16);
@@ -168,7 +171,7 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
     }
 }
 
-impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for ColumnWidget {
+impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
     fn handle_input(
         &mut self,
         event: Event,
@@ -298,24 +301,22 @@ pub(crate) struct EditWidget {
     pub(crate) state: UIState,
 }
 
-impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
-    fn render_into_frame(&mut self, app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
+impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
+    fn allocate_chunk(&self, chunk: Rect) -> Option<usize> {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
         let curr_height = usize::from(vchunks[0].height);
-        if app.refresh_window_size(curr_height.saturating_sub(1)) {
-            app.set_column_update(ColumnUpdate::Regenerate);
+        Some(curr_height.saturating_sub(1))
+    }
 
-            let _ = app.update_column_data();
-            app.update_value(
-                self.state.selected_column,
-                self.edit.selected,
-                &self.edit.visible(),
-            );
-        }
+    fn render_into_frame(&mut self, app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
+        let vchunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
+            .split(chunk);
 
         let hchunks = split_chunk_into_columns(chunk, app.num_cols() as u16);
 
@@ -326,6 +327,13 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
         //  at the cursor location.
         for (i, ((title, data), &chunk)) in app.header_col_iter().zip(hchunks.iter()).enumerate() {
             let width = usize::from(chunk.width).saturating_sub(1);
+            let data = if i == self.state.selected_column {
+                let mut data = data.clone();
+                data[self.edit.selected] = self.edit.visible().to_owned();
+                data
+            } else {
+                data.clone()
+            };
             let list = List::new(
                 data.iter()
                     .map(|word| ListItem::new(Span::from(word.unicode_truncate(width).0)))
@@ -346,7 +354,7 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
     }
 }
 
-impl<D: IndexableDatabase, B: Backend> View<D, B> for EditWidget {
+impl<D: IndexableDatabase> InputHandler<D> for EditWidget {
     fn handle_input(
         &mut self,
         event: Event,
@@ -452,8 +460,12 @@ pub(crate) struct HelpWidget {
     pub(crate) help_string: &'static str,
 }
 
-impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget {
-    fn render_into_frame(&mut self, _app: &mut App<D>, f: &mut Frame<B>, chunk: Rect) {
+impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget {
+    fn allocate_chunk(&self, _chunk: Rect) -> Option<usize> {
+        None
+    }
+
+    fn render_into_frame(&mut self, _app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
@@ -474,7 +486,7 @@ impl<D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget {
     }
 }
 
-impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for HelpWidget {
+impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
     fn handle_input(
         &mut self,
         event: Event,
@@ -503,6 +515,7 @@ impl<'a, D: IndexableDatabase, B: Backend> View<D, B> for HelpWidget {
                     return Ok(ApplicationTask::DoNothing);
                 }
             },
+            // TODO: Add text input to look up commands.
             Event::Key(event) => {
                 match event.code {
                     KeyCode::Esc => return Ok(ApplicationTask::SwitchView(AppView::Columns)),

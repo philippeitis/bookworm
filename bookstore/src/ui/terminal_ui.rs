@@ -6,11 +6,14 @@ use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::Terminal;
 
+use crate::app::app::ColumnUpdate;
 use crate::app::settings::{InterfaceStyle, NavigationSettings, Settings};
 use crate::app::user_input::{CommandString, EditState};
 use crate::app::{App, ApplicationError};
-use crate::database::{AppDatabase, IndexableDatabase};
-use crate::ui::views::{AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, View};
+use crate::database::IndexableDatabase;
+use crate::ui::views::{
+    AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
+};
 use crate::ui::widgets::{BorderWidget, Widget};
 
 #[derive(Default)]
@@ -21,10 +24,16 @@ pub(crate) struct UIState {
     pub(crate) selected_column: usize,
 }
 
-pub(crate) struct AppInterface<D: AppDatabase, B> {
+trait ViewHandler<D: IndexableDatabase, B: Backend>: ResizableWidget<D, B> + InputHandler<D> {}
+
+impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for ColumnWidget {}
+impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for EditWidget {}
+impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for HelpWidget {}
+
+pub(crate) struct AppInterface<D: IndexableDatabase, B: Backend> {
     app: App<D>,
     border_widget: BorderWidget,
-    active_view: Box<dyn View<D, B>>,
+    active_view: Box<dyn ViewHandler<D, B>>,
 }
 
 impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
@@ -135,7 +144,14 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                         )
                     };
 
-                    self.active_view.render_into_frame(&mut self.app, f, chunk);
+                    if let Some(chunk_size) = self.active_view.allocate_chunk(chunk) {
+                        if self.app.refresh_window_size(chunk_size) {
+                            self.app.set_column_update(ColumnUpdate::Regenerate);
+                            let _ = self.app.update_column_data();
+                        }
+                    }
+
+                    self.active_view.render_into_frame(&self.app, f, chunk);
                 })?;
             }
 
