@@ -26,20 +26,11 @@ fn get_isbn(text: &str) -> Option<String> {
     Some(RE.captures(text)?.get(1)?.as_str().to_owned())
 }
 
-// Same as above, but again, what kind of terrible human being would put escaped metadata tags in
-// their description? (Also, the first metadata tag being escaped is very, very unlikely).
-fn get_metadata_byte_range(text: &[u8]) -> Option<Range<usize>> {
-    lazy_static::lazy_static! {
-        static ref RE: ByteRegex = ByteRegex::new(r#"(?s:<(?:opf:)?metadata[^>]*>)(?s)(.*)(?-s)(?:</(?:opf:)?metadata>)"#).unwrap();
-    }
-    let val = RE.find(text)?;
-    Some(val.start()..val.end())
-}
-
 pub enum EpubError {
     BadZip,
     IoError,
     NoContainer,
+    NoPackage,
     NoRootFile,
     // NoContent,
     // BadMimetype,
@@ -104,7 +95,6 @@ enum FieldSeen {
 }
 
 // TODO: Can have multi-part titles.
-
 impl EpubMetadata {
     pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self, EpubError> {
         let mut buf = BufReader::new(File::open(path)?);
@@ -125,7 +115,6 @@ impl EpubMetadata {
         let root_file = if let Ok(mut meta_inf) = archive.by_name("META-INF/container.xml") {
             let mut buf = Vec::new();
             meta_inf.read_to_end(&mut buf)?;
-            // let s = String::from_utf8_lossy(&buf);
             match get_root_file_byte_range(&buf) {
                 Some(range) => String::from_utf8_lossy(&buf[range]).into_owned(),
                 None => return Err(EpubError::NoRootFile),
@@ -134,16 +123,12 @@ impl EpubMetadata {
             return Err(EpubError::NoContainer);
         };
 
-        let mut meta_buf = Vec::new();
-        let range = if let Ok(mut root_file) = archive.by_name(&root_file) {
-            root_file.read_to_end(&mut meta_buf)?;
-            match get_metadata_byte_range(&meta_buf) {
-                Some(metadata) => metadata,
-                None => return Err(EpubError::NoMetadata),
-            }
-        } else {
-            return Err(EpubError::NoContainer);
-        };
+        let meta_zip = archive
+            .by_name(&root_file)
+            .map_err(|_| EpubError::NoContainer)?;
+        // TODO: 1KB seems to get most of the metadata. Validate these findings?
+        let mut reader = Reader::from_reader(BufReader::with_capacity(2 << 10, meta_zip));
+        reader.trim_text(true);
 
         let mut new_obj = EpubMetadata {
             title: None,
@@ -153,12 +138,48 @@ impl EpubMetadata {
             description: None,
         };
 
-        let mut reader = Reader::from_reader(BufReader::new(&meta_buf[range]));
-        reader.trim_text(true);
-
         let mut buf = Vec::new();
 
+        // Read possible declaration, as well as package tag.
+        // Ignores comments and unexpected text.
+        loop {
+            match reader.read_event(&mut buf)? {
+                Event::Start(e) => match e.name() {
+                    b"package" => break,
+                    _ => return Err(EpubError::NoPackage),
+                },
+                Event::Decl(_) => {
+                    buf.clear();
+                    match reader.read_event(&mut buf)? {
+                        Event::Start(e) => match e.name() {
+                            b"package" => break,
+                            _ => return Err(EpubError::NoPackage),
+                        },
+                        _ => return Err(EpubError::NoPackage),
+                    }
+                }
+                Event::Text(_) | Event::Comment(_) => {}
+                _ => return Err(EpubError::NoPackage),
+            }
+            buf.clear();
+        }
+
+        // Read metadata tag.
+        // Ignores any comments.
+        loop {
+            match reader.read_event(&mut buf)? {
+                Event::Start(e) => match e.name() {
+                    b"metadata" | b"opf:metadata" => break,
+                    _ => return Err(EpubError::NoMetadata),
+                },
+                Event::Comment(_) => {}
+                _ => return Err(EpubError::NoMetadata),
+            }
+            buf.clear();
+        }
+
         let mut seen = FieldSeen::None;
+
         loop {
             match reader.read_event(&mut buf)? {
                 Event::Start(ref e) => {
@@ -242,6 +263,10 @@ impl EpubMetadata {
                         FieldSeen::None => {}
                     }
                 }
+                Event::End(e) => match e.name() {
+                    b"metadata" | b"opf:metadata" => break,
+                    _ => {}
+                },
                 Event::Eof => break,
                 _ => {}
             }
