@@ -85,24 +85,26 @@ impl RawBook {
             title: None,
             authors: None,
             series: None,
-            variants: Some(variants.clone()),
+            variants: None,
             extended_tags: None,
             description: None,
         };
 
-        for variant in variants.iter() {
+        for variant in variants.iter_mut() {
             if book.title.is_none() {
-                book.title = variant.local_title.clone();
+                book.title = std::mem::take(&mut variant.local_title);
             }
 
             if book.authors.is_none() {
-                book.authors = variant.additional_authors.clone();
+                book.authors = std::mem::take(&mut variant.additional_authors);
             }
 
             if book.description.is_none() {
-                book.description = variant.description.clone();
+                book.description = std::mem::take(&mut variant.description);
             }
         }
+
+        book.variants = Some(variants);
 
         Ok(book)
     }
