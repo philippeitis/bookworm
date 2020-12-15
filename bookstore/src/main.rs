@@ -6,6 +6,7 @@ mod ui;
 
 use std::env;
 use std::io::{stdout, Write};
+use std::path::PathBuf;
 
 use crossterm::{event::DisableMouseCapture, event::EnableMouseCapture, execute};
 
@@ -19,13 +20,14 @@ use crate::app::{App, ApplicationError, Settings};
 use crate::database::{AppDatabase, Database};
 use crate::ui::AppInterface;
 
+// TODO: PathBuf + SQLite DB? How should that situation be handled?
 #[derive(Clap)]
 #[clap(version = "0.1", author = "?")]
 struct Opts {
     #[clap(short, long, default_value = "settings.toml")]
-    settings: String,
+    settings: PathBuf,
     #[clap(short, long, default_value = "books.db")]
-    database: String,
+    database: PathBuf,
 }
 
 fn main() -> Result<(), ApplicationError> {
