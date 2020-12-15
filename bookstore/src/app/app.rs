@@ -91,10 +91,8 @@ impl From<SQLError> for ApplicationError {
 
 // 0.75
 fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::io::Error> {
-    // TODO: Look at libraries with parallel directory reading.
-    //  Handle errored reads somehow.
-    let start = std::time::Instant::now();
-    let res = jwalk::WalkDir::new(dir)
+    // TODO: Handle errored reads somehow.
+    Ok(jwalk::WalkDir::new(dir)
         .min_depth(0)
         .max_depth(depth as usize)
         .into_iter()
@@ -102,10 +100,7 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::
         .collect::<Vec<_>>()
         .par_iter()
         .filter_map(|path| RawBook::generate_from_file(path).ok())
-        .collect::<Vec<_>>();
-    let elapsed = start.elapsed().as_secs_f32();
-    println!("{}", elapsed);
-    Ok(res)
+        .collect::<Vec<_>>())
 }
 
 // fn books_in_dir<P: AsRef<Path>>(dir: P) -> Result<Vec<RawBook>, std::io::Error> {
