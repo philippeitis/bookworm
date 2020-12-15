@@ -145,14 +145,14 @@ impl EpubMetadata {
         loop {
             match reader.read_event(&mut buf)? {
                 Event::Start(e) => match e.name() {
-                    b"package" => break,
+                    b"opf:package" | b"package" => break,
                     _ => return Err(EpubError::NoPackage),
                 },
                 Event::Decl(_) => {
                     buf.clear();
                     match reader.read_event(&mut buf)? {
                         Event::Start(e) => match e.name() {
-                            b"package" => break,
+                            b"opf:package" | b"package" => break,
                             _ => return Err(EpubError::NoPackage),
                         },
                         _ => return Err(EpubError::NoPackage),
