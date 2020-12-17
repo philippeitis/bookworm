@@ -105,12 +105,14 @@ pub(crate) fn book_to_widget_text(book: &Book, width: usize) -> Text {
                 "{:?}: {}",
                 variant.book_type(),
                 if let Some(p) = prefix.as_ref() {
-                    variant.path().strip_prefix(p).unwrap_or(variant.path())
+                    variant
+                        .path()
+                        .strip_prefix(p)
+                        .unwrap_or_else(|_| variant.path())
                 } else {
                     variant.path()
                 }
                 .display()
-                .to_string()
             );
             data.extend(Text::styled(s, field_exists));
         }
