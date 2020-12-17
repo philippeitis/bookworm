@@ -160,6 +160,7 @@ dependencies = [
  "tui",
  "unicase 2.6.0",
  "unicode-truncate",
+ "unicode-width",
  "yup-oauth2",
  "zip",
 ]

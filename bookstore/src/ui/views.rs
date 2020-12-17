@@ -340,6 +340,32 @@ pub(crate) struct EditWidget {
     pub(crate) state: UIState,
 }
 
+fn unicode_truncate_start(s: &str, width: usize) -> (&str, usize) {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    if width == 0 {
+        return (s.get(..0).unwrap(), 0);
+    }
+
+    let mut new_width = s.width();
+
+    if new_width <= width {
+        return (s, new_width);
+    }
+
+    let mut char_indices = s.char_indices();
+    while let Some((_, c)) = char_indices.next() {
+        new_width -= c.width().unwrap_or(0);
+        if new_width <= width {
+            return match char_indices.next() {
+                None => (s.get(..0).unwrap(), 0),
+                Some((i, _)) => (s.get(i..).unwrap(), new_width),
+            };
+        }
+    }
+
+    (s.get(..0).unwrap(), 0)
+}
+
 impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
     fn allocate_chunk(&self, chunk: Rect) -> Option<usize> {
         let vchunks = Layout::default()
@@ -362,28 +388,26 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget 
         let edit_style = self.state.style.edit_style();
         let select_style = self.state.style.select_style();
 
-        // TODO: Make it so that the selected value is visible
-        //  at the cursor location.
         for (i, ((title, data), &chunk)) in app.header_col_iter().zip(hchunks.iter()).enumerate() {
             let width = usize::from(chunk.width).saturating_sub(1);
-            let data = if i == self.state.selected_column {
-                let mut data = data.clone();
-                data[self.edit.selected] = self.edit.visible().to_owned();
-                data
-            } else {
-                data.clone()
-            };
-            let list = List::new(
-                data.iter()
-                    .map(|word| ListItem::new(Span::from(word.unicode_truncate(width).0)))
-                    .collect::<Vec<_>>(),
-            )
-            .block(Block::default().title(Span::from(title.to_string())))
-            .highlight_style(if i == self.state.selected_column {
-                edit_style
-            } else {
-                select_style
-            });
+            let mut items = Vec::with_capacity(data.len());
+            for (j, word) in data.iter().enumerate() {
+                if i == self.state.selected_column && j == self.edit.selected {
+                    items.push(ListItem::new(Span::from(
+                        unicode_truncate_start(word, width).0,
+                    )));
+                } else {
+                    items.push(ListItem::new(Span::from(word.unicode_truncate(width).0)));
+                }
+            }
+
+            let list = List::new(items)
+                .block(Block::default().title(Span::from(title.to_string())))
+                .highlight_style(if i == self.state.selected_column {
+                    edit_style
+                } else {
+                    select_style
+                });
 
             let mut selected_row = ListState::default();
             selected_row.select(app.selected());
@@ -603,6 +627,61 @@ mod test {
                     .sum::<u16>(),
                 width
             );
+        }
+    }
+
+    mod truncate_start {
+        use super::super::*;
+
+        #[test]
+        fn empty() {
+            let (rv, rw) = unicode_truncate_start("", 4);
+            assert_eq!(rv, "");
+            assert_eq!(rw, 0);
+        }
+
+        #[test]
+        fn zero_width() {
+            let (rv, rw) = unicode_truncate_start("ab", 0);
+            assert_eq!(rv, "");
+            assert_eq!(rw, 0);
+
+            let (rv, rw) = unicode_truncate_start("你好", 0);
+            assert_eq!(rv, "");
+            assert_eq!(rw, 0);
+        }
+
+        #[test]
+        fn less_than_limit() {
+            let (rv, rw) = unicode_truncate_start("abc", 4);
+            assert_eq!(rv, "abc");
+            assert_eq!(rw, 3);
+
+            let (rv, rw) = unicode_truncate_start("你", 4);
+            assert_eq!(rv, "你");
+            assert_eq!(rw, 2);
+        }
+
+        #[test]
+        fn at_boundary() {
+            let (rv, rw) = unicode_truncate_start("boundary", 5);
+            assert_eq!(rv, "ndary");
+            assert_eq!(rw, 5);
+
+            let (rv, rw) = unicode_truncate_start("你好吗", 4);
+            assert_eq!(rv, "好吗");
+            assert_eq!(rw, 4);
+        }
+
+        #[test]
+        fn not_boundary() {
+            let (rv, rw) = unicode_truncate_start("你好吗", 3);
+            assert_eq!(rv, "吗");
+            assert_eq!(rw, 2);
+
+            let (rv, rw) = unicode_truncate_start("你好吗", 1);
+            assert_eq!(rv, "");
+            assert_eq!(rw, 0);
         }
     }
 }
