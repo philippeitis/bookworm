@@ -158,6 +158,8 @@ impl EpubMetadata {
                         _ => return Err(EpubError::NoPackage),
                     }
                 }
+                // We seem to have a case where we get a byte-order-mark
+                // at the start, so we match text here too.
                 Event::Text(_) | Event::Comment(_) => {}
                 _ => return Err(EpubError::NoPackage),
             }

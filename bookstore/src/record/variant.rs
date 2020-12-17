@@ -28,6 +28,7 @@ pub(crate) enum Identifier {
 pub(crate) enum BookType {
     EPUB,
     MOBI,
+    // Look at lo-pdf and pdf-extract.
     PDF,
     // TODO: AZW3, DJVU, DOC, RTF, custom extensions?
     Unsupported(OsString),
