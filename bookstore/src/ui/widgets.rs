@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::style::{Modifier, Style};
@@ -53,9 +55,16 @@ impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
     }
 }
 
+// TODO: Add line-wrapping.
 pub(crate) fn book_to_widget_text(book: &Book, width: usize) -> Text {
     let field_exists = Style::default().add_modifier(Modifier::BOLD);
     let field_not_provided = Style::default();
+
+    // Can the current directory change? Who knows. Definitely not me.
+    let prefix = match std::env::current_dir() {
+        Ok(d) => d.canonicalize().ok(),
+        Err(_) => None,
+    };
 
     let mut data = if let Some(t) = book.get_title() {
         Text::styled(t, field_exists)
@@ -73,7 +82,7 @@ pub(crate) fn book_to_widget_text(book: &Book, width: usize) -> Text {
 
     if let Some(d) = book.get_description() {
         data.extend(Text::styled("\n", field_exists));
-        // TODO: Make this look nice.
+        // TODO: Make this look nice in the TUI.
         data.extend(Text::raw(html2text::from_read(d.as_bytes(), width)));
     }
 
@@ -95,7 +104,13 @@ pub(crate) fn book_to_widget_text(book: &Book, width: usize) -> Text {
             let s = format!(
                 "{:?}: {}",
                 variant.book_type(),
-                variant.path().display().to_string()
+                if let Some(p) = prefix.as_ref() {
+                    variant.path().strip_prefix(p).unwrap_or(variant.path())
+                } else {
+                    variant.path()
+                }
+                .display()
+                .to_string()
             );
             data.extend(Text::styled(s, field_exists));
         }
