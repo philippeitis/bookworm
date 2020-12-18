@@ -102,7 +102,10 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                             AppView::Edit => {
                                 if let Some(x) = self.app.selected() {
                                     self.active_view = Box::new(EditWidget {
-                                        edit: EditState::new(&self.app.get_value(0, x), x),
+                                        edit: EditState::new(
+                                            &self.app.get_value(state.selected_column, x),
+                                            x,
+                                        ),
                                         state,
                                     })
                                 }
