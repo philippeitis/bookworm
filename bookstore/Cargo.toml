@@ -10,11 +10,10 @@ edition = "2018"
 # UI
 clap = "3.0.0-beta.2"
 tui = { version = "0.13", default-features = false, features = ['crossterm'] }
-unicode-truncate = "0.1.1"
+unicode-truncate = "0.2.0"
 crossterm = "0.18.2"
 shellwords = "1.1.0"
 html2text = "0.2.1"
-unicode-width = "0.1.8"
 
 # Core app
 serde = { version = "1.0", features = ["derive"] }
@@ -24,7 +23,7 @@ unicase = "2.6.0"
 itertools = "0.9.0"
 rayon = "1.5.0"
 sublime_fuzzy = "0.6.0"
-indexmap = { version = "1.6.0", default-features = false, features = ['serde-1', 'rayon'] }
+indexmap = { version = "1.6.1", default-features = false, features = ['serde-1', 'rayon'] }
 jwalk = "0.5.1"
 
 # Book parsing dependencies.
