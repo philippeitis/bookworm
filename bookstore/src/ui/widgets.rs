@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::style::{Modifier, Style};
