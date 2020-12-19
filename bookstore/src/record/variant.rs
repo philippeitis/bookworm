@@ -36,7 +36,7 @@ pub(crate) enum BookType {
 
 // TODO: Implement timeout to prevent crashing if reading explodes.
 impl BookType {
-    /// Returns a new BookType from the provided string - this should be a file extension.
+    /// Returns a new `BookType` from the provided string - this should be a file extension.
     fn new<S>(s: S) -> BookType
     where
         S: AsRef<OsStr>,
@@ -76,7 +76,7 @@ impl BookVariant {
     /// * ` file_path ` - The path to the file of interest.
     ///
     /// # Errors
-    /// Will return an error if the provided file_path does not lead to a file.
+    /// Will return an error if the provided path does not lead to a file.
     /// Will panic if the title can not be set.
     pub(crate) fn generate_from_file<P>(file_path: P) -> Result<Self, BookError>
     where

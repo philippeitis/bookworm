@@ -183,12 +183,12 @@ impl<D: IndexableDatabase> App<D> {
         self.bv.selected()
     }
 
-    /// Gets the book that selected by the BookIndex,
+    /// Gets the book specified by the `BookIndex`,
     /// or None if the particular book does not exist.
     ///
     /// # Arguments
     ///
-    /// * ` b ` - A BookIndex which either represents an exact ID, or the selected book.
+    /// * ` b ` - A `BookIndex` to get a book by ID or by current selection.
     pub(crate) fn get_book(&self, b: BookIndex) -> Result<Book, ApplicationError> {
         match b {
             BookIndex::Selected => Ok(self.bv.get_selected_book()?),

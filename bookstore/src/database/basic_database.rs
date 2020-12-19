@@ -101,7 +101,7 @@ impl BookMap {
     }
 }
 
-/// A database which fully implements the functionality of the AppDatabase trait,
+/// A database which fully implements the functionality of the `AppDatabase` trait,
 /// but does not guarantee that data is successfully written to disk.
 pub(crate) struct BasicDatabase {
     backend: FileDatabase<BookMap, Ron>,
@@ -159,7 +159,7 @@ pub(crate) trait AppDatabase {
     /// This function will return an error if the database fails.
     fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError>;
 
-    /// Removes all books with the given IDs. If a book with a given ID does not exists, no change
+    /// Removes all books with the given IDs. If a book with a given ID does not exist, no change
     /// for that particular ID.
     ///
     /// # Arguments
@@ -170,8 +170,9 @@ pub(crate) trait AppDatabase {
     fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError>;
 
     fn clear(&mut self) -> Result<(), DatabaseError>;
-    /// Finds and returns the book with the given ID. If no book is found, a BookNotFound error is
-    /// returned.
+
+    /// Finds and returns the book with the given ID. If no book is found,
+    /// a `BookNotFound` error is returned.
     ///
     /// # Arguments
     /// * ` id ` - The ID of the book to be returned.

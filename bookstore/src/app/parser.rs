@@ -138,19 +138,28 @@ fn remove_string_quotes(mut s: String) -> String {
 }
 
 #[allow(dead_code)]
-/// Reads a string which acts as a command, splits into into its component words,
-/// and then parses the result into a command which can be run.
-pub(crate) fn parse_command_string<S: ToString>(s: S) -> Result<Command, CommandError> {
-    let s = s.to_string();
-    match shellwords::split(s.as_str()) {
+/// Parses `s` into a command, using shell-style string splitting.
+///
+/// # Arguments
+/// * ` s ` - The command in string format.
+///
+/// # Errors
+/// Returns an error if the string does not have a matching command, or is a malformed command.
+pub(crate) fn parse_command_string<S: AsRef<str>>(s: S) -> Result<Command, CommandError> {
+    match shellwords::split(s.as_ref()) {
         Ok(vec) => parse_args(vec),
         Err(_) => Err(CommandError::InvalidCommand),
     }
 }
 
-/// Reads args and returns the appropriate command. If the command format is incorrect,
-/// returns Command::InvalidCommand, or Command::InvalidCommand if the first argument is not
-/// a recognized command.
+/// Reads `args` and returns the corresponding command. If no corresponding command exists,
+/// an error is returned.
+///
+/// # Arguments
+/// * ` args ` - The arguments to turn into a command.
+///
+/// # Errors
+/// If the command is missing required arguments, or is unrecognized, an error is returned.
 pub(crate) fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
     let c = if let Some(c) = args.first() {
         c.clone()

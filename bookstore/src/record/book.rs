@@ -47,32 +47,29 @@ pub(crate) struct RawBook {
 }
 
 impl RawBook {
-    /// Generates a book from the file at the specified `file_path`, and assigns the given ID
-    /// by default (note that the ID can not be changed).
+    /// Generates a book from the file at the specified `path`.
     /// To match books to their respective parsers, it is assumed that the extension is
     /// the correct file format, case-insensitive.
     /// Metadata will be generated from the file and corresponding parser.
     ///
     /// # Arguments
-    /// * ` file_path ` - The path to the file of interest.
-    /// * ` id ` - the id to set.
+    /// * ` path ` - The path to the file of interest.
     ///
     /// # Errors
-    /// Will return an error if the provided file_path does not lead to a file.
-    pub(crate) fn generate_from_file<P>(file_path: P) -> Result<RawBook, BookError>
+    /// Will return an error if `path` is not a file.
+    pub(crate) fn generate_from_file<P>(path: P) -> Result<RawBook, BookError>
     where
         P: AsRef<path::Path>,
     {
-        let mut variants = vec![];
-        let file_path = {
-            let file_path = file_path.as_ref();
-            match file_path.canonicalize() {
+        let path = {
+            let path = path.as_ref();
+            match path.canonicalize() {
                 Ok(p) => p,
-                Err(_) => file_path.to_path_buf(),
+                Err(_) => path.to_path_buf(),
             }
         };
 
-        if !file_path.is_file() {
+        if !path.is_file() {
             return Err(BookError::FileError);
         }
 
@@ -186,7 +183,7 @@ impl RawBook {
 impl RawBook {
     /// Sets specified columns, to the specified value. Titles will be stored directly,
     /// authors will be stored as a list containing a single author.
-    /// ID and Variants can not be modified through set_column.
+    /// ID and Variants can not be modified through `set_column`.
     /// Series will be parsed to extract an index - strings in the form "series ... [num]"
     /// will be parsed as ("series ...", num).
     ///
@@ -340,7 +337,7 @@ impl RawBook {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-/// A raw_book, with an associated ID.
+/// A `RawBook`, and associated ID.
 pub(crate) struct Book {
     id: u32,
     raw_book: RawBook,
@@ -402,18 +399,7 @@ impl Book {
         }
     }
 
-    /// Generates a book from the file at the specified `file_path`, and assigns the given ID
-    /// by default (note that the ID can not be changed).
-    /// To match books to their respective parsers, it is assumed that the extension is
-    /// the correct file format, case-insensitive.
-    /// Metadata will be generated from the file and corresponding parser.
-    ///
-    /// # Arguments
-    /// * ` file_path ` - The path to the file of interest.
-    /// * ` id ` - the id to set.
-    ///
-    /// # Errors
-    /// Will return an error if the provided file_path does not lead to a file.
+    /// Creates a `Book` with the given ID and core metadata.
     pub(crate) fn from_raw_book(raw_book: RawBook, id: u32) -> Book {
         Book { id, raw_book }
     }
@@ -426,7 +412,7 @@ impl Book {
 impl Book {
     /// Sets specified columns, to the specified value. Titles will be stored directly,
     /// authors will be stored as a list containing a single author.
-    /// ID and Variants can not be modified through set_column.
+    /// ID and Variants can not be modified through `set_column`.
     /// Series will be parsed to extract an index - strings in the form "series ... [num]"
     /// will be parsed as ("series ...", num).
     ///

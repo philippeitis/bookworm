@@ -59,15 +59,16 @@ pub(crate) trait InputHandler<D: IndexableDatabase> {
         app_state: &mut App<D>,
     ) -> Result<ApplicationTask, ApplicationError>;
 
-    /// Takes the object's UIState to allow use in another
+    /// Takes the object's `UIState` to allow use in another
     /// View.
     fn take_state(&mut self) -> UIState;
 }
 
 /// Takes `word`, and cuts excess letters to ensure that it fits within
 /// `max_width` visible characters. If `word` is too long, it will be truncated
-/// and have '...' appended to indicate that it has been truncated (if max_width
-/// is at least 3, otherwise, letters will simply be cut). It will then be returned as a ListItem.
+/// and have '...' appended to indicate that it has been truncated (if `max_width`
+/// is at least 3, otherwise, letters will simply be cut). It will then be returned as a
+/// `ListItem`.
 ///
 /// # Arguments
 /// * ` word ` - A string reference.

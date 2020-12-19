@@ -8,7 +8,7 @@ pub(crate) struct AutoCompleter<S> {
 }
 
 impl AutoCompleter<PathBuf> {
-    /// Returns a new AutoCompleter, which will fill in entries from the path fragment.
+    /// Returns a new `AutoCompleter`, which will fill in entries from the path fragment.
     ///
     /// # Arguments
     ///
