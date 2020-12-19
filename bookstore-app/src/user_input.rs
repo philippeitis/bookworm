@@ -150,18 +150,16 @@ impl CommandString {
             return Ok(());
         }
 
-        let values = self.get_values();
-
-        let val = if let Some(val) = values.last() {
+        let val = if let Some(val) = self.get_values().last() {
             if !val.0 && val.1.starts_with('-') && self.char_buf.last().eq(&Some(&' ')) {
                 self.keep_last = true;
-                ""
+                String::new()
             } else {
                 self.keep_last = false;
-                &val.1
+                val.1
             }
         } else {
-            ""
+            String::new()
         };
 
         self.auto_fill = Some(AutoCompleter::new(val)?);
@@ -185,50 +183,56 @@ impl CommandString {
         }
     }
 
-    pub fn get_values(&self) -> Vec<(bool, String)> {
-        let mut values = vec![];
-        let mut escaped = false;
-        let mut start = 0;
-        for (end, &c) in self.char_buf.iter().enumerate() {
-            match c {
-                ' ' => {
-                    if !escaped {
-                        if start == end {
-                            start += 1;
-                        } else {
-                            values.push((escaped, self.char_buf[start..end].iter().collect()));
-                            start = end + 1;
-                        }
-                    }
-                }
-                '"' => {
-                    if escaped {
-                        values.push((escaped, self.char_buf[start..end].iter().collect()));
-                        start = end;
-                        escaped = false;
-                    } else if start == end {
-                        escaped = true;
-                        start = end + 1;
-                    }
-                }
-                _ => {}
-            }
+    pub fn get_values(&self) -> CommandStringIter {
+        // let mut values = vec![];
+        // let mut escaped = false;
+        // let mut start = 0;
+        // for (end, &c) in self.char_buf.iter().enumerate() {
+        //     match c {
+        //         ' ' => {
+        //             if !escaped {
+        //                 if start == end {
+        //                     start += 1;
+        //                 } else {
+        //                     values.push((escaped, self.char_buf[start..end].iter().collect()));
+        //                     start = end + 1;
+        //                 }
+        //             }
+        //         }
+        //         '"' => {
+        //             if escaped {
+        //                 values.push((escaped, self.char_buf[start..end].iter().collect()));
+        //                 start = end;
+        //                 escaped = false;
+        //             } else if start == end {
+        //                 escaped = true;
+        //                 start = end + 1;
+        //             }
+        //         }
+        //         _ => {}
+        //     }
+        // }
+        //
+        // if start < self.char_buf.len() {
+        //     values.push((
+        //         escaped,
+        //         self.char_buf[start..self.char_buf.len()].iter().collect(),
+        //     ));
+        // }
+        // values
+        CommandStringIter {
+            command_string: &self,
+            escaped: false,
+            start: 0,
+            complete: false,
         }
-
-        if start < self.char_buf.len() {
-            values.push((
-                escaped,
-                self.char_buf[start..self.char_buf.len()].iter().collect(),
-            ));
-        }
-        values
     }
 
     /// Returns a Vector of tuples (bool, String), where the bool indicates whether
     /// the string needs to be escaped or not, and the string is the content of a
     /// quote escaped string, or is a regular word without whitespace.
     pub fn get_values_autofilled(&self) -> Vec<(bool, String)> {
-        let mut values = self.get_values();
+        let mut values: Vec<_> = self.get_values().collect();
         if let Some(s) = &self.autofilled {
             if !self.keep_last {
                 values.pop();
@@ -249,6 +253,98 @@ impl fmt::Display for CommandString {
             write!(f, "{}", vals)
         } else {
             write!(f, "{}", self.char_buf.iter().collect::<String>())
+        }
+    }
+}
+
+pub struct CommandStringIter<'a> {
+    command_string: &'a CommandString,
+    escaped: bool,
+    start: usize,
+    complete: bool,
+}
+
+impl<'a> CommandStringIter<'a> {
+    fn char_buf(&self) -> &[char] {
+        &self.command_string.char_buf[self.start..]
+    }
+}
+
+impl<'a> Iterator for CommandStringIter<'a> {
+    type Item = (bool, String);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for (end, &c) in self.command_string.char_buf[self.start..]
+            .iter()
+            .enumerate()
+        {
+            match c {
+                ' ' => {
+                    if !self.escaped {
+                        if end == 0 {
+                            self.start += 1;
+                        } else {
+                            let s = {
+                                let buf = self.char_buf()[..end].iter().collect();
+                                self.start += end;
+                                buf
+                            };
+                            return Some((self.escaped, s));
+                        }
+                    }
+                }
+                '"' => {
+                    if self.escaped {
+                        let s = {
+                            let buf = self.char_buf()[..end.saturating_sub(1)].iter().collect();
+                            self.start += end;
+                            self.escaped = false;
+                            buf
+                        };
+
+                        return Some((true, s));
+                    } else if end == 0 {
+                        self.escaped = true;
+                        self.start += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if self.complete {
+            None
+        } else {
+            self.complete = true;
+            Some((self.escaped, self.char_buf().iter().collect()))
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_command_splits() {
+        let samples = vec![
+            ("hello there!", vec![(false, "hello"), (false, "there!")]),
+            ("\"hello there!", vec![(true, "hello there!")]),
+            (
+                "\"hello world\" there!",
+                vec![(true, "hello world"), (false, "there!")],
+            ),
+        ];
+
+        for (word, expected) in samples {
+            let mut cs = CommandString::new();
+            cs.char_buf = word.chars().collect();
+            let results: Vec<_> = cs.get_values().collect();
+            let expected: Vec<_> = expected
+                .into_iter()
+                .map(|(b, s)| (b, s.to_owned()))
+                .collect();
+            assert_eq!(results, expected);
         }
     }
 }

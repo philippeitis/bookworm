@@ -324,13 +324,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                     KeyCode::Tab | KeyCode::BackTab => {
                         let curr_command = &mut self.state.curr_command;
                         curr_command.refresh_autofill()?;
-                        match parse_args(
-                            curr_command
-                                .get_values()
-                                .into_iter()
-                                .map(|(_, s)| s)
-                                .collect(),
-                        ) {
+                        match parse_args(curr_command.get_values().map(|(_, s)| s).collect()) {
                             Ok(command) => match command {
                                 Command::AddBookFromFile(_) => curr_command.auto_fill(false),
                                 Command::AddBooksFromDir(_, _) => curr_command.auto_fill(true),
