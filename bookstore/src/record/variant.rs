@@ -5,7 +5,7 @@ use std::str::FromStr;
 use mobi::MobiMetadata;
 use serde::{Deserialize, Serialize};
 
-use crate::record::epub::EpubMetadata;
+use crate::record::epub::Metadata as EpubMetadata;
 use crate::record::{BookError, ISBN};
 
 fn unravel_author(author: &str) -> String {

@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, Error, Read};
+use std::io::{BufReader, Read};
 use std::ops::Range;
 use std::path::Path;
 
@@ -26,7 +27,7 @@ fn get_isbn(text: &str) -> Option<String> {
     Some(RE.captures(text)?.get(1)?.as_str().to_owned())
 }
 
-pub enum EpubError {
+pub enum Error {
     BadZip,
     IoError,
     NoContainer,
@@ -39,30 +40,31 @@ pub enum EpubError {
     BadXML,
 }
 
-impl From<std::io::Error> for EpubError {
-    fn from(_: Error) -> Self {
-        EpubError::IoError
+impl From<std::io::Error> for Error {
+    fn from(_: std::io::Error) -> Self {
+        Error::IoError
     }
 }
 
-impl From<ZipError> for EpubError {
+impl From<ZipError> for Error {
     fn from(_: ZipError) -> Self {
-        EpubError::BadZip
+        Error::BadZip
     }
 }
 
-impl From<quick_xml::Error> for EpubError {
+impl From<quick_xml::Error> for Error {
     fn from(_: quick_xml::Error) -> Self {
-        EpubError::BadXML
+        Error::BadXML
     }
 }
 
-pub struct EpubMetadata {
+pub struct Metadata {
     pub title: Option<String>,
     pub author: Option<String>,
     pub language: Option<String>,
     pub isbn: Option<String>,
     pub description: Option<String>,
+    pub extended_values: HashMap<String, String>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -87,19 +89,18 @@ enum IdentifierScheme {
 enum FieldSeen {
     Author,
     Title,
-    Publisher,
+    // Publisher,
     Identifier(IdentifierScheme),
     Language,
     Description,
-    None,
+    Unknown(String),
 }
 
 // TODO: Can have multi-part titles.
-impl EpubMetadata {
-    pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self, EpubError> {
-        let mut buf = BufReader::new(File::open(path)?);
-        let mut archive = ZipArchive::new(&mut buf)?;
-
+impl Metadata {
+    pub(crate) fn from_archive<R: std::io::Seek + std::io::Read>(
+        archive: &mut ZipArchive<R>,
+    ) -> Result<Self, Error> {
         // if let Ok(mut mime) = archive.by_name("mimetype") {
         //     let expected = b"application/epub+zip".to_vec();
         //     let mut buf = vec![0; expected.len()];
@@ -117,25 +118,26 @@ impl EpubMetadata {
             meta_inf.read_to_end(&mut buf)?;
             match get_root_file_byte_range(&buf) {
                 Some(range) => String::from_utf8_lossy(&buf[range]).into_owned(),
-                None => return Err(EpubError::NoRootFile),
+                None => return Err(Error::NoRootFile),
             }
         } else {
-            return Err(EpubError::NoContainer);
+            return Err(Error::NoContainer);
         };
 
         let meta_zip = archive
             .by_name(&root_file)
-            .map_err(|_| EpubError::NoContainer)?;
+            .map_err(|_| Error::NoContainer)?;
         // TODO: 1KB seems to get most of the metadata. Validate these findings?
         let mut reader = Reader::from_reader(BufReader::with_capacity(2 << 10, meta_zip));
         reader.trim_text(true);
 
-        let mut new_obj = EpubMetadata {
+        let mut new_obj = Metadata {
             title: None,
             author: None,
             language: None,
             isbn: None,
             description: None,
+            extended_values: HashMap::new(),
         };
 
         let mut buf = Vec::new();
@@ -146,22 +148,22 @@ impl EpubMetadata {
             match reader.read_event(&mut buf)? {
                 Event::Start(e) => match e.name() {
                     b"opf:package" | b"package" => break,
-                    _ => return Err(EpubError::NoPackage),
+                    _ => return Err(Error::NoPackage),
                 },
                 Event::Decl(_) => {
                     buf.clear();
                     match reader.read_event(&mut buf)? {
                         Event::Start(e) => match e.name() {
                             b"opf:package" | b"package" => break,
-                            _ => return Err(EpubError::NoPackage),
+                            _ => return Err(Error::NoPackage),
                         },
-                        _ => return Err(EpubError::NoPackage),
+                        _ => return Err(Error::NoPackage),
                     }
                 }
                 // We seem to have a case where we get a byte-order-mark
                 // at the start, so we match text here too.
                 Event::Text(_) | Event::Comment(_) => {}
-                _ => return Err(EpubError::NoPackage),
+                _ => return Err(Error::NoPackage),
             }
             buf.clear();
         }
@@ -172,15 +174,15 @@ impl EpubMetadata {
             match reader.read_event(&mut buf)? {
                 Event::Start(e) => match e.name() {
                     b"metadata" | b"opf:metadata" => break,
-                    _ => return Err(EpubError::NoMetadata),
+                    _ => return Err(Error::NoMetadata),
                 },
                 Event::Comment(_) => {}
-                _ => return Err(EpubError::NoMetadata),
+                _ => return Err(Error::NoMetadata),
             }
             buf.clear();
         }
 
-        let mut seen = FieldSeen::None;
+        let mut seen = None;
 
         loop {
             match reader.read_event(&mut buf)? {
@@ -190,13 +192,13 @@ impl EpubMetadata {
                     //     String::from_utf8_lossy(e.name()),
                     //     e.attributes().map(|a| a.unwrap().value).collect::<Vec<_>>()
                     // );
-                    seen = match e.name() {
+                    seen = Some(match e.name() {
                         b"dc:creator" => FieldSeen::Author,
                         b"dc:title" => FieldSeen::Title,
                         b"dc:identifier" => {
                             let mut id = None;
                             let mut scheme = None;
-                            for a in e.attributes().filter_map(|a| a.ok()) {
+                            for a in e.attributes().filter_map(Result::ok) {
                                 match a.key {
                                     b"opf:scheme" => {
                                         scheme =
@@ -237,32 +239,43 @@ impl EpubMetadata {
                             })
                         }
                         b"dc:language" => FieldSeen::Language,
-                        b"dc:publisher" => FieldSeen::Publisher,
+                        // b"dc:publisher" => FieldSeen::Publisher,
                         b"dc:description" => FieldSeen::Description,
-                        _ => FieldSeen::None,
-                    }
+                        // TODO: Use strip_prefix when stable.
+                        bytes => FieldSeen::Unknown({
+                            String::from_utf8_lossy(if bytes.starts_with(b"dc:") {
+                                &bytes[3..]
+                            } else {
+                                bytes
+                            })
+                            .into_owned()
+                        }),
+                    })
                 }
                 Event::Text(e) => {
                     let val = e.unescape_and_decode(&reader)?;
-                    match seen {
-                        FieldSeen::Author => {
+                    match std::mem::take(&mut seen) {
+                        Some(FieldSeen::Author) => {
                             new_obj.author = Some(val);
                         }
-                        FieldSeen::Title => {
+                        Some(FieldSeen::Title) => {
                             new_obj.title = Some(val);
                         }
-                        FieldSeen::Publisher => {}
-                        FieldSeen::Identifier(scheme) => match scheme {
+                        // Some(FieldSeen::Publisher) => {}
+                        Some(FieldSeen::Identifier(scheme)) => match scheme {
                             IdentifierScheme::ISBN => new_obj.isbn = get_isbn(&val),
                             _ => {}
                         },
-                        FieldSeen::Language => {
+                        Some(FieldSeen::Language) => {
                             new_obj.language = Some(val);
                         }
-                        FieldSeen::Description => {
+                        Some(FieldSeen::Description) => {
                             new_obj.description = Some(val);
                         }
-                        FieldSeen::None => {}
+                        Some(FieldSeen::Unknown(value)) => {
+                            new_obj.extended_values.insert(value, val);
+                        }
+                        None => {}
                     }
                 }
                 Event::End(e) => match e.name() {
@@ -277,6 +290,11 @@ impl EpubMetadata {
         }
 
         Ok(new_obj)
+    }
+
+    pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let mut buf = BufReader::new(File::open(path)?);
+        Self::from_archive(&mut ZipArchive::new(&mut buf)?)
     }
 }
 

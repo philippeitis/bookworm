@@ -1,4 +1,4 @@
-use crate::record::epub::EpubError;
+use crate::record::epub::Error as EpubError;
 use crate::record::variant::BookType;
 
 #[derive(Debug, PartialEq, Eq)]
