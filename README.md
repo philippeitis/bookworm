@@ -40,7 +40,7 @@ bookstore is a fast (hopefully) terminal based library management system (like C
 ```bash
 git clone https://github.com/philippeitis/bookstore.git
 cd bookstore
-cargo install --path bookstore
+cargo install --path bookstore_tui
 ```
 
 The minimum supported Rust version is current stable.

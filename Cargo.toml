@@ -1,0 +1,16 @@
+[workspace]
+
+members = [
+    "bookstore-tui",
+    "bookstore-app",
+    "bookstore-records",
+    "bookstore-database",
+    "quick-epub"
+]
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level=3

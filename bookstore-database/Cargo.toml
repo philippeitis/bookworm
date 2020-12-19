@@ -1,0 +1,38 @@
+[package]
+name = "bookstore-database"
+version = "0.1.0"
+authors = ["philippeitis <33013301+philippeitis@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bookstore-records = { version = "0.1.0", path = "../bookstore-records" }
+
+unicase = "2.6.0"
+sublime_fuzzy = "0.6.0"
+indexmap = { version = "1.6.1", default-features = false, features = ['serde-1', 'rayon'] }
+regex = "1.4.2"
+rustbreak = { version = "2", features = ["ron_enc"] }
+serde = { version = "1.0", features = ["derive"] }
+
+google-drive3 = { version = "*", optional = true }
+hyper = { version = "^0.10", optional = true }
+hyper-rustls = { version = "^0.6", optional = true }
+serde_json = { version = "^1.0", optional = true }
+yup-oauth2 = { version = "^1.0", optional = true }
+
+
+# Likely SQLx dependencies.
+sqlx = { version = "0.4.1", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
+tokio = { version = "0.3.5", features = ["macros", "rt-multi-thread"], optional = true }
+async-trait = { version = "0.1.42", optional = true }
+crossbeam = { version = "0.8.0", optional = true }
+
+[features]
+cloud = ["google-drive3", "hyper", "hyper-rustls", "serde_json", "yup-oauth2"]
+sqlite = ["sqlx", "tokio", "async-trait", "crossbeam"]
+
+[dev-dependencies]
+tempfile = "3.1.0"
+rand = "0.7.3"
