@@ -21,7 +21,7 @@ fn get_root_file_byte_range(text: &[u8]) -> Option<Range<usize>> {
 
 fn get_isbn(text: &str) -> Option<String> {
     lazy_static::lazy_static! {
-        static ref RE: Regex = Regex::new(r#"(?:urn:isbn:)?([\d-]*)"#).unwrap();
+        static ref RE: Regex = Regex::new(r#"^(?:urn:isbn:)?([\d-]+)"#).unwrap();
     }
     Some(RE.captures(text)?.get(1)?.as_str().to_owned())
 }
@@ -294,5 +294,7 @@ mod test {
         assert_eq!(get_isbn(isbn), Some(String::from("0123456789012")));
         let isbn = "978-0-345-53979-3";
         assert_eq!(get_isbn(isbn), Some(String::from("978-0-345-53979-3")));
+        let isbn = "hello world:0123456789012";
+        assert_eq!(get_isbn(isbn), None);
     }
 }
