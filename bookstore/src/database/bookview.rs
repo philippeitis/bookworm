@@ -126,8 +126,7 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
             None => Ok(self.db.get_books_indexed(self.root_cursor.window_range())?),
             Some((cursor, books)) => Ok(cursor
                 .window_range()
-                .map(|i| books.get_index(i))
-                .filter_map(|b| b)
+                .filter_map(|i| books.get_index(i))
                 .map(|(_, b)| b.clone())
                 .collect()),
         }

@@ -67,7 +67,7 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                 },
                 had_selected: false,
                 offset: BlindOffset::new(),
-                book_area: Default::default(),
+                book_area: Rect::default(),
             }),
         })
     }
@@ -96,7 +96,7 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                                     state,
                                     had_selected: false,
                                     offset: BlindOffset::new(),
-                                    book_area: Default::default(),
+                                    book_area: Rect::default(),
                                 })
                             }
                             AppView::Edit => {

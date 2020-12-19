@@ -36,18 +36,18 @@ impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
     /// * ` f ` - A frame to render into.
     /// * ` chunk ` - A chunk to specify the command string size.
     fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
-        let command_widget = if !self.command_string.is_empty() {
+        let command_widget = if self.command_string.is_empty() {
+            Paragraph::new(Text::styled(
+                "Enter command or search",
+                Style::default().add_modifier(Modifier::BOLD),
+            ))
+        } else {
             // TODO: Slow blink looks wrong
             let text = Text::styled(
                 self.command_string.to_string(),
                 Style::default().add_modifier(Modifier::BOLD),
             );
             Paragraph::new(text)
-        } else {
-            Paragraph::new(Text::styled(
-                "Enter command or search",
-                Style::default().add_modifier(Modifier::BOLD),
-            ))
         };
         f.render_widget(command_widget, chunk);
     }

@@ -13,7 +13,7 @@ pub enum Flag {
     StartingArguments(Vec<String>),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BookIndex {
     Selected,
     BookID(u32),
@@ -51,10 +51,9 @@ impl Command {
     pub(crate) fn requires_ui(&self) -> bool {
         use Command::*;
         match self {
-            DeleteBook(b) => b == &BookIndex::Selected,
-            EditBook(b, _, _) => b == &BookIndex::Selected,
-            OpenBookInApp(b, _) => b == &BookIndex::Selected,
-            OpenBookInExplorer(b, _) => b == &BookIndex::Selected,
+            DeleteBook(b) | EditBook(b, _, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
+                b == &BookIndex::Selected
+            }
             AddColumn(_) | RemoveColumn(_) | SortColumn(_, _) | FindMatches(_) => true,
             _ => false,
         }
@@ -107,10 +106,10 @@ fn read_flags(args: Vec<String>) -> Vec<Flag> {
     }
 
     if last_flag_valid {
-        if !flag_args.is_empty() {
-            flags.push(Flag::FlagWithArgument(flag, flag_args));
-        } else {
+        if flag_args.is_empty() {
             flags.push(Flag::Flag(flag));
+        } else {
+            flags.push(Flag::FlagWithArgument(flag, flag_args));
         }
     } else {
         flags.push(Flag::StartingArguments(flag_args));

@@ -592,8 +592,7 @@ impl IndexableDatabase for BasicDatabase {
 
         Ok(self.backend.read(|db| {
             (start..end)
-                .map(|i| db.books.get_index(i))
-                .filter_map(|b| b)
+                .filter_map(|i| db.books.get_index(i))
                 .map(|b| b.1.clone())
                 .collect()
         })?)

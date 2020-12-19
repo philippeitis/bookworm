@@ -193,11 +193,11 @@ impl CommandString {
             match c {
                 ' ' => {
                     if !escaped {
-                        if start != end {
+                        if start == end {
+                            start += 1;
+                        } else {
                             values.push((escaped, self.char_buf[start..end].iter().collect()));
                             start = end + 1;
-                        } else {
-                            start += 1;
                         }
                     }
                 }

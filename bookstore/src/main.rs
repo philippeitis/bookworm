@@ -1,4 +1,12 @@
 #![allow(clippy::single_match)]
+#![allow(clippy::explicit_iter_loop)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::filter_map)]
+#![allow(clippy::too_many_lines)]
+#![deny(clippy::doc_markdown)]
+#![deny(clippy::if_not_else)]
+
 mod app;
 mod database;
 mod record;
