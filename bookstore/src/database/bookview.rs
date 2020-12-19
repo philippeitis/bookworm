@@ -141,12 +141,14 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 
         let col = ColumnIdentifier::from(col);
 
-        for scope in self.scopes.iter_mut() {
-            if reverse {
-                scope.1.sort_by(|_, a, _, b| b.cmp_column(a, &col))
-            } else {
-                scope.1.sort_by(|_, a, _, b| a.cmp_column(b, &col))
-            }
+        if reverse {
+            self.scopes
+                .iter_mut()
+                .for_each(|(_, scope)| scope.sort_by(|_, a, _, b| b.cmp_column(a, &col)));
+        } else {
+            self.scopes
+                .iter_mut()
+                .for_each(|(_, scope)| scope.sort_by(|_, a, _, b| a.cmp_column(b, &col)));
         }
 
         Ok(())
@@ -228,11 +230,11 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
             let col_id = ColumnIdentifier::from(&col);
             let mut book = book.clone();
             book.set_column(&col_id, &new_val)?;
-            for (_, map) in self.scopes.iter_mut() {
+            self.scopes.iter_mut().for_each(|(_, map)| {
                 if let Some(val) = map.get_mut(&id) {
                     *val = book.clone();
                 }
-            }
+            });
             Ok(self.db.edit_book_with_id(id, col, new_val)?)
         } else {
             Ok(())
@@ -295,42 +297,45 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 
 impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
     fn push_scope(&mut self, search: Search) -> Result<(), BookViewError> {
-        let mut results = IndexMap::new();
-
-        match self.scopes.last() {
-            None => {
-                for book in self.db.find_matches(search)?.into_iter() {
-                    results.insert(book.get_id(), book);
-                }
-            }
+        let results: IndexMap<_, _> = match self.scopes.last() {
+            None => self
+                .db
+                .find_matches(search)?
+                .into_iter()
+                .map(|book| (book.get_id(), book))
+                .collect(),
             Some((_, books)) => match search {
                 Search::Regex(column, search) => {
                     let col = ColumnIdentifier::from(column);
                     let matcher = Regex::new(search.as_str())?;
-                    for (_, book) in books.iter() {
-                        if matcher.is_match(&book.get_column_or(&col, "")) {
-                            results.insert(book.get_id(), book.clone());
-                        }
-                    }
+                    books
+                        .iter()
+                        .filter(|(_, book)| matcher.is_match(&book.get_column_or(&col, "")))
+                        .map(|(_, b)| (b.get_id(), b.clone()))
+                        .collect()
                 }
                 Search::CaseSensitive(column, search) => {
                     let col = ColumnIdentifier::from(column);
-                    for (_, book) in books.iter() {
-                        if best_match(&search, &book.get_column_or(&col, "")).is_some() {
-                            results.insert(book.get_id(), book.clone());
-                        }
-                    }
+                    books
+                        .iter()
+                        .filter(|(_, book)| {
+                            best_match(&search, &book.get_column_or(&col, "")).is_some()
+                        })
+                        .map(|(_, b)| (b.get_id(), b.clone()))
+                        .collect()
                 }
                 Search::Default(column, search) => {
                     let col = ColumnIdentifier::from(column);
-                    for (_, book) in books.iter() {
-                        if best_match(&search, &book.get_column_or(&col, "")).is_some() {
-                            results.insert(book.get_id(), book.clone());
-                        }
-                    }
+                    books
+                        .iter()
+                        .filter(|(_, book)| {
+                            best_match(&search, &book.get_column_or(&col, "")).is_some()
+                        })
+                        .map(|(_, b)| (b.get_id(), b.clone()))
+                        .collect()
                 }
             },
-        }
+        };
 
         self.scopes.push((
             PageCursor::new(self.root_cursor.window_size(), results.len()),
