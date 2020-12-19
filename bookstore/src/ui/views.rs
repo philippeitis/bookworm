@@ -9,8 +9,8 @@ use tui::Frame;
 
 use unicode_truncate::UnicodeTruncateStr;
 
-use crate::app::parse_args;
 use crate::app::user_input::EditState;
+use crate::app::{parse_args, Command};
 use crate::app::{App, ApplicationError};
 use crate::database::IndexableDatabase;
 use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
@@ -279,18 +279,22 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                         return Ok(ApplicationTask::Update);
                     }
                     KeyCode::Tab | KeyCode::BackTab => {
-                        self.state.curr_command.refresh_autofill()?;
-                        let vals = self.state.curr_command.get_values();
-                        if let Some(val) = vals.get(0) {
-                            if val.1 == "!a" {
-                                let dir = if let Some(val) = vals.get(1) {
-                                    val.1 == "-d"
-                                } else {
-                                    false
-                                };
-                                self.state.curr_command.auto_fill(dir);
-                            }
-                        };
+                        let curr_command = &mut self.state.curr_command;
+                        curr_command.refresh_autofill()?;
+                        match parse_args(
+                            curr_command
+                                .get_values()
+                                .into_iter()
+                                .map(|(_, s)| s)
+                                .collect(),
+                        ) {
+                            Ok(command) => match command {
+                                Command::AddBookFromFile(_) => curr_command.auto_fill(false),
+                                Command::AddBooksFromDir(_, _) => curr_command.auto_fill(true),
+                                _ => {}
+                            },
+                            Err(_) => {}
+                        }
                     }
                     KeyCode::Esc => {
                         app.deselect();
