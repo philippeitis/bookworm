@@ -9,6 +9,7 @@ use zip::{result::ZipError, ZipArchive};
 use regex::{bytes::Regex as ByteRegex, Regex};
 
 use quick_xml::{events::Event, Reader};
+use std::fmt::Formatter;
 
 // Not robust if string is escaped, but at the same time, who would do such a terrible thing in the
 // root file?
@@ -62,13 +63,13 @@ pub struct Metadata {
     pub title: Option<String>,
     pub author: Option<String>,
     pub language: Option<String>,
-    pub isbn: Option<String>,
+    pub identifier: Option<(IdentifierScheme, String)>,
     pub description: Option<String>,
     pub extended_values: HashMap<String, String>,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum IdentifierScheme {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IdentifierScheme {
     Amazon,
     BarnesNoble,
     Calibre,
@@ -83,7 +84,35 @@ enum IdentifierScheme {
     URL,
     URN,
     UUID,
-    Unknown,
+    Unknown(String),
+    None,
+}
+
+impl std::fmt::Display for IdentifierScheme {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                IdentifierScheme::Amazon => "amazon",
+                IdentifierScheme::BarnesNoble => "barnesnoble",
+                IdentifierScheme::Calibre => "calibre",
+                IdentifierScheme::EdelWeiss => "edelweiss",
+                IdentifierScheme::FF => "ff",
+                IdentifierScheme::GoodReads => "goodreads",
+                IdentifierScheme::Google => "google",
+                IdentifierScheme::ISBN => "isbn",
+                IdentifierScheme::MOBIASIN => "mobi-asin",
+                IdentifierScheme::SonyBookID => "sonybookid",
+                IdentifierScheme::URI => "uri",
+                IdentifierScheme::URL => "url",
+                IdentifierScheme::URN => "urn",
+                IdentifierScheme::UUID => "uuid",
+                IdentifierScheme::Unknown(id) => id,
+                IdentifierScheme::None => "none",
+            }
+        )
+    }
 }
 
 enum FieldSeen {
@@ -135,7 +164,7 @@ impl Metadata {
             title: None,
             author: None,
             language: None,
-            isbn: None,
+            identifier: None,
             description: None,
             extended_values: HashMap::new(),
         };
@@ -212,11 +241,11 @@ impl Metadata {
                             }
                             FieldSeen::Identifier(match scheme {
                                 None => match id {
-                                    None => IdentifierScheme::Unknown,
+                                    None => IdentifierScheme::None,
                                     Some(val) => match val.to_ascii_lowercase().as_str() {
                                         "uuid_id" => IdentifierScheme::UUID,
                                         "isbn" => IdentifierScheme::ISBN,
-                                        _ => IdentifierScheme::Unknown,
+                                        id => IdentifierScheme::Unknown(id.to_owned()),
                                     },
                                 },
                                 Some(val) => match val.to_ascii_lowercase().as_str() {
@@ -234,7 +263,7 @@ impl Metadata {
                                     "url" => IdentifierScheme::URL,
                                     "urn" => IdentifierScheme::URN,
                                     "uuid" => IdentifierScheme::UUID,
-                                    _ => IdentifierScheme::Unknown,
+                                    id => IdentifierScheme::Unknown(id.to_owned()),
                                 },
                             })
                         }
@@ -263,7 +292,10 @@ impl Metadata {
                         }
                         // Some(FieldSeen::Publisher) => {}
                         Some(FieldSeen::Identifier(scheme)) => match scheme {
-                            IdentifierScheme::ISBN => new_obj.isbn = get_isbn(&val),
+                            IdentifierScheme::ISBN => {
+                                new_obj.identifier =
+                                    get_isbn(&val).map(|v| (IdentifierScheme::ISBN, v))
+                            }
                             _ => {}
                         },
                         Some(FieldSeen::Language) => {
