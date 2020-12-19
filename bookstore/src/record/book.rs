@@ -268,16 +268,19 @@ impl RawBook {
                 } else if let Some((s_st, s_ind)) = s_series {
                     if let Some((o_st, o_ind)) = o_series {
                         if s_st.eq(o_st) {
-                            if s_ind == o_ind {
-                                Ordering::Equal
-                            } else if let Some(s_ind) = s_ind {
-                                if let Some(o_ind) = o_ind {
-                                    s_ind.partial_cmp(&o_ind).unwrap_or(Ordering::Equal)
-                                } else {
-                                    Ordering::Greater
-                                }
-                            } else {
-                                Ordering::Less
+                            match s_ind.partial_cmp(o_ind) {
+                                Some(o) => o,
+                                None => match s_ind.map(|f| f.is_nan()) {
+                                    Some(true) => match o_ind.map(|f| f.is_nan()) {
+                                        Some(true) => Ordering::Equal,
+                                        Some(false) => Ordering::Less,
+                                        None => {
+                                            unreachable!("Neither s_ind nor o_ind can be None.")
+                                        }
+                                    },
+                                    Some(false) => Ordering::Greater,
+                                    None => unreachable!("Neither s_ind nor o_ind can be None."),
+                                },
                             }
                         } else {
                             s_st.cmp(&o_st)
@@ -290,6 +293,7 @@ impl RawBook {
                 }
             }
             ColumnIdentifier::ID => Ordering::Equal,
+            ColumnIdentifier::Title => self.get_title().cmp(&other.get_title()),
             c => self.get_column_or(c, "").cmp(&other.get_column_or(c, "")),
         }
     }
