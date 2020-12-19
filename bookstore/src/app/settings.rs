@@ -88,25 +88,25 @@ impl Default for NavigationSettings {
     }
 }
 
-fn str_to_color<S: AsRef<str>>(s: S) -> Option<Color> {
+fn str_to_color_or<S: AsRef<str>>(s: S, default: Color) -> Color {
     match s.as_ref().to_ascii_lowercase().as_str() {
-        "black" => Some(Color::Black),
-        "red" => Some(Color::Red),
-        "green" => Some(Color::Green),
-        "yellow" => Some(Color::Yellow),
-        "blue" => Some(Color::Blue),
-        "magenta" => Some(Color::Magenta),
-        "cyan" => Some(Color::Cyan),
-        "gray" => Some(Color::Gray),
-        "darkgray" => Some(Color::DarkGray),
-        "lightred" => Some(Color::LightRed),
-        "lightgreen" => Some(Color::LightGreen),
-        "lightyellow" => Some(Color::LightYellow),
-        "lightblue" => Some(Color::LightBlue),
-        "lightmagenta" => Some(Color::LightMagenta),
-        "lightcyan" => Some(Color::LightCyan),
-        "white" => Some(Color::White),
-        _ => None,
+        "black" => Color::Black,
+        "red" => Color::Red,
+        "green" => Color::Green,
+        "yellow" => Color::Yellow,
+        "blue" => Color::Blue,
+        "magenta" => Color::Magenta,
+        "cyan" => Color::Cyan,
+        "gray" => Color::Gray,
+        "darkgray" => Color::DarkGray,
+        "lightred" => Color::LightRed,
+        "lightgreen" => Color::LightGreen,
+        "lightyellow" => Color::LightYellow,
+        "lightblue" => Color::LightBlue,
+        "lightmagenta" => Color::LightMagenta,
+        "lightcyan" => Color::LightCyan,
+        "white" => Color::White,
+        _ => default,
     }
 }
 
@@ -151,7 +151,7 @@ impl From<TomlColors> for InterfaceStyle {
 impl TomlColors {
     fn selected_bg(&self) -> Color {
         if let Some(color) = &self.selected_bg {
-            str_to_color(color).unwrap_or(Color::LightBlue)
+            str_to_color_or(color, Color::LightBlue)
         } else {
             Color::LightBlue
         }
@@ -159,7 +159,7 @@ impl TomlColors {
 
     fn selected_fg(&self) -> Color {
         if let Some(color) = &self.selected_fg {
-            str_to_color(color).unwrap_or(Color::White)
+            str_to_color_or(color, Color::White)
         } else {
             Color::White
         }
@@ -167,7 +167,7 @@ impl TomlColors {
 
     fn edit_bg(&self) -> Color {
         if let Some(color) = &self.edit_bg {
-            str_to_color(color).unwrap_or(Color::Blue)
+            str_to_color_or(color, Color::Blue)
         } else {
             Color::Blue
         }
@@ -175,7 +175,7 @@ impl TomlColors {
 
     fn edit_fg(&self) -> Color {
         if let Some(color) = &self.edit_fg {
-            str_to_color(color).unwrap_or(Color::White)
+            str_to_color_or(color, Color::White)
         } else {
             Color::White
         }
