@@ -9,14 +9,14 @@ use tui::Frame;
 
 use unicode_truncate::UnicodeTruncateStr;
 
-use bookstore_app::user_input::EditState;
-use bookstore_app::{parse_args, Command};
-use bookstore_app::{App, ApplicationError};
+use bookstore_app::{parse_args, App, ApplicationError, Command};
+use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
 use bookstore_database::IndexableDatabase;
 
 use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
 use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{book_to_widget_text, CommandWidget, Widget};
+use bookstore_app::settings::Color;
 
 #[derive(Copy, Clone)]
 pub(crate) enum AppView {
@@ -30,6 +30,48 @@ pub(crate) enum ApplicationTask {
     DoNothing,
     Update,
     SwitchView(AppView),
+}
+
+trait TuiStyle {
+    fn edit_style(&self) -> Style;
+
+    fn select_style(&self) -> Style;
+}
+
+fn to_tui(c: bookstore_app::settings::Color) -> tui::style::Color {
+    use tui::style::Color as TColor;
+    match c {
+        Color::Black => TColor::Black,
+        Color::Red => TColor::Red,
+        Color::Green => TColor::Green,
+        Color::Yellow => TColor::Yellow,
+        Color::Blue => TColor::Blue,
+        Color::Magenta => TColor::Magenta,
+        Color::Cyan => TColor::Cyan,
+        Color::Gray => TColor::Gray,
+        Color::DarkGray => TColor::DarkGray,
+        Color::LightRed => TColor::LightRed,
+        Color::LightGreen => TColor::LightGreen,
+        Color::LightYellow => TColor::LightYellow,
+        Color::LightBlue => TColor::LightBlue,
+        Color::LightMagenta => TColor::LightMagenta,
+        Color::LightCyan => TColor::LightCyan,
+        Color::White => TColor::White,
+    }
+}
+
+impl TuiStyle for InterfaceStyle {
+    fn edit_style(&self) -> Style {
+        Style::default()
+            .fg(to_tui(self.edit_fg))
+            .bg(to_tui(self.edit_bg))
+    }
+
+    fn select_style(&self) -> Style {
+        Style::default()
+            .fg(to_tui(self.selected_fg))
+            .bg(to_tui(self.selected_bg))
+    }
 }
 
 // TODO: when https://github.com/crossterm-rs/crossterm/issues/507 is resolved,

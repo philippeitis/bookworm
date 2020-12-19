@@ -1,10 +1,28 @@
 use std::path::Path;
 
-use tui::style::{Color, Style};
-
 use serde::Deserialize;
 
 use unicase::UniCase;
+
+#[derive(Copy, Clone)]
+pub enum Color {
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    Gray,
+    DarkGray,
+    LightRed,
+    LightGreen,
+    LightYellow,
+    LightBlue,
+    LightMagenta,
+    LightCyan,
+    White,
+}
 
 /// Provides terminal UI settings.
 pub struct Settings {
@@ -41,16 +59,6 @@ impl Default for InterfaceStyle {
             edit_fg: Color::White,
             edit_bg: Color::Blue,
         }
-    }
-}
-
-impl InterfaceStyle {
-    pub fn edit_style(&self) -> Style {
-        Style::default().fg(self.edit_fg).bg(self.edit_bg)
-    }
-
-    pub fn select_style(&self) -> Style {
-        Style::default().fg(self.selected_fg).bg(self.selected_bg)
     }
 }
 

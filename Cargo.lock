@@ -139,7 +139,6 @@ dependencies = [
  "serde",
  "shellwords",
  "toml",
- "tui",
  "unicase 2.6.0",
 ]
 
