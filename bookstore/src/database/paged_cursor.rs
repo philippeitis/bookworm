@@ -5,6 +5,18 @@ pub struct PageCursor {
     height: usize,
 }
 
+trait ReplaceAndEqual {
+    /// Replaces `self` with `other`, and returns whether `self` was
+    /// equal to `other`.
+    fn replace_and_equal(&mut self, other: Self) -> bool;
+}
+
+impl<T: PartialEq + Copy> ReplaceAndEqual for T {
+    fn replace_and_equal(&mut self, other: Self) -> bool {
+        std::mem::replace(self, other) == other
+    }
+}
+
 impl PageCursor {
     /// Creates a new Cursor at location 0, with no selection active.
     pub(crate) fn new(window_size: usize, height: usize) -> Self {
@@ -31,9 +43,7 @@ impl PageCursor {
     pub(crate) fn scroll_down(&mut self, inc: usize) -> bool {
         if self.top_index + inc + self.window_size > self.height {
             let new_val = self.height.saturating_sub(self.window_size);
-            let c = self.top_index != new_val;
-            self.top_index = new_val;
-            c
+            !self.top_index.replace_and_equal(new_val)
         } else {
             self.top_index += inc;
             true
@@ -42,14 +52,9 @@ impl PageCursor {
 
     /// Moves the view up by inc, but does not move the start past the first index.
     pub(crate) fn scroll_up(&mut self, inc: usize) -> bool {
-        if self.top_index <= inc {
-            let c = self.top_index != 0;
-            self.top_index = 0;
-            c
-        } else {
-            self.top_index -= inc;
-            true
-        }
+        !self
+            .top_index
+            .replace_and_equal(self.top_index.saturating_sub(inc))
     }
 
     /// Selects the value at index. If index is greater than the window size or data len,
@@ -58,38 +63,23 @@ impl PageCursor {
         if let Some(ind) = index {
             let ind = {
                 let min = self.window_size.min(self.height);
-                if ind >= min {
-                    if min > 0 {
-                        Some(min - 1)
-                    } else {
-                        None
-                    }
+                if min == 0 {
+                    min
+                } else if ind >= min {
+                    min - 1
                 } else {
-                    Some(ind)
+                    ind
                 }
             };
-            if self.selected == ind {
-                false
-            } else {
-                self.selected = ind;
-                true
-            }
-        } else if self.selected == index {
-            false
+            !self.selected.replace_and_equal(Some(ind))
         } else {
-            self.selected = index;
-            true
+            !self.selected.replace_and_equal(index)
         }
     }
 
     /// Returns the selected value.
     pub(crate) fn selected(&self) -> Option<usize> {
-        let ind = self.selected?;
-        if self.window_size == 0 {
-            Some(0)
-        } else {
-            Some(ind)
-        }
+        Some(self.selected?.min(self.window_size).min(self.height))
     }
 
     /// Returns the selected value, if one is selected.
@@ -101,15 +91,13 @@ impl PageCursor {
     /// If the cursor moves past the end of the visible window, the window is moved down.
     pub(crate) fn select_down(&mut self) -> bool {
         if let Some(s) = self.selected {
-            if s + 1 < self.window_size && s + 1 < self.height {
+            if s + 1 < self.window_size.min(self.height) {
                 self.select(Some(s + 1))
             } else {
                 self.scroll_down(1)
             }
-        } else if self.window_size != 0 {
-            self.select(Some(self.window_size - 1))
         } else {
-            self.select(None)
+            self.select(self.window_size.checked_sub(1))
         }
     }
 
@@ -134,15 +122,10 @@ impl PageCursor {
     /// to the top. Otherwise, the selected index is unchanged.
     pub(crate) fn page_up(&mut self) -> bool {
         if self.selected.is_some() && self.at_top() {
-            return if self.selected != Some(0) {
-                self.selected = Some(0);
-                true
-            } else {
-                false
-            };
+            !self.selected.replace_and_equal(Some(0))
+        } else {
+            self.scroll_up(self.window_size)
         }
-
-        self.scroll_up(self.window_size)
     }
 
     /// Moves the view down by the size of the window, except in the case that moving the page
@@ -151,15 +134,13 @@ impl PageCursor {
     /// If a value is selected and the view is already at the bottom, the selection is also moved
     /// to the bottom. Otherwise, the selected index is unchanged.
     pub(crate) fn page_down(&mut self) -> bool {
-        if self.selected.is_some() && self.at_end() && self.window_size != 0 {
-            return if self.selected != Some(self.window_size - 1) {
-                self.selected = Some(self.window_size - 1);
-                true
-            } else {
-                false
-            };
+        if self.selected.is_some() && self.at_end() {
+            !self
+                .selected
+                .replace_and_equal(Some(self.window_size.saturating_sub(1)))
+        } else {
+            self.scroll_down(self.window_size)
         }
-        self.scroll_down(self.window_size)
     }
 
     /// Moves the view to the end of the data. If a selection exists, the selection is moved to
@@ -167,9 +148,7 @@ impl PageCursor {
     pub(crate) fn end(&mut self) -> bool {
         let t_change = self.scroll_down(self.height);
         let s_change = if self.selected.is_some() {
-            let old_selection = self.selected;
-            self.select(Some(self.window_size));
-            old_selection != self.selected
+            self.select(Some(self.window_size))
         } else {
             false
         };
@@ -179,16 +158,9 @@ impl PageCursor {
     /// Moves the view to the start of the data. If a selection exists, the selection is moved to
     /// the top.
     pub(crate) fn home(&mut self) -> bool {
-        let t_change = if self.top_index == 0 {
-            false
-        } else {
-            self.top_index = 0;
-            true
-        };
+        let t_change = !self.top_index.replace_and_equal(0);
         let s_change = if self.selected.is_some() {
-            let old_selection = self.selected;
-            self.select(Some(0));
-            old_selection != self.selected
+            !self.selected.replace_and_equal(Some(0))
         } else {
             false
         };
@@ -208,11 +180,7 @@ impl PageCursor {
     /// Adjusts the start of the window so that it doesn't go past the end of the data, if possible.
     pub(crate) fn refresh(&mut self) {
         if self.top_index + self.window_size > self.height {
-            if self.height > self.window_size {
-                self.top_index = self.height - self.window_size;
-            } else {
-                self.top_index = 0;
-            }
+            self.top_index = self.height.saturating_sub(self.window_size)
         }
     }
 
