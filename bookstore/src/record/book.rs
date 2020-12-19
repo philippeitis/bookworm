@@ -73,11 +73,6 @@ impl RawBook {
             return Err(BookError::FileError);
         }
 
-        if let Ok(mut variant) = BookVariant::generate_from_file(file_path) {
-            variant.id = Some(0);
-            variants.push(variant);
-        }
-
         let mut book = RawBook {
             title: None,
             authors: None,
@@ -87,7 +82,8 @@ impl RawBook {
             description: None,
         };
 
-        for variant in variants.iter_mut() {
+        if let Ok(mut variant) = BookVariant::generate_from_file(path) {
+            variant.id = Some(0);
             if book.title.is_none() {
                 book.title = std::mem::take(&mut variant.local_title);
             }
@@ -99,9 +95,8 @@ impl RawBook {
             if book.description.is_none() {
                 book.description = std::mem::take(&mut variant.description);
             }
+            book.variants = Some(vec![variant]);
         }
-
-        book.variants = Some(variants);
 
         Ok(book)
     }
