@@ -42,15 +42,14 @@ impl BookType {
         S: AsRef<OsStr>,
     {
         let so = s.as_ref();
-        if let Some(s) = so.to_str() {
-            match s.to_ascii_lowercase().as_str() {
+        match so.to_str() {
+            Some(s) => match s.to_ascii_lowercase().as_str() {
                 "epub" => BookType::EPUB,
                 "mobi" => BookType::MOBI,
                 "pdf" => BookType::PDF,
                 _ => BookType::Unsupported(so.to_os_string()),
-            }
-        } else {
-            BookType::Unsupported(so.to_os_string())
+            },
+            None => BookType::Unsupported(so.to_os_string()),
         }
     }
 }
@@ -69,8 +68,8 @@ pub(crate) struct BookVariant {
 }
 
 impl BookVariant {
-    /// Generates a book variant from the file at the specified `file_path`, and fills in
-    /// information from the metadata of the book.
+    /// Generates a book variant from the file at `file_path`, and fills in details from the
+    /// parsed book metadata.
     ///
     /// # Arguments
     /// * ` file_path ` - The path to the file of interest.
