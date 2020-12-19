@@ -286,7 +286,7 @@ impl<'a> Iterator for CommandStringIter<'a> {
                         } else {
                             let s = {
                                 let buf = self.char_buf()[..end].iter().collect();
-                                self.start += end;
+                                self.start += end + 1;
                                 buf
                             };
                             return Some((self.escaped, s));
@@ -334,6 +334,7 @@ mod test {
                 "\"hello world\" there!",
                 vec![(true, "hello world"), (false, "there!")],
             ),
+            ("!a -d x", vec![(false, "!a"), (false, "-d"), (false, "x")]),
         ];
 
         for (word, expected) in samples {
