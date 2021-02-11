@@ -298,6 +298,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "codegen"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34c59e8a9b988977ec3bd61ab380cf1167048817ecd3d6999fac03657f85a609"
+dependencies = [
+ "indexmap",
+]
+
+[[package]]
 name = "const_fn"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -968,6 +977,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "isbn2"
+version = "0.3.0"
+source = "git+https://github.com/philippeitis/isbn-rs.git#d56eee43f5fa99cf372a7a49d902b5d643727871"
+dependencies = [
+ "arrayvec",
+ "codegen",
+ "roxmltree",
+]
+
+[[package]]
 name = "itertools"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1580,9 +1599,8 @@ dependencies = [
 name = "quick-epub"
 version = "0.1.0"
 dependencies = [
- "lazy_static",
+ "isbn2",
  "quick-xml",
- "regex",
  "zip",
 ]
 
@@ -1740,6 +1758,15 @@ dependencies = [
  "base64 0.12.3",
  "bitflags",
  "serde",
+]
+
+[[package]]
+name = "roxmltree"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbf7d7b1ea646d380d0e8153158063a6da7efe30ddbf3184042848e3f8a6f671"
+dependencies = [
+ "xmlparser",
 ]
 
 [[package]]
@@ -2534,6 +2561,12 @@ dependencies = [
  "markup5ever",
  "time",
 ]
+
+[[package]]
+name = "xmlparser"
+version = "0.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "114ba2b24d2167ef6d67d7d04c8cc86522b87f490025f39f0303b7db5bf5e3d8"
 
 [[package]]
 name = "yup-oauth2"

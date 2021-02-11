@@ -1,31 +1,122 @@
 use std::collections::HashMap;
+use std::fmt::Formatter;
 use std::fs::File;
-use std::io::{BufReader, Read};
-use std::ops::Range;
+use std::io::BufReader;
 use std::path::Path;
+use std::str::FromStr;
 
 use zip::{result::ZipError, ZipArchive};
 
-use regex::{bytes::Regex as ByteRegex, Regex};
-
+use isbn2::Isbn;
 use quick_xml::{events::Event, Reader};
-use std::fmt::Formatter;
+use zip::read::ZipFile;
 
-// Not robust if string is escaped, but at the same time, who would do such a terrible thing in the
-// root file?
-fn get_root_file_byte_range(text: &[u8]) -> Option<Range<usize>> {
-    lazy_static::lazy_static! {
-        static ref RE: ByteRegex = ByteRegex::new(r#"(?:<rootfile )(?:[^>]*)(?:full-path=")([^"]*)(?:"[^>]*>)"#).unwrap();
+fn get_root_file(file: ZipFile) -> Option<String> {
+    let mut buf = Vec::new();
+    let mut reader = Reader::from_reader(BufReader::new(file));
+    reader.trim_text(true);
+
+    // Read possible declaration, as well as package tag.
+    // Ignores comments and unexpected text.
+    loop {
+        match reader.read_event(&mut buf).ok()? {
+            Event::Start(e) => match e.name() {
+                b"opf:container" | b"container" => break,
+                _ => return None,
+            },
+            Event::Decl(_) => {
+                buf.clear();
+                match reader.read_event(&mut buf).ok()? {
+                    Event::Start(e) => match e.name() {
+                        b"opf:container" | b"container" => break,
+                        _ => return None,
+                    },
+                    _ => return None,
+                }
+            }
+            // We seem to have a case where we get a byte-order-mark
+            // at the start, so we match text here too.
+            Event::Text(_) | Event::Comment(_) => {}
+            _ => return None,
+        }
+        buf.clear();
     }
-    let range = RE.captures(text)?.get(1)?;
-    Some(range.start()..range.end())
+
+    // Read metadata tag.
+    // Ignores any comments.
+    loop {
+        match reader.read_event(&mut buf).ok()? {
+            Event::Start(e) => match e.name() {
+                b"rootfiles" => break,
+                _ => return None,
+            },
+            Event::Comment(_) => {}
+            _ => return None,
+        }
+        buf.clear();
+    }
+    let mut root_file_seen = false;
+
+    loop {
+        let event = reader.read_event(&mut buf);
+        match event.ok()? {
+            Event::Empty(ref e) => match e.name() {
+                b"rootfile" => {
+                    for a in e.attributes().filter_map(Result::ok) {
+                        match a.key {
+                            b"full-path" => {
+                                return Some(String::from_utf8_lossy(&a.value).into_owned())
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => return None,
+            },
+            Event::Start(ref e) => match e.name() {
+                b"rootfile" => {
+                    for a in e.attributes().filter_map(Result::ok) {
+                        match a.key {
+                            b"full-path" => {
+                                return Some(String::from_utf8_lossy(&a.value).into_owned())
+                            }
+                            _ => {}
+                        }
+                    }
+                    root_file_seen = true;
+                }
+                _ => return None,
+            },
+            Event::Text(e) => {
+                if root_file_seen {
+                    return e.unescape_and_decode(&reader).ok();
+                }
+            }
+            Event::End(e) => match e.name() {
+                b"rootfiles" => break,
+                _ => {}
+            },
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    None
 }
 
 fn get_isbn(text: &str) -> Option<String> {
-    lazy_static::lazy_static! {
-        static ref RE: Regex = Regex::new(r#"^(?:urn:isbn:)?([\d-]+)"#).unwrap();
+    let text = if text.starts_with("urn:isbn:") {
+        text.split_at("urn:isbn:".len()).1
+    } else {
+        text
+    };
+    if Isbn::from_str(text).is_ok() {
+        Some(text.to_string())
+    } else {
+        None
     }
-    Some(RE.captures(text)?.get(1)?.as_str().to_owned())
 }
 
 pub enum Error {
@@ -142,16 +233,16 @@ impl Metadata {
         //     return Err(EpubError::NoMimetype);
         // }
 
-        let root_file = if let Ok(mut meta_inf) = archive.by_name("META-INF/container.xml") {
-            let mut buf = Vec::new();
-            meta_inf.read_to_end(&mut buf)?;
-            match get_root_file_byte_range(&buf) {
-                Some(range) => String::from_utf8_lossy(&buf[range]).into_owned(),
-                None => return Err(Error::NoRootFile),
-            }
+        // Valid epub archives should have a META-INF/container.xml file.
+        let mut buf = Vec::new();
+
+        let root_file = if let Ok(meta_inf) = archive.by_name("META-INF/container.xml") {
+            get_root_file(meta_inf).ok_or(Error::NoRootFile)?
         } else {
             return Err(Error::NoContainer);
         };
+
+        buf.clear();
 
         let meta_zip = archive
             .by_name(&root_file)
@@ -168,8 +259,6 @@ impl Metadata {
             description: None,
             extended_values: HashMap::new(),
         };
-
-        let mut buf = Vec::new();
 
         // Read possible declaration, as well as package tag.
         // Ignores comments and unexpected text.
@@ -345,6 +434,8 @@ mod test {
         let isbn = "978-0-345-53979-3";
         assert_eq!(get_isbn(isbn), Some(String::from("978-0-345-53979-3")));
         let isbn = "hello world:0123456789012";
+        assert_eq!(get_isbn(isbn), None);
+        let isbn = "urn:isbn:urn:isbn:0123456789012";
         assert_eq!(get_isbn(isbn), None);
     }
 }
