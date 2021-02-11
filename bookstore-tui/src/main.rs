@@ -13,6 +13,7 @@ use std::env;
 use std::io::{stdout, Write};
 use std::path::PathBuf;
 
+use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{event::DisableMouseCapture, event::EnableMouseCapture, execute};
 
 use clap::Clap;
@@ -85,10 +86,12 @@ fn main() -> Result<(), TuiError> {
 
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
-    execute!(&stdout, EnableMouseCapture)?;
+    // terminal.clear()?;
+    execute!(&stdout, EnableMouseCapture, EnterAlternateScreen)?;
+    crossterm::terminal::enable_raw_mode()?;
     let r = app.run(&mut terminal);
-    execute!(&stdout, DisableMouseCapture)?;
+    execute!(&stdout, DisableMouseCapture, LeaveAlternateScreen)?;
+    crossterm::terminal::disable_raw_mode()?;
     r
 }
 
