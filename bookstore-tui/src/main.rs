@@ -79,9 +79,19 @@ fn main() -> Result<(), TuiError> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
     crossterm::terminal::enable_raw_mode()?;
-    execute!(&stdout, EnterAlternateScreen, EnableMouseCapture, cursor::Hide)?;
+    execute!(
+        &stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        cursor::Hide
+    )?;
     let r = app.run(&mut terminal);
-    execute!(&stdout, cursor::Show, DisableMouseCapture, LeaveAlternateScreen)?;
+    execute!(
+        &stdout,
+        cursor::Show,
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     crossterm::terminal::disable_raw_mode()?;
     r
 }
