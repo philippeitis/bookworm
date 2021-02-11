@@ -84,9 +84,7 @@ pub struct CommandString {
 }
 
 impl CommandString {
-    pub fn vals_to_string(
-        values: &mut dyn Iterator<Item = &(bool, std::string::String)>,
-    ) -> String {
+    fn vals_to_string(values: &mut dyn Iterator<Item = &(bool, std::string::String)>) -> String {
         values
             .map(|(escaped, raw_str)| {
                 if *escaped {
@@ -130,7 +128,8 @@ impl CommandString {
         self.open_end = true;
     }
 
-    pub fn write_back(&mut self) {
+    /// Writes the current autofill to self.
+    fn write_back(&mut self) {
         if self.autofilled.is_some() {
             let v = self.get_values_autofilled();
             self.char_buf = CommandString::vals_to_string(&mut v.iter())
