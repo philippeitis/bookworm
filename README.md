@@ -44,3 +44,5 @@ cargo install --path bookstore_tui
 ```
 
 The minimum supported Rust version is current stable.
+
+Note that not all terminals are fully supported - Windows Command Prompt and Ubuntu's default terminal are tested and work correctly. However, scrolling with the mouse does not work in Windows Terminal. 
