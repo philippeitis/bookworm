@@ -157,7 +157,7 @@ impl BookVariant {
                         Some((id, value)) => match id {
                             IdentifierScheme::ISBN => {
                                 self.identifier =
-                                    ISBN::from_str(&value).ok().map(|v| Identifier::ISBN(v))
+                                    ISBN::from_str(&value).ok().map(Identifier::ISBN)
                             }
                             IdentifierScheme::Unknown(id) => {
                                 self.identifier = Some(Unknown(id, value));

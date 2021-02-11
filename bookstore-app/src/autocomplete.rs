@@ -11,11 +11,9 @@ impl AutoCompleter<PathBuf> {
     /// Returns a new `AutoCompleter`, which will fill in entries from the path fragment.
     ///
     /// # Arguments
-    ///
     /// * ` word ` - The word to provide autofills for.
     ///
     /// # Errors
-    ///
     /// If the glob fails, an error will be returned.
     pub fn new<S: AsRef<str>>(word: S) -> Result<Self, ()> {
         let word = word.as_ref().to_owned();
@@ -37,7 +35,7 @@ impl AutoCompleter<PathBuf> {
     /// Returns the next path which is at least as long as the original,
     /// or None if no such path exists.
     ///
-    /// If at least one such word exists, this function will always
+    /// If at least one such path exists, this function will always
     /// return a value.
     pub fn get_next_word(&mut self) -> Option<&PathBuf> {
         self.get_next_word_by(|_| true)
@@ -47,11 +45,10 @@ impl AutoCompleter<PathBuf> {
     /// and satisfies the provided predicate, or None if no such path
     /// exists.
     ///
-    /// If at least one such word exists, this function will always
+    /// If at least one such path exists, this function will always
     /// return a value.
     ///
     /// # Arguments
-    ///
     /// * ` p ` - A predicate which returns true if the given path should
     ///             be returned, otherwise false.
     pub fn get_next_word_by(&mut self, p: impl Fn(&PathBuf) -> bool) -> Option<&PathBuf> {
@@ -84,7 +81,6 @@ impl<S> GetRing<S> {
     /// always be returned.
     ///
     /// # Arguments
-    ///
     /// * ` p ` - A predicate which returns true if the given item should
     ///             be returned, otherwise false.
     fn get_next_item_by(&mut self, p: impl Fn(&S) -> bool) -> Option<&S> {

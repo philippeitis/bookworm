@@ -102,6 +102,7 @@ impl CommandString {
             .join(" ")
     }
 
+    /// Creates an empty CommandString.
     pub fn new() -> Self {
         CommandString {
             char_buf: vec![],
@@ -112,12 +113,16 @@ impl CommandString {
         }
     }
 
+    /// Pushes `c` to the end of the working character buffer. If an unwritten autofill exists,
+    /// the autofill is also persisted, and `c` is pushed after. The autofill source is reset.
     pub fn push(&mut self, c: char) {
         self.write_back();
         self.auto_fill = None;
         self.char_buf.push(c)
     }
 
+    /// Pops the last character. If an unwritten autofill exists, the autofill is also persisted,
+    /// and the last character is popped. The autofill source is reset.
     pub fn pop(&mut self) {
         self.write_back();
         self.auto_fill = None;
@@ -135,14 +140,16 @@ impl CommandString {
         }
     }
 
+    /// Clears all internal state, including autofills.
     pub fn clear(&mut self) {
         self.auto_fill = None;
         self.autofilled = None;
         self.char_buf.clear();
     }
 
+    /// Checks if any characters are currently written or can be written.
     pub fn is_empty(&self) -> bool {
-        self.char_buf.is_empty()
+        self.char_buf.is_empty() && self.autofilled.is_none()
     }
 
     pub fn refresh_autofill(&mut self) -> Result<(), ()> {
@@ -150,13 +157,13 @@ impl CommandString {
             return Ok(());
         }
 
-        let val = if let Some(val) = self.get_values().last() {
-            if !val.0 && val.1.starts_with('-') && self.char_buf.last().eq(&Some(&' ')) {
+        let val = if let Some((escaped, word)) = self.get_values().last() {
+            if !escaped && word.starts_with('-') && self.char_buf.last().eq(&Some(&' ')) {
                 self.keep_last = true;
                 String::new()
             } else {
                 self.keep_last = false;
-                val.1
+                word
             }
         } else {
             String::new()
@@ -166,7 +173,13 @@ impl CommandString {
         Ok(())
     }
 
-    /// Runs autofill on the last value.
+    /// Autofills the current input, replacing the last word with an appropriate autofill.
+    /// If `dir` is true, fills in a directory path - otherwise, allows any path.
+    /// This is for the sake of being able to drill into directories to find books of
+    /// interest.
+    ///
+    /// # Arguments
+    /// * ` dir ` - true if filling in a directory, false otherwise.
     pub fn auto_fill(&mut self, dir: bool) {
         self.open_end = false;
 
@@ -184,42 +197,6 @@ impl CommandString {
     }
 
     pub fn get_values(&self) -> CommandStringIter {
-        // let mut values = vec![];
-        // let mut escaped = false;
-        // let mut start = 0;
-        // for (end, &c) in self.char_buf.iter().enumerate() {
-        //     match c {
-        //         ' ' => {
-        //             if !escaped {
-        //                 if start == end {
-        //                     start += 1;
-        //                 } else {
-        //                     values.push((escaped, self.char_buf[start..end].iter().collect()));
-        //                     start = end + 1;
-        //                 }
-        //             }
-        //         }
-        //         '"' => {
-        //             if escaped {
-        //                 values.push((escaped, self.char_buf[start..end].iter().collect()));
-        //                 start = end;
-        //                 escaped = false;
-        //             } else if start == end {
-        //                 escaped = true;
-        //                 start = end + 1;
-        //             }
-        //         }
-        //         _ => {}
-        //     }
-        // }
-        //
-        // if start < self.char_buf.len() {
-        //     values.push((
-        //         escaped,
-        //         self.char_buf[start..self.char_buf.len()].iter().collect(),
-        //     ));
-        // }
-        // values
         CommandStringIter {
             command_string: &self,
             escaped: false,
