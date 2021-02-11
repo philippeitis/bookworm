@@ -1,12 +1,3 @@
-#![allow(clippy::single_match)]
-#![allow(clippy::explicit_iter_loop)]
-#![allow(clippy::option_if_let_else)]
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::filter_map)]
-#![allow(clippy::too_many_lines)]
-#![deny(clippy::doc_markdown)]
-#![deny(clippy::if_not_else)]
-
 mod ui;
 
 use std::env;
@@ -14,7 +5,7 @@ use std::io::{stdout, Write};
 use std::path::PathBuf;
 
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::{event::DisableMouseCapture, event::EnableMouseCapture, execute};
+use crossterm::{cursor, event::DisableMouseCapture, event::EnableMouseCapture, execute};
 
 use clap::Clap;
 
@@ -86,11 +77,11 @@ fn main() -> Result<(), TuiError> {
 
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;
-    // terminal.clear()?;
-    execute!(&stdout, EnableMouseCapture, EnterAlternateScreen)?;
+    terminal.clear()?;
     crossterm::terminal::enable_raw_mode()?;
+    execute!(&stdout, EnterAlternateScreen, EnableMouseCapture, cursor::Hide)?;
     let r = app.run(&mut terminal);
-    execute!(&stdout, DisableMouseCapture, LeaveAlternateScreen)?;
+    execute!(&stdout, cursor::Show, DisableMouseCapture, LeaveAlternateScreen)?;
     crossterm::terminal::disable_raw_mode()?;
     r
 }
