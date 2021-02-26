@@ -8,5 +8,5 @@ edition = "2018"
 
 [dependencies]
 zip = "0.5.9"
-quick-xml = "0.20.0"
+quick-xml = "0.22.0"
 isbn2 = { git = "https://github.com/philippeitis/isbn-rs.git" }

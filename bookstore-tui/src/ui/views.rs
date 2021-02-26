@@ -1,4 +1,4 @@
-use crossterm::event::{Event, KeyCode, MouseEvent};
+use crossterm::event::{Event, KeyCode, MouseEvent, MouseEventKind};
 
 use tui::backend::Backend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -242,8 +242,8 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
     ) -> Result<ApplicationTask, ApplicationError> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::Update),
-            Event::Mouse(m) => match m {
-                MouseEvent::ScrollDown(c, r, _) => {
+            Event::Mouse(m) => match (m.kind, m.column, m.row) {
+                (MouseEventKind::ScrollDown, c, r) => {
                     let inverted = self.state.nav_settings.inverted;
                     let scroll = self.state.nav_settings.scroll;
                     if inside_rect(self.book_area, c, r) {
@@ -260,7 +260,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                         }
                     }
                 }
-                MouseEvent::ScrollUp(c, r, _) => {
+                (MouseEventKind::ScrollUp, c, r) => {
                     let inverted = self.state.nav_settings.inverted;
                     let scroll = self.state.nav_settings.scroll;
                     if inside_rect(self.book_area, c, r) {
@@ -570,15 +570,15 @@ impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
     ) -> Result<ApplicationTask, ApplicationError> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::Update),
-            Event::Mouse(m) => match m {
-                MouseEvent::ScrollDown(_, _, _) => {
+            Event::Mouse(m) => match m.kind {
+                MouseEventKind::ScrollDown => {
                     if self.state.nav_settings.inverted {
                         self.text.scroll_up(self.state.nav_settings.scroll)
                     } else {
                         self.text.scroll_down(self.state.nav_settings.scroll)
                     };
                 }
-                MouseEvent::ScrollUp(_, _, _) => {
+                MouseEventKind::ScrollUp => {
                     if self.state.nav_settings.inverted {
                         self.text.scroll_down(self.state.nav_settings.scroll)
                     } else {
