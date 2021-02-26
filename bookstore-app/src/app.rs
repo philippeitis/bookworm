@@ -1,6 +1,6 @@
 use std::path::Path;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-use std::{path::PathBuf, process::Command as ProcessCommand};
+use std::process::Command as ProcessCommand;
 
 use rayon::prelude::*;
 #[cfg(feature = "sqlite")]
@@ -371,8 +371,8 @@ impl<D: IndexableDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` book ` - The book to find a path for.
-    fn get_book_path(book: &Book, index: usize) -> Option<PathBuf> {
-        Some(book.get_variants()?.get(index)?.path().to_owned())
+    fn get_book_path(book: &Book, index: usize) -> Option<&Path> {
+        Some(book.get_variants()?.get(index)?.path())
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
