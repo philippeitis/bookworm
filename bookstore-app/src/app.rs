@@ -1,4 +1,6 @@
 use std::path::Path;
+#[cfg(target_os = "windows")]
+use std::path::PathBuf;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Command as ProcessCommand;
 
@@ -259,7 +261,7 @@ impl<D: IndexableDatabase> App<D> {
                     self.open_book(&b, index)?;
                 }
             }
-            #[cfg(windows)]
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             Command::OpenBookInExplorer(b, index) => {
                 if let Ok(b) = self.get_book(b) {
                     self.open_book_in_dir(&b, index)?;
@@ -414,8 +416,7 @@ impl<D: IndexableDatabase> App<D> {
         Ok(())
     }
 
-    #[cfg(windows)]
-    /// Opens the book and selects it, in File Explorer on Windows.
+    /// Opens the book and selects it, in File Explorer on Windows, or in Nautilus on Linux.
     /// Other operating systems not currently supported
     ///
     /// # Arguments
@@ -428,6 +429,7 @@ impl<D: IndexableDatabase> App<D> {
     /// or if the command itself fails.
     fn open_book_in_dir(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
         // TODO: This doesn't work when run with install due to relative paths.
+        #[cfg(target_os = "windows")]
         if let Some(path) = App::<D>::get_book_path(book, index) {
             let open_book_path = PathBuf::from(".\\src\\open_book.py").canonicalize()?;
             // TODO: Find a way to do this entirely in Rust
@@ -436,6 +438,13 @@ impl<D: IndexableDatabase> App<D> {
                     open_book_path.display().to_string().as_str(),
                     path.display().to_string().as_str(),
                 ])
+                .spawn()?;
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(path) = App::<D>::get_book_path(book, index) {
+            ProcessCommand::new("nautilus")
+                .arg("--select")
+                .arg(path)
                 .spawn()?;
         }
         Ok(())
