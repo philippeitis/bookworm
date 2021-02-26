@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use itertools::Itertools;
 
+use crate::autocomplete::AutoCompleteError;
 use crate::AutoCompleter;
 
 pub struct EditState {
@@ -83,6 +84,17 @@ pub struct CommandString {
     keep_last: bool,
 }
 
+#[derive(Debug)]
+pub enum CommandStringError {
+    AutoComplete(AutoCompleteError),
+}
+
+impl From<AutoCompleteError> for CommandStringError {
+    fn from(e: AutoCompleteError) -> Self {
+        Self::AutoComplete(e)
+    }
+}
+
 impl CommandString {
     fn vals_to_string(values: &mut dyn Iterator<Item = &(bool, std::string::String)>) -> String {
         values
@@ -151,7 +163,7 @@ impl CommandString {
         self.char_buf.is_empty() && self.autofilled.is_none()
     }
 
-    pub fn refresh_autofill(&mut self) -> Result<(), ()> {
+    pub fn refresh_autofill(&mut self) -> Result<(), CommandStringError> {
         if self.auto_fill.is_some() {
             return Ok(());
         }

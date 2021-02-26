@@ -1,10 +1,21 @@
 use std::path::PathBuf;
 
-use glob::glob;
+use glob::{glob, PatternError};
 
 pub struct AutoCompleter<S> {
     word_len: usize,
     possibilities: GetRing<S>,
+}
+
+#[derive(Debug)]
+pub enum AutoCompleteError {
+    Glob(PatternError),
+}
+
+impl From<glob::PatternError> for AutoCompleteError {
+    fn from(e: PatternError) -> Self {
+        Self::Glob(e)
+    }
 }
 
 impl AutoCompleter<PathBuf> {
@@ -15,21 +26,20 @@ impl AutoCompleter<PathBuf> {
     ///
     /// # Errors
     /// If the glob fails, an error will be returned.
-    pub fn new<S: AsRef<str>>(word: S) -> Result<Self, ()> {
+    pub fn new<S: AsRef<str>>(word: S) -> Result<Self, AutoCompleteError> {
         let word = word.as_ref().to_owned();
         let word_len = word.len();
         let glob_str = word + "*";
 
-        if let Ok(paths) = glob(glob_str.as_str()) {
-            let mut p: Vec<_> = paths.into_iter().filter_map(Result::ok).collect();
-            p.sort();
-            Ok(AutoCompleter {
-                word_len,
-                possibilities: GetRing::new(p),
-            })
-        } else {
-            Err(())
-        }
+        let mut p: Vec<_> = glob(&glob_str)?
+            .into_iter()
+            .filter_map(Result::ok)
+            .collect();
+        p.sort();
+        Ok(AutoCompleter {
+            word_len,
+            possibilities: GetRing::new(p),
+        })
     }
 
     /// Returns the next path which is at least as long as the original,

@@ -20,6 +20,7 @@ use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;
 use crate::parser::{BookIndex, Command};
 use crate::settings::SortSettings;
+use crate::user_input::CommandStringError;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ColumnUpdate {
@@ -37,6 +38,7 @@ pub enum ApplicationError {
     BookView(BookViewError),
     NoBookSelected,
     Err(()),
+    UserInput(CommandStringError),
     #[cfg(feature = "sqlite")]
     SQL(SQLError),
 }
@@ -75,6 +77,12 @@ impl From<BookViewError> for ApplicationError {
             BookViewError::NoBookSelected => ApplicationError::NoBookSelected,
             x => ApplicationError::BookView(x),
         }
+    }
+}
+
+impl From<CommandStringError> for ApplicationError {
+    fn from(e: CommandStringError) -> Self {
+        ApplicationError::UserInput(e)
     }
 }
 
