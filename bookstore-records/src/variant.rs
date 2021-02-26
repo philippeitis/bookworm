@@ -2,12 +2,13 @@ use std::ffi::{OsStr, OsString};
 use std::path;
 use std::str::FromStr;
 
+use isbn2::Isbn;
 use mobi::MobiMetadata;
 use quick_epub::{IdentifierScheme, Metadata as EpubMetadata};
 use serde::{Deserialize, Serialize};
 
 use crate::variant::Identifier::Unknown;
-use crate::{BookError, ISBN};
+use crate::BookError;
 
 fn unravel_author(author: &str) -> String {
     if let Some(i) = author.find(',') {
@@ -21,7 +22,7 @@ fn unravel_author(author: &str) -> String {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum Identifier {
-    ISBN(ISBN),
+    ISBN(Isbn),
     Unknown(String, String),
 }
 
@@ -156,7 +157,7 @@ impl BookVariant {
                     match metadata.identifier {
                         Some((id, value)) => match id {
                             IdentifierScheme::ISBN => {
-                                self.identifier = ISBN::from_str(&value).ok().map(Identifier::ISBN)
+                                self.identifier = Isbn::from_str(&value).ok().map(Identifier::ISBN)
                             }
                             IdentifierScheme::Unknown(id) => {
                                 self.identifier = Some(Unknown(id, value));
@@ -183,7 +184,7 @@ impl BookVariant {
 
                 if self.identifier.is_none() {
                     if let Some(isbn) = doc.isbn() {
-                        if let Ok(isbn) = ISBN::from_str(&isbn) {
+                        if let Ok(isbn) = Isbn::from_str(&isbn) {
                             self.identifier = Some(Identifier::ISBN(isbn));
                         }
                     }
