@@ -1,7 +1,7 @@
 mod ui;
 
 use std::env;
-use std::io::{stdout, Write};
+use std::io::stdout;
 use std::path::PathBuf;
 
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};

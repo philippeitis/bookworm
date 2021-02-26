@@ -1,4 +1,4 @@
-use crossterm::event::{Event, KeyCode, MouseEvent, MouseEventKind};
+use crossterm::event::{Event, KeyCode, MouseEventKind};
 
 use tui::backend::Backend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
