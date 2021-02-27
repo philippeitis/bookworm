@@ -295,7 +295,7 @@ impl<D: IndexableDatabase> App<D> {
             Command::GeneralHelp => {
                 self.active_help_string = Some(GENERAL_HELP);
             }
-            #[cfg(not(windows))]
+            #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
             _ => return Ok(true),
         }
         Ok(true)
