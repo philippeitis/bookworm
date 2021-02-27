@@ -69,6 +69,7 @@ pub(crate) struct AppInterface<D: IndexableDatabase, B: Backend> {
     app: App<D>,
     border_widget: BorderWidget,
     active_view: Box<dyn ViewHandler<D, B>>,
+    ui_updated: bool,
 }
 
 impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
@@ -103,6 +104,7 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                 offset: BlindOffset::new(),
                 book_area: Rect::default(),
             }),
+            ui_updated: false,
         })
     }
 
@@ -120,9 +122,8 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
             if poll(Duration::from_millis(500))? {
                 match self.active_view.handle_input(read()?, &mut self.app)? {
                     ApplicationTask::Quit => return Ok(true),
-                    ApplicationTask::Update => self.app.register_update(),
                     ApplicationTask::SwitchView(view) => {
-                        self.app.register_update();
+                        self.ui_updated = true;
                         let state = self.active_view.take_state();
                         match view {
                             AppView::Columns => {
@@ -153,12 +154,19 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                             }
                         }
                     }
+                    ApplicationTask::UpdateUI => {
+                        self.ui_updated = true;
+                    }
                     ApplicationTask::DoNothing => {}
                 }
                 break;
             }
         }
         Ok(false)
+    }
+
+    fn take_update(&mut self) -> bool {
+        std::mem::replace(&mut self.ui_updated, false)
     }
 
     /// Runs the application - including handling user inputs and refreshing the output.
@@ -174,7 +182,7 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
             self.app.apply_sort()?;
             self.app.update_column_data()?;
 
-            if self.app.take_update() {
+            if self.app.take_update() || self.take_update() {
                 terminal.draw(|f| {
                     self.border_widget.saved = self.app.saved();
                     self.border_widget.render_into_frame(f, f.size());

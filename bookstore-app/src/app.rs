@@ -523,7 +523,7 @@ impl<D: IndexableDatabase> App<D> {
         self.selected_cols.iter().zip(self.column_data.iter())
     }
 
-    pub fn register_update(&mut self) {
+    fn register_update(&mut self) {
         self.updated = true;
     }
 

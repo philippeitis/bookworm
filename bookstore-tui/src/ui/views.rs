@@ -28,8 +28,8 @@ pub(crate) enum AppView {
 pub(crate) enum ApplicationTask {
     Quit,
     DoNothing,
-    Update,
     SwitchView(AppView),
+    UpdateUI,
 }
 
 trait TuiStyle {
@@ -234,6 +234,7 @@ fn inside_rect(rect: Rect, col: u16, row: u16) -> bool {
     col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
 }
 
+// NOTE: This is the only place where app scrolling takes place.
 impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
     fn handle_input(
         &mut self,
@@ -241,7 +242,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
         app: &mut App<D>,
     ) -> Result<ApplicationTask, ApplicationError> {
         match event {
-            Event::Resize(_, _) => return Ok(ApplicationTask::Update),
+            Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Mouse(m) => match (m.kind, m.column, m.row) {
                 (MouseEventKind::ScrollDown, c, r) => {
                     let inverted = self.state.nav_settings.inverted;
@@ -319,7 +320,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                                 // TODO: How should invalid commands be handled?
                             }
                         }
-                        return Ok(ApplicationTask::Update);
+                        return Ok(ApplicationTask::UpdateUI);
                     }
                     KeyCode::Tab | KeyCode::BackTab => {
                         let curr_command = &mut self.state.curr_command;
@@ -369,7 +370,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                 }
             }
         }
-        Ok(ApplicationTask::Update)
+        Ok(ApplicationTask::UpdateUI)
     }
 
     fn take_state(&mut self) -> UIState {
@@ -440,7 +441,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget {
         app: &mut App<D>,
     ) -> Result<ApplicationTask, ApplicationError> {
         match event {
-            Event::Resize(_, _) => return Ok(ApplicationTask::Update),
+            Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             // TODO: Should this behave more like Excel / Google Sheets:
             // Up / down write and go up and down
             // Enter writes and goes down
@@ -521,9 +522,9 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget {
         app.update_value(
             self.state.selected_column,
             self.edit.selected,
-            &self.edit.visible(),
+            self.edit.visible(),
         );
-        Ok(ApplicationTask::Update)
+        Ok(ApplicationTask::UpdateUI)
     }
 
     fn take_state(&mut self) -> UIState {
@@ -569,7 +570,7 @@ impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
         _app: &mut App<D>,
     ) -> Result<ApplicationTask, ApplicationError> {
         match event {
-            Event::Resize(_, _) => return Ok(ApplicationTask::Update),
+            Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Mouse(m) => match m.kind {
                 MouseEventKind::ScrollDown => {
                     if self.state.nav_settings.inverted {
@@ -616,7 +617,7 @@ impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
                 }
             }
         }
-        Ok(ApplicationTask::Update)
+        Ok(ApplicationTask::UpdateUI)
     }
 
     fn take_state(&mut self) -> UIState {
