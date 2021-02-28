@@ -1,3 +1,7 @@
+use std::cell::{Ref, RefCell, RefMut};
+use std::ops::DerefMut;
+use std::rc::Rc;
+
 use crossterm::event::{Event, KeyCode, MouseEventKind};
 
 use tui::backend::Backend;
@@ -9,14 +13,27 @@ use tui::Frame;
 
 use unicode_truncate::UnicodeTruncateStr;
 
+use bookstore_app::settings::Color;
 use bookstore_app::{parse_args, App, ApplicationError, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
-use bookstore_database::IndexableDatabase;
+use bookstore_database::{BookView, IndexableDatabase, NestedBookView, ScrollableBookView};
 
 use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
 use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{book_to_widget_text, CommandWidget, Widget};
-use bookstore_app::settings::Color;
+use bookstore_app::table_view::ColumnUpdate;
+
+macro_rules! state {
+    ($self: ident) => {
+        $self.state.as_ref().borrow()
+    };
+}
+
+macro_rules! state_mut {
+    ($self: ident) => {
+        $self.state.as_ref().borrow_mut()
+    };
+}
 
 #[derive(Copy, Clone)]
 pub(crate) enum AppView {
@@ -101,10 +118,6 @@ pub(crate) trait InputHandler<D: IndexableDatabase> {
         event: Event,
         app_state: &mut App<D>,
     ) -> Result<ApplicationTask, ApplicationError>;
-
-    /// Takes the object's `UIState` to allow use in another
-    /// View.
-    fn take_state(&mut self) -> UIState;
 }
 
 /// Takes `word`, and cuts excess letters to ensure that it fits within
@@ -163,14 +176,24 @@ fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
         .split(chunk)
 }
 
-pub(crate) struct ColumnWidget {
-    pub(crate) state: UIState,
+pub(crate) struct ColumnWidget<D: IndexableDatabase> {
+    pub(crate) state: Rc<RefCell<UIState<D>>>,
     pub(crate) had_selected: bool,
     pub(crate) offset: BlindOffset,
     pub(crate) book_area: Rect,
 }
 
-impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget {
+impl<D: IndexableDatabase> ColumnWidget<D> {
+    fn state(&self) -> Ref<UIState<D>> {
+        self.state.as_ref().borrow()
+    }
+
+    fn state_mut(&mut self) -> RefMut<UIState<D>> {
+        self.state.as_ref().borrow_mut()
+    }
+}
+
+impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget<D> {
     fn allocate_chunk(&self, chunk: Rect) -> Option<usize> {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
@@ -180,8 +203,8 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
         Some(curr_height.saturating_sub(1))
     }
 
-    fn render_into_frame(&mut self, app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
-        let chunk = if let Ok(b) = app.selected_item() {
+    fn render_into_frame(&mut self, _app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
+        let chunk = if let Ok(b) = state!(self).book_view.get_selected_book() {
             self.had_selected = true;
             let hchunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -209,10 +232,15 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
             .split(chunk);
 
         let chunk = vchunks[0];
-        let hchunks = split_chunk_into_columns(chunk, app.num_cols() as u16);
-        let select_style = self.state.style.select_style();
+        let hchunks = split_chunk_into_columns(chunk, self.state().table_view.num_cols() as u16);
+        let select_style = self.state().style.select_style();
 
-        for ((title, data), &chunk) in app.header_col_iter().zip(hchunks.iter()) {
+        for ((title, data), &chunk) in self
+            .state()
+            .table_view
+            .header_col_iter()
+            .zip(hchunks.iter())
+        {
             let width = usize::from(chunk.width).saturating_sub(1);
             let list = List::new(
                 data.iter()
@@ -222,11 +250,11 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
             .block(Block::default().title(Span::from(title.to_string())))
             .highlight_style(select_style);
             let mut selected_row = ListState::default();
-            selected_row.select(app.selected());
+            selected_row.select(self.state().book_view.selected());
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
 
-        CommandWidget::new(&self.state.curr_command).render_into_frame(f, vchunks[1]);
+        CommandWidget::new(&self.state().curr_command).render_into_frame(f, vchunks[1]);
     }
 }
 
@@ -235,7 +263,7 @@ fn inside_rect(rect: Rect, col: u16, row: u16) -> bool {
 }
 
 // NOTE: This is the only place where app scrolling takes place.
-impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
+impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
     fn handle_input(
         &mut self,
         event: Event,
@@ -245,8 +273,8 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Mouse(m) => match (m.kind, m.column, m.row) {
                 (MouseEventKind::ScrollDown, c, r) => {
-                    let inverted = self.state.nav_settings.inverted;
-                    let scroll = self.state.nav_settings.scroll;
+                    let inverted = self.state().nav_settings.inverted;
+                    let scroll = self.state().nav_settings.scroll;
                     if inside_rect(self.book_area, c, r) {
                         if inverted {
                             self.offset.scroll_up(scroll);
@@ -255,15 +283,15 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                         }
                     } else {
                         if inverted {
-                            app.scroll_up(scroll);
+                            self.state_mut().modify_bv(|bv| bv.scroll_up(scroll));
                         } else {
-                            app.scroll_down(scroll);
+                            self.state_mut().modify_bv(|bv| bv.scroll_down(scroll));
                         }
                     }
                 }
                 (MouseEventKind::ScrollUp, c, r) => {
-                    let inverted = self.state.nav_settings.inverted;
-                    let scroll = self.state.nav_settings.scroll;
+                    let inverted = self.state().nav_settings.inverted;
+                    let scroll = self.state().nav_settings.scroll;
                     if inside_rect(self.book_area, c, r) {
                         if inverted {
                             self.offset.scroll_down(scroll);
@@ -272,9 +300,9 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                         }
                     } else {
                         if inverted {
-                            app.scroll_down(scroll);
+                            self.state_mut().modify_bv(|bv| bv.scroll_down(scroll));
                         } else {
-                            app.scroll_up(scroll);
+                            self.state_mut().modify_bv(|bv| bv.scroll_up(scroll));
                         }
                     }
                 }
@@ -286,30 +314,34 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                 // Text input
                 match event.code {
                     KeyCode::F(2) => {
-                        if app.selected().is_some() {
+                        if self.state().book_view.selected().is_some() {
                             return Ok(ApplicationTask::SwitchView(AppView::Edit));
                         }
                     }
                     KeyCode::Backspace => {
-                        self.state.curr_command.pop();
+                        self.state_mut().curr_command.pop();
                     }
                     KeyCode::Char(x) => {
-                        self.state.curr_command.push(x);
+                        self.state_mut().curr_command.push(x);
                     }
                     KeyCode::Enter => {
                         let args: Vec<_> = self
-                            .state
+                            .state()
                             .curr_command
                             .get_values_autofilled()
                             .into_iter()
                             .map(|(_, a)| a)
                             .collect();
 
-                        self.state.curr_command.clear();
+                        self.state_mut().curr_command.clear();
 
                         match parse_args(args) {
                             Ok(command) => {
-                                if !app.run_command(command)? {
+                                let mut state = self.state_mut();
+                                let state_deref = state.deref_mut();
+                                let table_view = &mut state_deref.table_view;
+                                let book_view = &mut state_deref.book_view;
+                                if !app.run_command(command, table_view, book_view)? {
                                     return Ok(ApplicationTask::Quit);
                                 }
                                 if app.has_help_string() {
@@ -323,7 +355,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                         return Ok(ApplicationTask::UpdateUI);
                     }
                     KeyCode::Tab | KeyCode::BackTab => {
-                        let curr_command = &mut self.state.curr_command;
+                        let curr_command = &mut self.state_mut().curr_command;
                         curr_command.refresh_autofill()?;
                         match parse_args(curr_command.get_values().map(|(_, s)| s).collect()) {
                             Ok(command) => match command {
@@ -335,13 +367,16 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                         }
                     }
                     KeyCode::Esc => {
-                        app.deselect();
-                        self.state.curr_command.clear();
-                        app.pop_scope();
+                        self.state_mut().modify_bv(|bv| bv.deselect());
+                        self.state_mut().curr_command.clear();
+                        self.state_mut().modify_bv(|bv| bv.pop_scope());
                     }
                     KeyCode::Delete => {
-                        if self.state.curr_command.is_empty() {
-                            app.remove_selected_book()?;
+                        if self.state().curr_command.is_empty() {
+                            app.remove_selected_book(&mut self.state_mut().book_view)?;
+                            self.state_mut()
+                                .table_view
+                                .set_column_update(ColumnUpdate::Regenerate);
                         } else {
                             // TODO: Add code to delete forwards
                             //  (requires implementing cursor logic)
@@ -349,22 +384,22 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
                     }
                     // Scrolling
                     KeyCode::Up => {
-                        app.select_up();
+                        self.state_mut().modify_bv(|bv| bv.select_up());
                     }
                     KeyCode::Down => {
-                        app.select_down();
+                        self.state_mut().modify_bv(|bv| bv.select_down());
                     }
                     KeyCode::PageDown => {
-                        app.page_down();
+                        self.state_mut().modify_bv(|bv| bv.page_down());
                     }
                     KeyCode::PageUp => {
-                        app.page_up();
+                        self.state_mut().modify_bv(|bv| bv.page_up());
                     }
                     KeyCode::Home => {
-                        app.home();
+                        self.state_mut().modify_bv(|bv| bv.home());
                     }
                     KeyCode::End => {
-                        app.end();
+                        self.state_mut().modify_bv(|bv| bv.end());
                     }
                     _ => return Ok(ApplicationTask::DoNothing),
                 }
@@ -372,18 +407,23 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget {
         }
         Ok(ApplicationTask::UpdateUI)
     }
+}
 
-    fn take_state(&mut self) -> UIState {
-        std::mem::take(&mut self.state)
+pub(crate) struct EditWidget<D: IndexableDatabase> {
+    pub(crate) edit: EditState,
+    pub(crate) state: Rc<RefCell<UIState<D>>>,
+}
+
+impl<D: IndexableDatabase> EditWidget<D> {
+    fn state(&self) -> Ref<UIState<D>> {
+        self.state.as_ref().borrow()
+    }
+    fn state_mut(&mut self) -> RefMut<UIState<D>> {
+        self.state.as_ref().borrow_mut()
     }
 }
 
-pub(crate) struct EditWidget {
-    pub(crate) edit: EditState,
-    pub(crate) state: UIState,
-}
-
-impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget {
+impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<D> {
     fn allocate_chunk(&self, chunk: Rect) -> Option<usize> {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
@@ -394,23 +434,29 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget 
         Some(curr_height.saturating_sub(1))
     }
 
-    fn render_into_frame(&mut self, app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
+    fn render_into_frame(&mut self, _app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        let hchunks = split_chunk_into_columns(chunk, app.num_cols() as u16);
+        let hchunks = split_chunk_into_columns(chunk, self.state().table_view.num_cols() as u16);
 
-        let edit_style = self.state.style.edit_style();
-        let select_style = self.state.style.select_style();
+        let edit_style = self.state().style.edit_style();
+        let select_style = self.state().style.select_style();
 
-        for (i, ((title, data), &chunk)) in app.header_col_iter().zip(hchunks.iter()).enumerate() {
+        for (i, ((title, data), &chunk)) in self
+            .state()
+            .table_view
+            .header_col_iter()
+            .zip(hchunks.iter())
+            .enumerate()
+        {
             let width = usize::from(chunk.width).saturating_sub(1);
             let mut items = Vec::with_capacity(data.len());
             for (j, word) in data.iter().enumerate() {
                 items.push(
-                    if i == self.state.selected_column && j == self.edit.selected {
+                    if i == self.state().selected_column && j == self.edit.selected {
                         ListItem::new(Span::from(word.unicode_truncate_start(width).0))
                     } else {
                         ListItem::new(Span::from(word.unicode_truncate(width).0))
@@ -420,21 +466,21 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget 
 
             let list = List::new(items)
                 .block(Block::default().title(Span::from(title.to_string())))
-                .highlight_style(if i == self.state.selected_column {
+                .highlight_style(if i == self.state().selected_column {
                     edit_style
                 } else {
                     select_style
                 });
 
             let mut selected_row = ListState::default();
-            selected_row.select(app.selected());
+            selected_row.select(self.state().book_view.selected());
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
-        CommandWidget::new(&self.state.curr_command).render_into_frame(f, vchunks[1]);
+        CommandWidget::new(&self.state().curr_command).render_into_frame(f, vchunks[1]);
     }
 }
 
-impl<D: IndexableDatabase> InputHandler<D> for EditWidget {
+impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
     fn handle_input(
         &mut self,
         event: Event,
@@ -458,13 +504,20 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget {
                     }
                     KeyCode::Enter => {
                         if self.edit.started_edit {
-                            app.edit_selected_book_with_column(
-                                self.state.selected_column,
+                            let column = self
+                                .state()
+                                .table_view
+                                .get_column(self.state().selected_column)
+                                .clone();
+                            app.edit_selected_book(
+                                column,
                                 &self.edit.new_value,
+                                &mut state_mut!(self).book_view,
                             )?;
                         } else {
-                            app.update_value(
-                                self.state.selected_column,
+                            let column = self.state().selected_column;
+                            state_mut!(self).table_view.update_value(
+                                column,
                                 self.edit.selected,
                                 &self.edit.orig_value,
                             );
@@ -472,8 +525,9 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget {
                         return Ok(ApplicationTask::SwitchView(AppView::Columns));
                     }
                     KeyCode::Esc => {
-                        app.update_value(
-                            self.state.selected_column,
+                        let column = self.state().selected_column;
+                        state_mut!(self).table_view.update_value(
+                            column,
                             self.edit.selected,
                             &self.edit.orig_value,
                         );
@@ -487,57 +541,80 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget {
                         self.edit.edit_orig();
                     }
                     KeyCode::Down => {
-                        if self.state.selected_column + 1 < app.num_cols() {
+                        if self.state().selected_column + 1 < self.state().table_view.num_cols() {
                             if self.edit.started_edit {
-                                app.edit_selected_book_with_column(
-                                    self.state.selected_column,
+                                app.edit_selected_book(
+                                    self.state()
+                                        .table_view
+                                        .get_column(self.state().selected_column),
                                     &self.edit.new_value,
+                                    &mut state_mut!(self).book_view,
                                 )?;
                             }
-                            self.state.selected_column += 1;
+                            self.state_mut().selected_column += 1;
                         }
-                        self.edit.reset_orig(
-                            app.get_value(self.state.selected_column, self.edit.selected),
-                        );
+                        let value = &self
+                            .state()
+                            .table_view
+                            .header_col_iter()
+                            .nth(self.state().selected_column)
+                            .unwrap()
+                            .1[self.edit.selected]
+                            .clone();
+                        self.edit.reset_orig(value);
                     }
                     KeyCode::Up => {
-                        if self.state.selected_column > 0 {
+                        if self.state().selected_column > 0 {
                             if self.edit.started_edit {
-                                app.edit_selected_book_with_column(
-                                    self.state.selected_column,
+                                app.edit_selected_book(
+                                    self.state()
+                                        .table_view
+                                        .get_column(self.state().selected_column),
                                     &self.edit.new_value,
+                                    &mut state_mut!(self).book_view,
                                 )?;
                             }
-                            self.state.selected_column -= 1;
+                            self.state_mut().selected_column -= 1;
                         }
-                        self.edit.reset_orig(
-                            app.get_value(self.state.selected_column, self.edit.selected),
-                        );
+                        let value = &self
+                            .state()
+                            .table_view
+                            .header_col_iter()
+                            .nth(self.state().selected_column)
+                            .unwrap()
+                            .1[self.edit.selected]
+                            .clone();
+                        self.edit.reset_orig(value);
                     }
                     _ => return Ok(ApplicationTask::DoNothing),
                 }
             }
             _ => return Ok(ApplicationTask::DoNothing),
         }
-        app.update_value(
-            self.state.selected_column,
-            self.edit.selected,
-            self.edit.visible(),
-        );
+        let column = self.state().selected_column;
+        state_mut!(self)
+            .table_view
+            .update_value(column, self.edit.selected, &self.edit.visible());
         Ok(ApplicationTask::UpdateUI)
-    }
-
-    fn take_state(&mut self) -> UIState {
-        std::mem::take(&mut self.state)
     }
 }
 
-pub(crate) struct HelpWidget {
-    pub(crate) state: UIState,
+pub(crate) struct HelpWidget<D: IndexableDatabase> {
+    pub(crate) state: Rc<RefCell<UIState<D>>>,
     pub(crate) text: ScrollableText,
 }
 
-impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget {
+impl<D: IndexableDatabase> HelpWidget<D> {
+    fn state(&self) -> Ref<UIState<D>> {
+        self.state.as_ref().borrow()
+    }
+
+    fn state_mut(&mut self) -> RefMut<UIState<D>> {
+        self.state.as_ref().borrow_mut()
+    }
+}
+
+impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget<D> {
     fn allocate_chunk(&self, _chunk: Rect) -> Option<usize> {
         None
     }
@@ -563,7 +640,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget 
     }
 }
 
-impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
+impl<D: IndexableDatabase> InputHandler<D> for HelpWidget<D> {
     fn handle_input(
         &mut self,
         event: Event,
@@ -573,17 +650,19 @@ impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Mouse(m) => match m.kind {
                 MouseEventKind::ScrollDown => {
-                    if self.state.nav_settings.inverted {
-                        self.text.scroll_up(self.state.nav_settings.scroll)
+                    let scroll = self.state().nav_settings.scroll;
+                    if self.state().nav_settings.inverted {
+                        self.text.scroll_up(scroll)
                     } else {
-                        self.text.scroll_down(self.state.nav_settings.scroll)
+                        self.text.scroll_down(scroll)
                     };
                 }
                 MouseEventKind::ScrollUp => {
-                    if self.state.nav_settings.inverted {
-                        self.text.scroll_down(self.state.nav_settings.scroll)
+                    let scroll = self.state().nav_settings.scroll;
+                    if self.state().nav_settings.inverted {
+                        self.text.scroll_down(scroll)
                     } else {
-                        self.text.scroll_up(self.state.nav_settings.scroll)
+                        self.text.scroll_up(scroll)
                     };
                 }
                 _ => {
@@ -618,10 +697,6 @@ impl<D: IndexableDatabase> InputHandler<D> for HelpWidget {
             }
         }
         Ok(ApplicationTask::UpdateUI)
-    }
-
-    fn take_state(&mut self) -> UIState {
-        std::mem::take(&mut self.state)
     }
 }
 

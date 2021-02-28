@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::Rc;
 use std::time::Duration;
 
 use crossterm::event::{poll, read};
@@ -7,11 +10,11 @@ use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::Terminal;
 
-use bookstore_app::app::ColumnUpdate;
 use bookstore_app::settings::{InterfaceStyle, NavigationSettings, Settings};
+use bookstore_app::table_view::{ColumnUpdate, TableView};
 use bookstore_app::user_input::{CommandString, EditState};
 use bookstore_app::{App, ApplicationError};
-use bookstore_database::{DatabaseError, IndexableDatabase};
+use bookstore_database::{BookView, DatabaseError, IndexableDatabase, SearchableBookView};
 
 use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
 use crate::ui::views::{
@@ -51,28 +54,45 @@ impl From<DatabaseError> for TuiError {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct UIState {
+pub(crate) struct UIState<D: IndexableDatabase> {
     pub(crate) style: InterfaceStyle,
     pub(crate) nav_settings: NavigationSettings,
     pub(crate) curr_command: CommandString,
     pub(crate) selected_column: usize,
+    pub(crate) table_view: TableView,
+    pub(crate) book_view: SearchableBookView<D>,
+}
+
+impl<D: IndexableDatabase> UIState<D> {
+    pub(crate) fn modify_bv(&mut self, f: impl Fn(&mut SearchableBookView<D>) -> bool) -> bool {
+        if f(&mut self.book_view) {
+            self.table_view.set_column_update(ColumnUpdate::Regenerate);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn update_column_data(&mut self) -> Result<(), ApplicationError> {
+        self.table_view.update_column_data(&self.book_view)
+    }
 }
 
 trait ViewHandler<D: IndexableDatabase, B: Backend>: ResizableWidget<D, B> + InputHandler<D> {}
 
-impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for ColumnWidget {}
-impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for EditWidget {}
-impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for HelpWidget {}
+impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for ColumnWidget<D> {}
+impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for EditWidget<D> {}
+impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for HelpWidget<D> {}
 
-pub(crate) struct AppInterface<D: IndexableDatabase, B: Backend> {
+pub(crate) struct AppInterface<'a, D: 'a + IndexableDatabase, B: Backend> {
     app: App<D>,
     border_widget: BorderWidget,
-    active_view: Box<dyn ViewHandler<D, B>>,
+    active_view: Box<dyn ViewHandler<D, B> + 'a>,
+    ui_state: Rc<RefCell<UIState<D>>>,
     ui_updated: bool,
 }
 
-impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
+impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     /// Returns a new database, instantiated with the provided settings and database.
     ///
     /// # Arguments
@@ -86,25 +106,29 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
     pub(crate) fn new<S: AsRef<str>>(
         name: S,
         settings: Settings,
-        mut app: App<D>,
+        app: App<D>,
     ) -> Result<Self, TuiError> {
-        app.set_selected_columns(settings.columns);
-
+        let mut table_view = TableView::new();
+        table_view.set_selected_columns(settings.columns);
+        let state = Rc::new(RefCell::new(UIState {
+            style: settings.interface_style,
+            nav_settings: settings.navigation_settings,
+            curr_command: CommandString::new(),
+            selected_column: 0,
+            table_view,
+            book_view: app.new_book_view(),
+        }));
         Ok(AppInterface {
-            app,
             border_widget: BorderWidget::new(name.as_ref().to_string()),
             active_view: Box::new(ColumnWidget {
-                state: UIState {
-                    style: settings.interface_style,
-                    nav_settings: settings.navigation_settings,
-                    curr_command: CommandString::new(),
-                    selected_column: 0,
-                },
+                state: state.clone(),
                 had_selected: false,
                 offset: BlindOffset::new(),
                 book_area: Rect::default(),
             }),
             ui_updated: false,
+            ui_state: state,
+            app,
         })
     }
 
@@ -124,31 +148,35 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                     ApplicationTask::Quit => return Ok(true),
                     ApplicationTask::SwitchView(view) => {
                         self.ui_updated = true;
-                        let state = self.active_view.take_state();
                         match view {
                             AppView::Columns => {
                                 self.active_view = Box::new(ColumnWidget {
-                                    state,
+                                    state: self.ui_state.clone(),
                                     had_selected: false,
                                     offset: BlindOffset::new(),
                                     book_area: Rect::default(),
                                 })
                             }
                             AppView::Edit => {
-                                if let Some(x) = self.app.selected() {
+                                let state = self.ui_state.deref().borrow();
+                                if let Some(x) = state.book_view.selected() {
+                                    let value = state
+                                        .table_view
+                                        .header_col_iter()
+                                        .nth(state.selected_column)
+                                        .unwrap()
+                                        .1[x]
+                                        .clone();
                                     self.active_view = Box::new(EditWidget {
-                                        edit: EditState::new(
-                                            &self.app.get_value(state.selected_column, x),
-                                            x,
-                                        ),
-                                        state,
-                                    })
+                                        edit: EditState::new(value, x),
+                                        state: self.ui_state.clone(),
+                                    });
                                 }
                             }
                             AppView::Help => {
                                 let help_string = self.app.take_help_string();
                                 self.active_view = Box::new(HelpWidget {
-                                    state,
+                                    state: self.ui_state.clone(),
                                     text: ScrollableText::new(help_string),
                                 })
                             }
@@ -179,8 +207,11 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
     /// This function will return an error if running the program fails for any reason.
     pub(crate) fn run(&mut self, terminal: &mut Terminal<B>) -> Result<(), TuiError> {
         loop {
-            self.app.apply_sort()?;
-            self.app.update_column_data()?;
+            {
+                let mut state = self.ui_state.borrow_mut();
+                self.app.apply_sort(&mut state.book_view)?;
+                state.update_column_data()?;
+            }
 
             if self.app.take_update() || self.take_update() {
                 terminal.draw(|f| {
@@ -198,9 +229,10 @@ impl<D: IndexableDatabase, B: Backend> AppInterface<D, B> {
                     };
 
                     if let Some(chunk_size) = self.active_view.allocate_chunk(chunk) {
-                        if self.app.refresh_window_size(chunk_size) {
-                            self.app.set_column_update(ColumnUpdate::Regenerate);
-                            let _ = self.app.update_column_data();
+                        let mut state = self.ui_state.borrow_mut();
+                        if state.book_view.refresh_window_size(chunk_size) {
+                            state.table_view.set_column_update(ColumnUpdate::Regenerate);
+                            let _ = state.update_column_data();
                         }
                     }
 

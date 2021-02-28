@@ -4,6 +4,7 @@ pub mod autocomplete;
 mod help_strings;
 pub mod parser;
 pub mod settings;
+pub mod table_view;
 pub mod user_input;
 
 pub use app::{App, ApplicationError};

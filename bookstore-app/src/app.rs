@@ -1,36 +1,30 @@
+use std::cell::{Ref, RefCell, RefMut};
+use std::ops::DerefMut;
 use std::path::Path;
 #[cfg(target_os = "windows")]
 use std::path::PathBuf;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Command as ProcessCommand;
+use std::rc::Rc;
 
 use rayon::prelude::*;
 #[cfg(feature = "sqlite")]
 use sqlx::Error as SQLError;
 use unicase::UniCase;
 
+use bookstore_database::bookview::BookViewIndex;
 use bookstore_database::{
     bookview::BookViewError, AppDatabase, BookView, DatabaseError, IndexableDatabase,
-    NestedBookView, ScrollableBookView, SearchableBookView,
+    NestedBookView, SearchableBookView,
 };
-use bookstore_records::{
-    book::{ColumnIdentifier, RawBook},
-    Book, BookError,
-};
+use bookstore_records::{book::RawBook, Book, BookError};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;
 use crate::parser::{BookIndex, Command};
 use crate::settings::SortSettings;
+use crate::table_view::{ColumnUpdate, TableView};
 use crate::user_input::CommandStringError;
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum ColumnUpdate {
-    Regenerate,
-    AddColumn(UniCase<String>),
-    RemoveColumn(UniCase<String>),
-    NoUpdate,
-}
 
 #[derive(Debug)]
 pub enum ApplicationError {
@@ -131,62 +125,87 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::
 
 pub struct App<D: AppDatabase> {
     // Application data
-    bv: SearchableBookView<D>,
-    selected_cols: Vec<UniCase<String>>,
-    column_data: Vec<Vec<String>>,
+    db: Rc<RefCell<D>>,
     active_help_string: Option<&'static str>,
     // Actions to run on data
     sort_settings: SortSettings,
-    column_update: ColumnUpdate,
     updated: bool,
 }
 
 impl<D: IndexableDatabase> App<D> {
     pub fn new(db: D) -> Self {
         App {
-            bv: SearchableBookView::new(db),
-            selected_cols: vec![],
+            db: Rc::new(RefCell::new(db)),
             sort_settings: SortSettings::default(),
             updated: true,
-            column_update: ColumnUpdate::Regenerate,
-            column_data: vec![],
             active_help_string: None,
         }
     }
 
-    pub fn update_value<S: AsRef<str>>(&mut self, col: usize, row: usize, new_value: S) {
-        self.register_update();
-        self.column_data[col][row] = new_value.as_ref().to_owned();
+    pub fn new_book_view(&self) -> SearchableBookView<D> {
+        SearchableBookView::new(self.db.clone())
     }
 
-    pub fn get_value(&self, col: usize, row: usize) -> &str {
-        &self.column_data[col][row]
+    fn db(&self) -> Ref<D> {
+        self.db.as_ref().borrow()
     }
 
-    pub fn selected_item(&self) -> Result<Book, ApplicationError> {
-        Ok(self.bv.get_selected_book()?)
+    fn db_mut(&mut self) -> RefMut<D> {
+        self.db.as_ref().borrow_mut()
     }
 
-    pub fn edit_selected_book_with_column<S: AsRef<str>>(
+    pub fn edit_selected_book<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        column: usize,
-        new_value: S,
+        column: S0,
+        new_value: S1,
+        book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError> {
-        self.bv
-            .edit_selected_book(&self.selected_cols[column], new_value)?;
+        match book_view.edit_selected_book(&column, &new_value)? {
+            BookViewIndex::ID(id) => {
+                self.db_mut().edit_book_with_id(id, column, new_value)?;
+            }
+            BookViewIndex::Index(index) => {
+                self.db_mut().edit_book_indexed(index, column, new_value)?;
+            }
+        }
         self.register_update();
         Ok(())
     }
 
-    pub fn remove_selected_book(&mut self) -> Result<(), ApplicationError> {
-        self.bv.remove_selected_book()?;
+    pub fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
+        &mut self,
+        id: u32,
+        column: S0,
+        new_value: S1,
+        book_view: &mut SearchableBookView<D>,
+    ) -> Result<(), ApplicationError> {
+        book_view.edit_book_with_id(id, &column, &new_value)?;
+        self.db_mut().edit_book_with_id(id, &column, &new_value)?;
         self.register_update();
-        self.column_update = ColumnUpdate::Regenerate;
         Ok(())
     }
 
-    pub fn selected(&self) -> Option<usize> {
-        self.bv.selected()
+    pub fn remove_selected_book(
+        &mut self,
+        book_view: &mut SearchableBookView<D>,
+    ) -> Result<(), ApplicationError> {
+        match book_view.remove_selected_book()? {
+            BookViewIndex::ID(id) => self.db_mut().remove_book(id)?,
+            BookViewIndex::Index(index) => self.db_mut().remove_book_indexed(index)?,
+        }
+        self.register_update();
+        Ok(())
+    }
+
+    pub fn remove_book(
+        &mut self,
+        id: u32,
+        book_view: &mut SearchableBookView<D>,
+    ) -> Result<(), ApplicationError> {
+        book_view.remove_book(id)?;
+        self.db_mut().remove_book(id);
+        self.register_update();
+        Ok(())
     }
 
     /// Gets the book specified by the `BookIndex`,
@@ -195,95 +214,103 @@ impl<D: IndexableDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` b ` - A `BookIndex` to get a book by ID or by current selection.
-    pub fn get_book(&self, b: BookIndex) -> Result<Book, ApplicationError> {
+    pub fn get_book(b: BookIndex, bv: &SearchableBookView<D>) -> Result<Book, ApplicationError> {
         match b {
-            BookIndex::Selected => Ok(self.bv.get_selected_book()?),
-            BookIndex::BookID(id) => Ok(self.bv.get_book(id)?),
+            BookIndex::Selected => Ok(bv.get_selected_book()?),
+            BookIndex::BookID(id) => Ok(bv.get_book(id)?),
         }
     }
 
+    fn write<B>(&mut self, f: impl Fn(&mut D) -> B) -> B {
+        let v = f(self.db_mut().deref_mut());
+        self.register_update();
+        v
+    }
+
+    // Used in main.rs, ColumnWidget::handle_input
     /// Runs the command currently in the current command string. On success, returns a bool
     /// indicating whether to continue or not.
     ///
     /// # Arguments
     ///
     /// * ` command ` - The command to run.
-    pub fn run_command(&mut self, command: parser::Command) -> Result<bool, ApplicationError> {
+    pub fn run_command(
+        &mut self,
+        command: parser::Command,
+        table: &mut TableView,
+        book_view: &mut SearchableBookView<D>,
+    ) -> Result<bool, ApplicationError> {
         match command {
             Command::DeleteBook(b) => {
                 match b {
-                    BookIndex::Selected => self.bv.remove_selected_book()?,
-                    BookIndex::BookID(id) => self.bv.remove_book(id)?,
+                    BookIndex::Selected => self.remove_selected_book(book_view)?,
+                    // TODO: Should this also do bv's books?
+                    BookIndex::BookID(id) => self.remove_book(id, book_view)?,
                 };
-                self.column_update = ColumnUpdate::Regenerate;
+                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::DeleteAll => {
-                self.bv.write(|db| db.clear())?;
-                self.column_update = ColumnUpdate::Regenerate;
+                self.write(|db| db.clear())?;
+                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::EditBook(b, field, new_value) => {
                 match b {
-                    BookIndex::Selected => self.bv.edit_selected_book(field, new_value)?,
-                    BookIndex::BookID(id) => self
-                        .bv
-                        .write(|db| db.edit_book_with_id(id, &field, &new_value))?,
+                    BookIndex::Selected => self.edit_selected_book(field, new_value, book_view)?,
+                    BookIndex::BookID(id) => {
+                        self.edit_book_with_id(id, &field, &new_value, book_view)?
+                    }
                 };
                 self.sort_settings.is_sorted = false;
-                self.column_update = ColumnUpdate::Regenerate;
+                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::AddBookFromFile(f) => {
-                self.bv
-                    .write(|db| db.insert_book(RawBook::generate_from_file(&f)?))?;
-                self.updated = true;
+                self.write(|db| db.insert_book(RawBook::generate_from_file(&f)?))?;
                 self.sort_settings.is_sorted = false;
-                self.column_update = ColumnUpdate::Regenerate;
+                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::AddBooksFromDir(dir, depth) => {
                 // TODO: Handle failed reads.
-                self.bv
-                    .write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
-                self.updated = true;
+                self.write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
                 self.sort_settings.is_sorted = false;
-                self.column_update = ColumnUpdate::Regenerate;
+                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::AddColumn(column) => {
-                self.column_update = ColumnUpdate::AddColumn(UniCase::new(column));
+                table.set_column_update(ColumnUpdate::AddColumn(UniCase::new(column)));
             }
             Command::RemoveColumn(column) => {
-                self.column_update = ColumnUpdate::RemoveColumn(UniCase::new(column));
+                table.set_column_update(ColumnUpdate::RemoveColumn(UniCase::new(column)));
             }
             Command::SortColumn(column, rev) => {
-                self.update_selected_column(UniCase::new(column), rev);
+                self.update_selected_column(UniCase::new(column), rev, table);
             }
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             Command::OpenBookInApp(b, index) => {
-                if let Ok(b) = self.get_book(b) {
+                if let Ok(b) = Self::get_book(b, book_view) {
                     self.open_book(&b, index)?;
                 }
             }
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             Command::OpenBookInExplorer(b, index) => {
-                if let Ok(b) = self.get_book(b) {
+                if let Ok(b) = Self::get_book(b, book_view) {
                     self.open_book_in_dir(&b, index)?;
                 }
             }
             Command::FindMatches(search) => {
-                self.bv.push_scope(search)?;
-                self.updated = true;
-                self.column_update = ColumnUpdate::Regenerate;
+                book_view.push_scope(search)?;
+                self.register_update();
+                table.set_column_update(ColumnUpdate::Regenerate);
             }
-            Command::Write => self.bv.write(|d| d.save())?,
+            Command::Write => self.write(|d| d.save())?,
             // TODO: A warning pop-up when user is about to exit
             //  with unsaved changes.
             Command::Quit => return Ok(false),
             Command::WriteAndQuit => {
-                self.bv.write(|d| d.save())?;
+                self.write(|d| d.save())?;
                 return Ok(false);
             }
             Command::TryMergeAllBooks => {
-                self.bv.write(|db| db.merge_similar())?;
-                self.register_update();
-                self.column_update = ColumnUpdate::Regenerate;
+                self.write(|db| db.merge_similar())?;
+                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::Help(flag) => {
                 if let Some(s) = help_strings(&flag) {
@@ -298,6 +325,7 @@ impl<D: IndexableDatabase> App<D> {
             #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
             _ => return Ok(true),
         }
+        book_view.refresh_db_size();
         Ok(true)
     }
 
@@ -307,72 +335,23 @@ impl<D: IndexableDatabase> App<D> {
     ///
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
-    fn update_selected_column(&mut self, mut word: UniCase<String>, reverse: bool) {
+    fn update_selected_column(
+        &mut self,
+        mut word: UniCase<String>,
+        reverse: bool,
+        table: &mut TableView,
+    ) {
         match word.to_ascii_lowercase().as_str() {
             "author" => word = UniCase::from(String::from("authors")),
             _ => {}
         }
 
-        if self.selected_cols.contains(&word) {
+        if table.selected_cols().contains(&word) {
             self.sort_settings.column = word;
             self.sort_settings.is_sorted = false;
             self.sort_settings.reverse = reverse;
-            self.column_update = ColumnUpdate::Regenerate;
+            table.set_column_update(ColumnUpdate::Regenerate);
         }
-    }
-
-    /// Updates the table data if a change occurs.
-    pub fn update_column_data(&mut self) -> Result<(), ApplicationError> {
-        match &self.column_update {
-            ColumnUpdate::Regenerate => {
-                self.updated = true;
-                self.column_data =
-                    vec![Vec::with_capacity(self.bv.window_size()); self.selected_cols.len()];
-
-                if self.bv.window_size() == 0 {
-                    self.column_update = ColumnUpdate::NoUpdate;
-                    return Ok(());
-                }
-
-                let cols = self
-                    .selected_cols
-                    .iter()
-                    .map(|col| ColumnIdentifier::from(col.as_str()))
-                    .collect::<Vec<_>>();
-
-                for b in self.bv.get_books_cursored()? {
-                    for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
-                        column.push(b.get_column_or(&col, ""));
-                    }
-                }
-            }
-            ColumnUpdate::AddColumn(word) => {
-                self.updated = true;
-                if self.bv.inner().has_column(&word) && !self.selected_cols.contains(&word) {
-                    self.selected_cols.push(word.clone());
-                    let column_string = ColumnIdentifier::from(word.as_str());
-                    self.column_data.push(
-                        self.bv
-                            .get_books_cursored()?
-                            .iter()
-                            .map(|book| book.get_column_or(&column_string, ""))
-                            .collect(),
-                    );
-                }
-            }
-            ColumnUpdate::RemoveColumn(word) => {
-                self.updated = true;
-                let index = self.selected_cols.iter().position(|x| x.eq(&word));
-                if let Some(index) = index {
-                    self.selected_cols.remove(index);
-                    self.column_data.remove(index);
-                }
-            }
-            ColumnUpdate::NoUpdate => {}
-        }
-
-        self.column_update = ColumnUpdate::NoUpdate;
-        Ok(())
     }
 
     /// Returns the first available path amongst the variants of the book, or None if no such
@@ -450,77 +429,22 @@ impl<D: IndexableDatabase> App<D> {
         Ok(())
     }
 
-    fn modify_db(&mut self, f: impl Fn(&mut SearchableBookView<D>) -> bool) -> bool {
-        if f(&mut self.bv) {
-            self.register_update();
-            self.column_update = ColumnUpdate::Regenerate;
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn scroll_up(&mut self, scroll: usize) -> bool {
-        self.modify_db(|db| db.scroll_up(scroll))
-    }
-
-    pub fn scroll_down(&mut self, scroll: usize) -> bool {
-        self.modify_db(|db| db.scroll_down(scroll))
-    }
-
-    pub fn deselect(&mut self) -> bool {
-        self.modify_db(|db| db.deselect())
-    }
-
-    pub fn select_up(&mut self) -> bool {
-        self.modify_db(|db| db.select_up())
-    }
-
-    pub fn select_down(&mut self) -> bool {
-        self.modify_db(|db| db.select_down())
-    }
-
-    pub fn page_up(&mut self) -> bool {
-        self.modify_db(|db| db.page_up())
-    }
-
-    pub fn page_down(&mut self) -> bool {
-        self.modify_db(|db| db.page_down())
-    }
-
-    pub fn home(&mut self) -> bool {
-        self.modify_db(|db| db.home())
-    }
-
-    pub fn end(&mut self) -> bool {
-        self.modify_db(|db| db.end())
-    }
-
-    pub fn apply_sort(&mut self) -> Result<(), DatabaseError> {
+    // used in AppInterface::run
+    pub fn apply_sort(
+        &mut self,
+        book_view: &mut SearchableBookView<D>,
+    ) -> Result<(), DatabaseError> {
         if !self.sort_settings.is_sorted {
-            self.bv.sort_by_column(
-                self.sort_settings.column.as_str(),
-                self.sort_settings.reverse,
-            )?;
+            let col = self.sort_settings.column.as_str();
+            let reverse = self.sort_settings.reverse;
+            self.db
+                .as_ref()
+                .borrow_mut()
+                .sort_books_by_col(col, reverse)?;
+            book_view.sort_by_column(col, reverse)?;
             self.sort_settings.is_sorted = true;
         }
         Ok(())
-    }
-
-    pub fn num_cols(&self) -> usize {
-        self.selected_cols.len()
-    }
-
-    pub fn refresh_window_size(&mut self, size: usize) -> bool {
-        self.bv.refresh_window_size(size)
-    }
-
-    pub fn set_column_update(&mut self, column_update: ColumnUpdate) {
-        self.column_update = column_update;
-    }
-
-    pub fn header_col_iter(&self) -> impl Iterator<Item = (&UniCase<String>, &Vec<String>)> {
-        self.selected_cols.iter().zip(self.column_data.iter())
     }
 
     fn register_update(&mut self) {
@@ -531,17 +455,8 @@ impl<D: IndexableDatabase> App<D> {
         std::mem::replace(&mut self.updated, false)
     }
 
-    pub fn set_selected_columns(&mut self, cols: Vec<String>) {
-        self.selected_cols = cols.into_iter().map(UniCase::new).collect();
-        self.column_data = vec![vec![]; self.selected_cols.len()];
-    }
-
     pub fn saved(&mut self) -> bool {
-        self.bv.inner().saved()
-    }
-
-    pub fn pop_scope(&mut self) -> bool {
-        self.modify_db(|db| db.pop_scope())
+        self.db().saved()
     }
 
     pub fn has_help_string(&self) -> bool {

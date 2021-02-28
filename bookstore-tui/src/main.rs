@@ -12,6 +12,7 @@ use clap::Clap;
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
+use bookstore_app::table_view::TableView;
 use bookstore_app::{parse_args, App, Settings};
 use bookstore_database::{AppDatabase, Database};
 
@@ -47,7 +48,8 @@ fn main() -> Result<(), TuiError> {
     let db = Database::open(opts.database)?;
 
     let mut app = App::new(db);
-
+    let mut placeholder_table_view = TableView::new();
+    let mut book_view = app.new_book_view();
     if !command.is_empty() {
         for command in command.split(|v| v == "--") {
             if let Ok(command) = parse_args(command.to_owned()) {
@@ -58,7 +60,7 @@ fn main() -> Result<(), TuiError> {
                     );
                     return Ok(());
                 }
-                if !app.run_command(command)? {
+                if !app.run_command(command, &mut placeholder_table_view, &mut book_view)? {
                     return Ok(());
                 }
                 if app.has_help_string() {
