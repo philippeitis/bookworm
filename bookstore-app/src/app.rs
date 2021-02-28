@@ -25,6 +25,13 @@ use crate::parser::{BookIndex, Command};
 use crate::settings::SortSettings;
 use crate::table_view::{ColumnUpdate, TableView};
 use crate::user_input::CommandStringError;
+use std::sync::{Arc, RwLock};
+
+macro_rules! book {
+    ($book: ident) => {
+        $book.as_ref().read().unwrap()
+    };
+}
 
 #[derive(Debug)]
 pub enum ApplicationError {
@@ -160,14 +167,13 @@ impl<D: IndexableDatabase> App<D> {
         new_value: S1,
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError> {
-        match book_view.edit_selected_book(&column, &new_value)? {
-            BookViewIndex::ID(id) => {
-                self.db_mut().edit_book_with_id(id, column, new_value)?;
-            }
-            BookViewIndex::Index(index) => {
-                self.db_mut().edit_book_indexed(index, column, new_value)?;
-            }
-        }
+        let id = book_view
+            .get_selected_book()?
+            .as_ref()
+            .read()
+            .unwrap()
+            .get_id();
+        self.db_mut().edit_book_with_id(id, column, new_value)?;
         self.register_update();
         Ok(())
     }
@@ -177,9 +183,7 @@ impl<D: IndexableDatabase> App<D> {
         id: u32,
         column: S0,
         new_value: S1,
-        book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError> {
-        book_view.edit_book_with_id(id, &column, &new_value)?;
         self.db_mut().edit_book_with_id(id, &column, &new_value)?;
         self.register_update();
         Ok(())
@@ -202,8 +206,8 @@ impl<D: IndexableDatabase> App<D> {
         id: u32,
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError> {
-        book_view.remove_book(id)?;
-        self.db_mut().remove_book(id);
+        book_view.remove_book(id);
+        self.db_mut().remove_book(id)?;
         self.register_update();
         Ok(())
     }
@@ -214,7 +218,10 @@ impl<D: IndexableDatabase> App<D> {
     /// # Arguments
     ///
     /// * ` b ` - A `BookIndex` to get a book by ID or by current selection.
-    pub fn get_book(b: BookIndex, bv: &SearchableBookView<D>) -> Result<Book, ApplicationError> {
+    pub fn get_book(
+        b: BookIndex,
+        bv: &SearchableBookView<D>,
+    ) -> Result<Arc<RwLock<Book>>, ApplicationError> {
         match b {
             BookIndex::Selected => Ok(bv.get_selected_book()?),
             BookIndex::BookID(id) => Ok(bv.get_book(id)?),
@@ -256,9 +263,7 @@ impl<D: IndexableDatabase> App<D> {
             Command::EditBook(b, field, new_value) => {
                 match b {
                     BookIndex::Selected => self.edit_selected_book(field, new_value, book_view)?,
-                    BookIndex::BookID(id) => {
-                        self.edit_book_with_id(id, &field, &new_value, book_view)?
-                    }
+                    BookIndex::BookID(id) => self.edit_book_with_id(id, &field, &new_value)?,
                 };
                 self.sort_settings.is_sorted = false;
                 table.set_column_update(ColumnUpdate::Regenerate);
@@ -286,13 +291,13 @@ impl<D: IndexableDatabase> App<D> {
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             Command::OpenBookInApp(b, index) => {
                 if let Ok(b) = Self::get_book(b, book_view) {
-                    self.open_book(&b, index)?;
+                    self.open_book(&book!(b), index)?;
                 }
             }
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             Command::OpenBookInExplorer(b, index) => {
                 if let Ok(b) = Self::get_book(b, book_view) {
-                    self.open_book_in_dir(&b, index)?;
+                    self.open_book_in_dir(&book!(b), index)?;
                 }
             }
             Command::FindMatches(search) => {

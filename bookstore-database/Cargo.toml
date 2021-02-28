@@ -14,7 +14,7 @@ sublime_fuzzy = "0.6.0"
 indexmap = { version = "1.6.1", default-features = false, features = ['serde-1', 'rayon'] }
 regex = "1.4.2"
 rustbreak = { version = "2", features = ["ron_enc"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 
 google-drive3 = { version = "*", optional = true }
 hyper = { version = "^0.10", optional = true }

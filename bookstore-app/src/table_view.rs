@@ -5,6 +5,12 @@ use bookstore_records::book::ColumnIdentifier;
 
 use crate::ApplicationError;
 
+macro_rules! book {
+    ($book: ident) => {
+        $book.as_ref().read().unwrap()
+    };
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ColumnUpdate {
     Regenerate,
@@ -69,7 +75,7 @@ impl TableView {
 
                 for b in bv.get_books_cursored()? {
                     for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
-                        column.push(b.get_column_or(&col, ""));
+                        column.push(book!(b).get_column_or(&col, ""));
                     }
                 }
             }
@@ -80,7 +86,7 @@ impl TableView {
                     self.column_data.push(
                         bv.get_books_cursored()?
                             .iter()
-                            .map(|book| book.get_column_or(&column_string, ""))
+                            .map(|book| book!(book).get_column_or(&column_string, ""))
                             .collect(),
                     );
                 }

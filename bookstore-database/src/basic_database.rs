@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::{Bound, RangeBounds};
 use std::path;
+use std::sync::{Arc, RwLock};
 
 use indexmap::IndexMap;
 use regex::{Error as RegexError, Regex};
@@ -11,11 +12,24 @@ use sqlx::Error as SQLError;
 use sublime_fuzzy::best_match;
 use unicase::UniCase;
 
-use crate::search::Search;
 use bookstore_records::{
     book::{ColumnIdentifier, RawBook},
     Book, BookError,
 };
+
+use crate::search::Search;
+
+macro_rules! book {
+    ($book: ident) => {
+        $book.as_ref().read().unwrap()
+    };
+}
+
+macro_rules! book_mut {
+    ($book: ident) => {
+        $book.as_ref().write().unwrap()
+    };
+}
 
 #[derive(Debug)]
 pub enum DatabaseError {
@@ -65,7 +79,7 @@ impl From<SQLError> for DatabaseError {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub(crate) struct BookMap {
     max_id: u32,
-    books: IndexMap<u32, Book>,
+    books: IndexMap<u32, Arc<RwLock<Book>>>,
 }
 
 impl BookMap {
@@ -182,7 +196,7 @@ pub trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails or no book is found
     /// with the given ID.
-    fn get_book(&self, id: u32) -> Result<Book, DatabaseError>;
+    fn get_book(&self, id: u32) -> Result<Arc<RwLock<Book>>, DatabaseError>;
 
     /// Finds and returns all books with the given IDs. If a book with a given ID does not exist,
     /// None is returned for that particular ID.
@@ -192,14 +206,14 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Book>>, DatabaseError>;
+    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError>;
 
     /// Returns a copy of every book in the database. If a database error occurs while reading,
     /// the error is returned.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError>;
+    fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError>;
 
     /// Returns a list of columns that exist for at least one book in the database.
     fn get_available_columns(&self) -> &HashSet<UniCase<String>>;
@@ -244,7 +258,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn find_matches(&self, search: Search) -> Result<Vec<Book>, DatabaseError>;
+    fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError>;
 
     // TODO: push this into bookview?
     /// Sorts books by comparing the specified column.
@@ -277,7 +291,7 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     fn get_books_indexed(
         &self,
         indices: impl RangeBounds<usize>,
-    ) -> Result<Vec<Book>, DatabaseError>;
+    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError>;
 
     /// Get the book at the current index, respecting the current ordering.
     ///
@@ -287,7 +301,7 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     /// # Errors
     /// This function will return an error if the database fails or the given index does not
     /// exist.
-    fn get_book_indexed(&self, index: usize) -> Result<Book, DatabaseError>;
+    fn get_book_indexed(&self, index: usize) -> Result<Arc<RwLock<Book>>, DatabaseError>;
 
     /// Remove the book at the current index, respecting the current ordering.
     ///
@@ -328,21 +342,22 @@ impl AppDatabase for BasicDatabase {
             let mut c = HashSet::new();
 
             for &col in &["title", "authors", "series", "id", "description"] {
-                c.insert(col);
+                c.insert(col.to_owned());
             }
 
             for book in db.books.values() {
-                if let Some(e) = book.get_extended_columns() {
+                let book = book!(book);
+                let columns = book.get_extended_columns();
+                if let Some(e) = columns {
                     for key in e.keys() {
-                        c.insert(key);
+                        if !c.contains(key) {
+                            c.insert(key.to_owned());
+                        }
                     }
                 }
             }
 
-            (
-                c.into_iter().map(|c| UniCase::new(c.to_owned())).collect(),
-                db.books.len(),
-            )
+            (c.into_iter().map(UniCase::new).collect(), db.books.len())
         })?;
 
         Ok(BasicDatabase {
@@ -363,7 +378,7 @@ impl AppDatabase for BasicDatabase {
         let (id, len) = self.backend.write(|db| {
             let id = db.new_id();
             let book = Book::from_raw_book(book, id);
-            db.books.insert(id, book);
+            db.books.insert(id, Arc::new(RwLock::new(book)));
             (id, db.books.len())
         })?;
 
@@ -380,7 +395,7 @@ impl AppDatabase for BasicDatabase {
             books.into_iter().for_each(|book| {
                 let id = db.new_id();
                 let book = Book::from_raw_book(book, id);
-                db.books.insert(id, book);
+                db.books.insert(id, Arc::new(RwLock::new(book)));
                 ids.push(id);
             });
             db.books.len()
@@ -425,21 +440,21 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn get_book(&self, id: u32) -> Result<Book, DatabaseError> {
+    fn get_book(&self, id: u32) -> Result<Arc<RwLock<Book>>, DatabaseError> {
         self.backend.read(|db| match db.books.get(&id) {
             None => Err(DatabaseError::BookNotFound(id)),
             Some(book) => Ok(book.clone()),
         })?
     }
 
-    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Book>>, DatabaseError> {
+    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError> {
         Ok(self
             .backend
             .read(|db| ids.iter().map(|id| db.books.get(id).cloned()).collect())?)
     }
 
     // TODO: Make this return a Vec of references?
-    fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError> {
+    fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
         Ok(self
             .backend
             .read(|db| db.books.values().cloned().collect())?)
@@ -461,7 +476,7 @@ impl AppDatabase for BasicDatabase {
     ) -> Result<(), DatabaseError> {
         self.backend.write(|db| match db.books.get_mut(&id) {
             None => Err(DatabaseError::BookNotFound(id)),
-            Some(book) => Ok(book.set_column(&column.as_ref().into(), new_value)?),
+            Some(book) => Ok(book_mut!(book).set_column(&column.as_ref().into(), new_value)?),
         })??;
         self.saved = false;
         self.cols.insert(UniCase::new(column.as_ref().to_owned()));
@@ -474,6 +489,7 @@ impl AppDatabase for BasicDatabase {
             let mut merges = vec![];
             let dummy_id = db.borrow_id();
             for book in db.books.values() {
+                let book = book!(book);
                 if let Some(title) = book.get_title() {
                     if let Some(authors) = book.get_authors() {
                         let a: String = authors.join(", ").to_ascii_lowercase();
@@ -487,35 +503,35 @@ impl AppDatabase for BasicDatabase {
                 }
             }
 
+            let dummy = Arc::new(RwLock::new(Book::with_id(dummy_id)));
             for (b1, b2_id) in merges.iter() {
                 // Dummy allows for O(n) time book removal while maintaining sort
                 // and getting owned copy of book.
-                let dummy = Book::with_id(dummy_id);
-                let b2 = db.books.insert(*b2_id, dummy);
+                let b2 = db.books.insert(*b2_id, dummy.clone());
                 if let Some(b1) = db.books.get_mut(b1) {
                     if let Some(b2) = b2 {
-                        b1.merge_mut(b2);
+                        book_mut!(b1).merge_mut(&book!(b2));
                     }
                 }
             }
-            db.books.retain(|_, book| book.get_id() != dummy_id);
+            db.books.retain(|_, book| book!(book).get_id() != dummy_id);
             db.books.len()
         })?;
         self.saved = false;
         Ok(())
     }
 
-    fn find_matches(&self, search: Search) -> Result<Vec<Book>, DatabaseError> {
+    fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
         Ok(self
             .backend
-            .read(|db| -> Result<Vec<Book>, DatabaseError> {
+            .read(|db| -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
                 let mut results = vec![];
                 match search {
                     Search::Regex(column, search) => {
                         let col = ColumnIdentifier::from(column);
                         let matcher = Regex::new(search.as_str())?;
                         for (_, book) in db.books.iter() {
-                            if matcher.is_match(&book.get_column_or(&col, "")) {
+                            if matcher.is_match(&book!(book).get_column_or(&col, "")) {
                                 results.push(book.clone());
                             }
                         }
@@ -523,7 +539,7 @@ impl AppDatabase for BasicDatabase {
                     Search::CaseSensitive(column, search) => {
                         let col = ColumnIdentifier::from(column);
                         for (_, book) in db.books.iter() {
-                            if best_match(&search, &book.get_column_or(&col, "")).is_some() {
+                            if best_match(&search, &book!(book).get_column_or(&col, "")).is_some() {
                                 results.push(book.clone());
                             }
                         }
@@ -532,7 +548,9 @@ impl AppDatabase for BasicDatabase {
                         let col = ColumnIdentifier::from(column);
                         let insensitive = search.to_ascii_lowercase();
                         for (_, book) in db.books.iter() {
-                            if best_match(&insensitive, &book.get_column_or(&col, "")).is_some() {
+                            if best_match(&insensitive, &book!(book).get_column_or(&col, ""))
+                                .is_some()
+                            {
                                 results.push(book.clone());
                             }
                         }
@@ -550,14 +568,18 @@ impl AppDatabase for BasicDatabase {
             // parallel threads are slower for small sorts.
             if db.books.len() < 2500 {
                 if reverse {
-                    db.books.sort_by(|_, a, _, b| b.cmp_column(a, &col))
+                    db.books
+                        .sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
                 } else {
-                    db.books.sort_by(|_, a, _, b| a.cmp_column(b, &col))
+                    db.books
+                        .sort_by(|_, a, _, b| book!(a).cmp_column(&book!(b), &col))
                 }
             } else if reverse {
-                db.books.par_sort_by(|_, a, _, b| b.cmp_column(a, &col))
+                db.books
+                    .par_sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
             } else {
-                db.books.par_sort_by(|_, a, _, b| a.cmp_column(b, &col))
+                db.books
+                    .par_sort_by(|_, a, _, b| book!(a).cmp_column(&book!(b), &col))
             }
         })?;
 
@@ -577,7 +599,7 @@ impl IndexableDatabase for BasicDatabase {
     fn get_books_indexed(
         &self,
         indices: impl RangeBounds<usize>,
-    ) -> Result<Vec<Book>, DatabaseError> {
+    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
         let start = match indices.start_bound() {
             Bound::Included(i) => *i,
             Bound::Excluded(i) => *i + 1,
@@ -600,7 +622,7 @@ impl IndexableDatabase for BasicDatabase {
         })?)
     }
 
-    fn get_book_indexed(&self, index: usize) -> Result<Book, DatabaseError> {
+    fn get_book_indexed(&self, index: usize) -> Result<Arc<RwLock<Book>>, DatabaseError> {
         self.backend.read(|db| {
             if let Some(b) = db.books.get_index(index) {
                 Ok(b.1.clone())
@@ -636,7 +658,7 @@ impl IndexableDatabase for BasicDatabase {
     ) -> Result<(), DatabaseError> {
         self.backend.write(|db| {
             if let Some((_, book)) = db.books.get_index_mut(index) {
-                book.set_column(&column.as_ref().into(), new_value)?;
+                book_mut!(book).set_column(&column.as_ref().into(), new_value)?;
                 Ok(())
             } else {
                 Err(DatabaseError::IndexOutOfBounds(index))
@@ -652,6 +674,7 @@ impl IndexableDatabase for BasicDatabase {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::ops::Deref;
     use tempfile;
 
     fn temp_db() -> BasicDatabase {
@@ -681,9 +704,9 @@ mod test {
         let res = db.insert_book(book.clone());
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), 0);
-        let fetched = db.get_book(0);
-        assert!(fetched.is_ok());
-        assert_eq!(fetched.unwrap().inner().to_owned(), book);
+        let fetched = db.get_book(0).unwrap();
+        db.remove_book(0).unwrap();
+        assert_eq!(book!(fetched).deref().inner(), &book);
     }
 
     #[test]
@@ -709,16 +732,16 @@ mod test {
         let fetched1 = db.get_book(1);
         assert!(fetched1.is_ok());
         let fetched1 = fetched1.unwrap();
-        assert_eq!(fetched1, book1);
+        assert_eq!(book!(fetched1).get_series(), book1.get_series());
 
         let fetched0 = db.get_book(0);
         assert!(fetched0.is_ok());
         let fetched0 = fetched0.unwrap();
-        assert_eq!(fetched0, book0);
+        assert_eq!(book!(fetched0).get_series(), book0.get_series());
 
-        assert_ne!(fetched0, fetched1);
-        assert_ne!(fetched0, book1);
-        assert_ne!(fetched1, book0);
+        assert_ne!(book!(fetched0).get_series(), book!(fetched1).get_series());
+        assert_ne!(book!(fetched0).get_series(), book1.get_series());
+        assert_ne!(book!(fetched1).get_series(), book0.get_series());
     }
 
     #[test]

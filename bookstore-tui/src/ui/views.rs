@@ -212,8 +212,8 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
                 .split(chunk);
 
             self.book_area = hchunks[1];
-            let book_text =
-                book_to_widget_text(&b, self.book_area.width.saturating_sub(1) as usize);
+            let b = &b.as_ref().read().unwrap();
+            let book_text = book_to_widget_text(b, self.book_area.width.saturating_sub(1) as usize);
             self.offset
                 .refresh_window_height(self.book_area.height as usize);
             let offset = self.offset.offset_with_height(book_text.lines.len());
@@ -609,6 +609,7 @@ impl<D: IndexableDatabase> HelpWidget<D> {
         self.state.as_ref().borrow()
     }
 
+    #[allow(dead_code)]
     fn state_mut(&mut self) -> RefMut<UIState<D>> {
         self.state.as_ref().borrow_mut()
     }

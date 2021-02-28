@@ -302,28 +302,28 @@ impl RawBook {
     ///
     /// # Arguments
     /// * ` other ` - Another book with more useful metadata, to be merged with self
-    pub(crate) fn merge_mut(&mut self, other: Self) {
+    pub(crate) fn merge_mut(&mut self, other: &Self) {
         if self.title.is_none() {
-            self.title = other.title;
+            self.title = other.title.clone();
         }
         if self.authors.is_none() {
-            self.authors = other.authors;
+            self.authors = other.authors.clone();
         }
         if self.series.is_none() {
-            self.series = other.series;
+            self.series = other.series.clone();
         }
         match self.variants.as_mut() {
-            None => self.variants = other.variants,
+            None => self.variants = other.variants.clone(),
             Some(v) => {
-                if let Some(vars) = other.variants {
+                if let Some(vars) = other.variants.clone() {
                     v.extend(vars);
                 }
             }
         }
         match self.extended_tags.as_mut() {
-            None => self.extended_tags = other.extended_tags,
+            None => self.extended_tags = other.extended_tags.clone(),
             Some(e) => {
-                if let Some(map) = other.extended_tags {
+                if let Some(map) = other.extended_tags.clone() {
                     e.extend(map);
                 }
             }
@@ -444,8 +444,8 @@ impl Book {
     ///
     /// # Arguments
     /// * ` other ` - Another book with more useful metadata, to be merged with self
-    pub fn merge_mut(&mut self, other: Self) {
-        self.raw_book.merge_mut(other.raw_book)
+    pub fn merge_mut(&mut self, other: &Self) {
+        self.raw_book.merge_mut(&other.raw_book)
     }
 }
 
