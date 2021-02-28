@@ -21,7 +21,6 @@ use bookstore_database::{BookView, IndexableDatabase, NestedBookView, Scrollable
 use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
 use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{book_to_widget_text, CommandWidget, Widget};
-use bookstore_app::table_view::ColumnUpdate;
 
 macro_rules! state {
     ($self: ident) => {
@@ -374,9 +373,6 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                     KeyCode::Delete => {
                         if self.state().curr_command.is_empty() {
                             app.remove_selected_book(&mut self.state_mut().book_view)?;
-                            self.state_mut()
-                                .table_view
-                                .set_column_update(ColumnUpdate::Regenerate);
                         } else {
                             // TODO: Add code to delete forwards
                             //  (requires implementing cursor logic)

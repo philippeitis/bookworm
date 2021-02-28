@@ -23,7 +23,7 @@ use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;
 use crate::parser::{BookIndex, Command};
 use crate::settings::SortSettings;
-use crate::table_view::{ColumnUpdate, TableView};
+use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
 use std::sync::{Arc, RwLock};
 
@@ -173,9 +173,7 @@ impl<D: IndexableDatabase> App<D> {
             .read()
             .unwrap()
             .get_id();
-        self.db_mut().edit_book_with_id(id, column, new_value)?;
-        self.register_update();
-        Ok(())
+        self.edit_book_with_id(id, column, new_value)
     }
 
     pub fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
@@ -257,7 +255,6 @@ impl<D: IndexableDatabase> App<D> {
                     // TODO: Should this also do bv's books?
                     BookIndex::BookID(id) => self.remove_book(id, book_view)?,
                 };
-                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::DeleteAll => {
                 self.write(|db| db.clear())?;
@@ -269,24 +266,24 @@ impl<D: IndexableDatabase> App<D> {
                     BookIndex::BookID(id) => self.edit_book_with_id(id, &field, &new_value)?,
                 };
                 self.sort_settings.is_sorted = false;
-                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::AddBookFromFile(f) => {
                 self.write(|db| db.insert_book(RawBook::generate_from_file(&f)?))?;
                 self.sort_settings.is_sorted = false;
-                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::AddBooksFromDir(dir, depth) => {
                 // TODO: Handle failed reads.
                 self.write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
                 self.sort_settings.is_sorted = false;
-                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::AddColumn(column) => {
-                table.set_column_update(ColumnUpdate::AddColumn(UniCase::new(column)));
+                let column = UniCase::new(column);
+                if book_view.has_column(&column) {
+                    table.add_column(column);
+                }
             }
             Command::RemoveColumn(column) => {
-                table.set_column_update(ColumnUpdate::RemoveColumn(UniCase::new(column)));
+                table.remove_column(UniCase::new(column));
             }
             Command::SortColumn(column, rev) => {
                 self.update_selected_column(UniCase::new(column), rev, table);
@@ -306,7 +303,6 @@ impl<D: IndexableDatabase> App<D> {
             Command::FindMatches(search) => {
                 book_view.push_scope(search)?;
                 self.register_update();
-                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::Write => self.write(|d| d.save())?,
             // TODO: A warning pop-up when user is about to exit
@@ -318,7 +314,6 @@ impl<D: IndexableDatabase> App<D> {
             }
             Command::TryMergeAllBooks => {
                 self.write(|db| db.merge_similar())?;
-                table.set_column_update(ColumnUpdate::Regenerate);
             }
             Command::Help(flag) => {
                 if let Some(s) = help_strings(&flag) {
@@ -358,7 +353,6 @@ impl<D: IndexableDatabase> App<D> {
             self.sort_settings.column = word;
             self.sort_settings.is_sorted = false;
             self.sort_settings.reverse = reverse;
-            table.set_column_update(ColumnUpdate::Regenerate);
         }
     }
 

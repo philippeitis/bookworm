@@ -11,18 +11,9 @@ macro_rules! book {
     };
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub enum ColumnUpdate {
-    Regenerate,
-    AddColumn(UniCase<String>),
-    RemoveColumn(UniCase<String>),
-    NoUpdate,
-}
-
 pub struct TableView {
     selected_cols: Vec<UniCase<String>>,
     column_data: Vec<Vec<String>>,
-    column_update: ColumnUpdate,
 }
 
 impl Default for TableView {
@@ -30,7 +21,6 @@ impl Default for TableView {
         TableView {
             selected_cols: vec![],
             column_data: vec![],
-            column_update: ColumnUpdate::Regenerate,
         }
     }
 }
@@ -40,7 +30,6 @@ impl TableView {
         TableView {
             selected_cols: vec![],
             column_data: vec![],
-            column_update: ColumnUpdate::Regenerate,
         }
     }
 
@@ -53,59 +42,42 @@ impl TableView {
     }
 
     /// Updates the table data if a change occurs.
-    pub fn update_column_data<D: IndexableDatabase, S: ScrollableBookView<D>>(
+    pub fn regenerate_columns<D: IndexableDatabase, S: ScrollableBookView<D>>(
         &mut self,
         bv: &S,
     ) -> Result<(), ApplicationError> {
-        match std::mem::replace(&mut self.column_update, ColumnUpdate::NoUpdate) {
-            ColumnUpdate::Regenerate => {
-                self.column_data =
-                    vec![Vec::with_capacity(bv.window_size()); self.selected_cols.len()];
+        self.column_data = vec![Vec::with_capacity(bv.window_size()); self.selected_cols.len()];
 
-                if bv.window_size() == 0 {
-                    self.column_update = ColumnUpdate::NoUpdate;
-                    return Ok(());
-                }
-
-                let cols = self
-                    .selected_cols
-                    .iter()
-                    .map(|col| ColumnIdentifier::from(col.as_str()))
-                    .collect::<Vec<_>>();
-
-                for b in bv.get_books_cursored()? {
-                    for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
-                        column.push(book!(b).get_column_or(&col, ""));
-                    }
-                }
-            }
-            ColumnUpdate::AddColumn(word) => {
-                if bv.has_column(&word) && !self.selected_cols.contains(&word) {
-                    self.selected_cols.push(word.clone());
-                    let column_string = ColumnIdentifier::from(word.as_str());
-                    self.column_data.push(
-                        bv.get_books_cursored()?
-                            .iter()
-                            .map(|book| book!(book).get_column_or(&column_string, ""))
-                            .collect(),
-                    );
-                }
-            }
-            ColumnUpdate::RemoveColumn(word) => {
-                let index = self.selected_cols.iter().position(|x| x.eq(&word));
-                if let Some(index) = index {
-                    self.selected_cols.remove(index);
-                    self.column_data.remove(index);
-                }
-            }
-            ColumnUpdate::NoUpdate => {}
+        if bv.window_size() == 0 {
+            return Ok(());
         }
 
+        let cols = self
+            .selected_cols
+            .iter()
+            .map(|col| ColumnIdentifier::from(col.as_str()))
+            .collect::<Vec<_>>();
+
+        for b in bv.get_books_cursored()? {
+            for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
+                column.push(book!(b).get_column_or(&col, ""));
+            }
+        }
         Ok(())
     }
 
-    pub fn set_column_update(&mut self, column_update: ColumnUpdate) {
-        self.column_update = column_update;
+    pub fn remove_column(&mut self, column: UniCase<String>) {
+        let index = self.selected_cols.iter().position(|x| x.eq(&column));
+        if let Some(index) = index {
+            self.selected_cols.remove(index);
+            self.column_data.remove(index);
+        }
+    }
+
+    pub fn add_column(&mut self, column: UniCase<String>) {
+        if !self.selected_cols.contains(&column) {
+            self.selected_cols.push(column);
+        }
     }
 
     pub fn header_col_iter(&self) -> impl Iterator<Item = (&UniCase<String>, &Vec<String>)> {

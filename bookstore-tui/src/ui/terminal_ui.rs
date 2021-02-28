@@ -11,7 +11,7 @@ use tui::layout::Rect;
 use tui::Terminal;
 
 use bookstore_app::settings::{InterfaceStyle, NavigationSettings, Settings};
-use bookstore_app::table_view::{ColumnUpdate, TableView};
+use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, EditState};
 use bookstore_app::{App, ApplicationError};
 use bookstore_database::{BookView, DatabaseError, IndexableDatabase, SearchableBookView};
@@ -65,16 +65,11 @@ pub(crate) struct UIState<D: IndexableDatabase> {
 
 impl<D: IndexableDatabase> UIState<D> {
     pub(crate) fn modify_bv(&mut self, f: impl Fn(&mut SearchableBookView<D>) -> bool) -> bool {
-        if f(&mut self.book_view) {
-            self.table_view.set_column_update(ColumnUpdate::Regenerate);
-            true
-        } else {
-            false
-        }
+        f(&mut self.book_view)
     }
 
     pub(crate) fn update_column_data(&mut self) -> Result<(), ApplicationError> {
-        self.table_view.update_column_data(&self.book_view)
+        self.table_view.regenerate_columns(&self.book_view)
     }
 }
 
@@ -210,7 +205,6 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             {
                 let mut state = self.ui_state.borrow_mut();
                 self.app.apply_sort(&mut state.book_view)?;
-                state.update_column_data()?;
             }
 
             if self.app.take_update() || self.take_update() {
@@ -230,10 +224,8 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
 
                     if let Some(chunk_size) = self.active_view.allocate_chunk(chunk) {
                         let mut state = self.ui_state.borrow_mut();
-                        if state.book_view.refresh_window_size(chunk_size) {
-                            state.table_view.set_column_update(ColumnUpdate::Regenerate);
-                            let _ = state.update_column_data();
-                        }
+                        state.book_view.refresh_window_size(chunk_size);
+                        let _ = state.update_column_data();
                     }
 
                     self.active_view.render_into_frame(&self.app, f, chunk);
