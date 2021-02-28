@@ -3,7 +3,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::time::Duration;
 
-use crossterm::event::{poll, read};
+use crossterm::event::{poll, read, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::ErrorKind;
 
 use tui::backend::Backend;
@@ -61,6 +61,7 @@ pub(crate) struct UIState<D: IndexableDatabase> {
     pub(crate) selected_column: usize,
     pub(crate) table_view: TableView,
     pub(crate) book_view: SearchableBookView<D>,
+    // pub(crate) command_log: Vec<CommandString>,
 }
 
 impl<D: IndexableDatabase> UIState<D> {
@@ -145,7 +146,15 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     fn get_input(&mut self) -> Result<bool, TuiError> {
         loop {
             if poll(Duration::from_millis(500))? {
-                match self.active_view.handle_input(read()?, &mut self.app)? {
+                let event = read()?;
+                match event {
+                    Event::Key(KeyEvent {
+                        code: KeyCode::Char('c'),
+                        modifiers: KeyModifiers::CONTROL,
+                    }) => return Ok(true),
+                    _ => {}
+                }
+                match self.active_view.handle_input(event, &mut self.app)? {
                     ApplicationTask::Quit => return Ok(true),
                     ApplicationTask::SwitchView(view) => {
                         self.ui_updated = true;

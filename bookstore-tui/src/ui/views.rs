@@ -2,7 +2,7 @@ use std::cell::{Ref, RefCell, RefMut};
 use std::ops::DerefMut;
 use std::rc::Rc;
 
-use crossterm::event::{Event, KeyCode, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
 
 use tui::backend::Backend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -12,6 +12,9 @@ use tui::widgets::{Block, List, ListItem, ListState, Paragraph};
 use tui::Frame;
 
 use unicode_truncate::UnicodeTruncateStr;
+
+use clipboard::ClipboardContext;
+use clipboard::ClipboardProvider;
 
 use bookstore_app::settings::Color;
 use bookstore_app::{parse_args, App, ApplicationError, Command};
@@ -322,7 +325,18 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         self.state_mut().curr_command.pop();
                     }
                     KeyCode::Char(x) => {
-                        self.state_mut().curr_command.push(x);
+                        if x == 'v'
+                            && event.modifiers == KeyModifiers::CONTROL | KeyModifiers::SHIFT
+                        {
+                            let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+                            if let Ok(s) = ctx.get_contents() {
+                                for c in s.chars() {
+                                    self.state_mut().curr_command.push(c);
+                                }
+                            }
+                        } else {
+                            self.state_mut().curr_command.push(x);
+                        }
                     }
                     KeyCode::Enter => {
                         let args: Vec<_> = self
@@ -527,7 +541,23 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                         self.edit.del();
                     }
                     KeyCode::Char(c) => {
-                        self.edit.push(c);
+                        if event.modifiers == KeyModifiers::CONTROL | KeyModifiers::SHIFT {
+                            if c == 'v' {
+                                let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+                                if let Ok(s) = ctx.get_contents() {
+                                    for c in s.chars() {
+                                        self.edit.push(c);
+                                    }
+                                }
+                            } else if c == 'c' {
+                                let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+                                let _ = ctx.set_contents(self.edit.visible().to_owned());
+                            } else {
+                                self.edit.push(c);
+                            }
+                        } else {
+                            self.edit.push(c);
+                        }
                     }
                     KeyCode::Enter => {
                         self.dump_edit(app)?;
