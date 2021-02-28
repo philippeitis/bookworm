@@ -71,6 +71,14 @@ impl<D: IndexableDatabase> UIState<D> {
     pub(crate) fn update_column_data(&mut self) -> Result<(), ApplicationError> {
         self.table_view.regenerate_columns(&self.book_view)
     }
+
+    pub(crate) fn get_selected_column_value(&self, index: usize) -> &str {
+        &self.table_view.get_column(self.selected_column)[index]
+    }
+
+    pub(crate) fn num_cols(&self) -> usize {
+        self.table_view.selected_cols().len()
+    }
 }
 
 trait ViewHandler<D: IndexableDatabase, B: Backend>: ResizableWidget<D, B> + InputHandler<D> {}
@@ -103,14 +111,12 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
         settings: Settings,
         app: App<D>,
     ) -> Result<Self, TuiError> {
-        let mut table_view = TableView::new();
-        table_view.set_selected_columns(settings.columns);
         let state = Rc::new(RefCell::new(UIState {
             style: settings.interface_style,
             nav_settings: settings.navigation_settings,
             curr_command: CommandString::new(),
             selected_column: 0,
-            table_view,
+            table_view: TableView::from(settings.columns),
             book_view: app.new_book_view(),
         }));
         Ok(AppInterface {
@@ -155,15 +161,8 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                             AppView::Edit => {
                                 let state = self.ui_state.deref().borrow();
                                 if let Some(x) = state.book_view.selected() {
-                                    let value = state
-                                        .table_view
-                                        .header_col_iter()
-                                        .nth(state.selected_column)
-                                        .unwrap()
-                                        .1[x]
-                                        .clone();
                                     self.active_view = Box::new(EditWidget {
-                                        edit: EditState::new(value, x),
+                                        edit: EditState::new(state.get_selected_column_value(x), x),
                                         state: self.ui_state.clone(),
                                     });
                                 }

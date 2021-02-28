@@ -11,18 +11,12 @@ macro_rules! book {
     };
 }
 
+/// TableView acts as a way to avoid errors in the rendering step - by pre-loading all
+/// data before entering the rendering step, the rendering step itself can avoid
+/// BookView::get_books_cursored()'s Result.
 pub struct TableView {
     selected_cols: Vec<UniCase<String>>,
     column_data: Vec<Vec<String>>,
-}
-
-impl Default for TableView {
-    fn default() -> Self {
-        TableView {
-            selected_cols: vec![],
-            column_data: vec![],
-        }
-    }
 }
 
 impl TableView {
@@ -31,14 +25,6 @@ impl TableView {
             selected_cols: vec![],
             column_data: vec![],
         }
-    }
-
-    pub fn update_value<S: AsRef<str>>(&mut self, col: usize, row: usize, new_value: S) {
-        self.column_data[col][row] = new_value.as_ref().to_owned();
-    }
-
-    pub fn get_value(&self, col: usize, row: usize) -> &str {
-        &self.column_data[col][row]
     }
 
     /// Updates the table data if a change occurs.
@@ -70,7 +56,6 @@ impl TableView {
         let index = self.selected_cols.iter().position(|x| x.eq(&column));
         if let Some(index) = index {
             self.selected_cols.remove(index);
-            self.column_data.remove(index);
         }
     }
 
@@ -84,20 +69,20 @@ impl TableView {
         self.selected_cols.iter().zip(self.column_data.iter())
     }
 
-    pub fn set_selected_columns(&mut self, cols: Vec<String>) {
-        self.selected_cols = cols.into_iter().map(UniCase::new).collect();
-        self.column_data = vec![vec![]; self.selected_cols.len()];
-    }
-
-    pub fn num_cols(&self) -> usize {
-        self.selected_cols.len()
-    }
-
     pub fn selected_cols(&self) -> &[UniCase<String>] {
         &self.selected_cols
     }
 
-    pub fn get_column(&self, index: usize) -> &UniCase<String> {
-        &self.selected_cols[index]
+    pub fn get_column(&self, index: usize) -> &[String] {
+        &self.column_data[index]
+    }
+}
+
+impl From<Vec<String>> for TableView {
+    fn from(selected_cols: Vec<String>) -> Self {
+        TableView {
+            selected_cols: selected_cols.into_iter().map(UniCase::new).collect(),
+            column_data: vec![],
+        }
     }
 }

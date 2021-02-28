@@ -17,6 +17,7 @@ use bookstore_app::settings::Color;
 use bookstore_app::{parse_args, App, ApplicationError, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
 use bookstore_database::{BookView, IndexableDatabase, NestedBookView, ScrollableBookView};
+use bookstore_records::BookError;
 
 use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
 use crate::ui::terminal_ui::UIState;
@@ -231,7 +232,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
             .split(chunk);
 
         let chunk = vchunks[0];
-        let hchunks = split_chunk_into_columns(chunk, self.state().table_view.num_cols() as u16);
+        let hchunks = split_chunk_into_columns(chunk, self.state().num_cols() as u16);
         let select_style = self.state().style.select_style();
 
         for ((title, data), &chunk) in self
@@ -417,6 +418,35 @@ impl<D: IndexableDatabase> EditWidget<D> {
     fn state_mut(&mut self) -> RefMut<UIState<D>> {
         self.state.as_ref().borrow_mut()
     }
+
+    /// Used to save the edit to the book being modified.
+    fn dump_edit(&mut self, app: &mut App<D>) -> Result<(), ApplicationError> {
+        if self.edit.started_edit {
+            let column = {
+                self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
+            };
+            match app.edit_selected_book(
+                column,
+                &self.edit.new_value,
+                &mut state_mut!(self).book_view,
+            ) {
+                Ok(_) => {}
+                // Catch immutable column error and discard changes.
+                Err(ApplicationError::Book(BookError::ImmutableColumnError)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    /// Used when column has been changed and edit should reflect new column's value.
+    fn reset_edit(&mut self) {
+        let value = self
+            .state()
+            .get_selected_column_value(self.edit.selected)
+            .to_owned();
+        self.edit.reset_orig(value);
+    }
 }
 
 impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<D> {
@@ -436,7 +466,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        let hchunks = split_chunk_into_columns(chunk, self.state().table_view.num_cols() as u16);
+        let hchunks = split_chunk_into_columns(chunk, self.state().num_cols() as u16);
 
         let edit_style = self.state().style.edit_style();
         let select_style = self.state().style.select_style();
@@ -453,6 +483,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
             for (j, word) in data.iter().enumerate() {
                 items.push(
                     if i == self.state().selected_column && j == self.edit.selected {
+                        let word = self.edit.visible();
                         ListItem::new(Span::from(word.unicode_truncate_start(width).0))
                     } else {
                         ListItem::new(Span::from(word.unicode_truncate(width).0))
@@ -499,34 +530,10 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                         self.edit.push(c);
                     }
                     KeyCode::Enter => {
-                        if self.edit.started_edit {
-                            let column = self
-                                .state()
-                                .table_view
-                                .get_column(self.state().selected_column)
-                                .clone();
-                            app.edit_selected_book(
-                                column,
-                                &self.edit.new_value,
-                                &mut state_mut!(self).book_view,
-                            )?;
-                        } else {
-                            let column = self.state().selected_column;
-                            state_mut!(self).table_view.update_value(
-                                column,
-                                self.edit.selected,
-                                &self.edit.orig_value,
-                            );
-                        }
+                        self.dump_edit(app)?;
                         return Ok(ApplicationTask::SwitchView(AppView::Columns));
                     }
                     KeyCode::Esc => {
-                        let column = self.state().selected_column;
-                        state_mut!(self).table_view.update_value(
-                            column,
-                            self.edit.selected,
-                            &self.edit.orig_value,
-                        );
                         return Ok(ApplicationTask::SwitchView(AppView::Columns));
                     }
                     KeyCode::Delete => {
@@ -537,60 +544,25 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                         self.edit.edit_orig();
                     }
                     KeyCode::Down => {
-                        if self.state().selected_column + 1 < self.state().table_view.num_cols() {
-                            if self.edit.started_edit {
-                                app.edit_selected_book(
-                                    self.state()
-                                        .table_view
-                                        .get_column(self.state().selected_column),
-                                    &self.edit.new_value,
-                                    &mut state_mut!(self).book_view,
-                                )?;
-                            }
+                        self.dump_edit(app)?;
+                        if self.state().selected_column + 1 < self.state().num_cols() {
                             self.state_mut().selected_column += 1;
+                            // Only reset edit if changing columns
+                            self.reset_edit();
                         }
-                        let value = &self
-                            .state()
-                            .table_view
-                            .header_col_iter()
-                            .nth(self.state().selected_column)
-                            .unwrap()
-                            .1[self.edit.selected]
-                            .clone();
-                        self.edit.reset_orig(value);
                     }
                     KeyCode::Up => {
+                        self.dump_edit(app)?;
                         if self.state().selected_column > 0 {
-                            if self.edit.started_edit {
-                                app.edit_selected_book(
-                                    self.state()
-                                        .table_view
-                                        .get_column(self.state().selected_column),
-                                    &self.edit.new_value,
-                                    &mut state_mut!(self).book_view,
-                                )?;
-                            }
                             self.state_mut().selected_column -= 1;
+                            self.reset_edit();
                         }
-                        let value = &self
-                            .state()
-                            .table_view
-                            .header_col_iter()
-                            .nth(self.state().selected_column)
-                            .unwrap()
-                            .1[self.edit.selected]
-                            .clone();
-                        self.edit.reset_orig(value);
                     }
                     _ => return Ok(ApplicationTask::DoNothing),
                 }
             }
             _ => return Ok(ApplicationTask::DoNothing),
         }
-        let column = self.state().selected_column;
-        state_mut!(self)
-            .table_view
-            .update_value(column, self.edit.selected, &self.edit.visible());
         Ok(ApplicationTask::UpdateUI)
     }
 }
