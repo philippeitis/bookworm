@@ -70,10 +70,6 @@ fn main() -> Result<(), TuiError> {
         }
     }
 
-    if !cfg!(windows) {
-        println!("Current backend may not offer best results on current operating system.");
-    };
-
     let stdout = stdout();
     let mut app = AppInterface::new("Really Cool Library", settings, app)?;
 

@@ -1,4 +1,4 @@
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::RefCell;
 use std::ops::DerefMut;
 use std::path::Path;
 #[cfg(target_os = "windows")]
@@ -6,6 +6,7 @@ use std::path::PathBuf;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Command as ProcessCommand;
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use rayon::prelude::*;
 #[cfg(feature = "sqlite")]
@@ -25,7 +26,6 @@ use crate::parser::{BookIndex, Command};
 use crate::settings::SortSettings;
 use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
-use std::sync::{Arc, RwLock};
 
 macro_rules! book {
     ($book: ident) => {
@@ -110,6 +110,81 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::
         .collect::<Vec<_>>())
 }
 
+/// Returns the first available path amongst the variants of the book, or None if no such
+/// path exists.
+///
+/// # Arguments
+///
+/// * ` book ` - The book to find a path for.
+fn get_book_path(book: &Book, index: usize) -> Option<&Path> {
+    Some(book.get_variants()?.get(index)?.path())
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+/// Opens the book in the native system viewer.
+///
+/// # Arguments
+///
+/// * ` book ` - The book to open.
+///
+/// # Errors
+/// This function may error if the book's variants do not exist,
+/// or if the command itself fails.
+fn open_book(book: &Book, index: usize) -> Result<(), ApplicationError> {
+    if let Some(path) = get_book_path(book, index) {
+        #[cfg(target_os = "windows")]
+        {
+            ProcessCommand::new("cmd.exe")
+                .args(&["/C", "start", "explorer"])
+                .arg(path)
+                .spawn()?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            ProcessCommand::new("xdg-open").arg(path).spawn()?;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            ProcessCommand::new("open").arg(path).spawn()?;
+        }
+    }
+    Ok(())
+}
+
+/// Opens the book and selects it, in File Explorer on Windows, or in Nautilus on Linux.
+/// Other operating systems not currently supported
+///
+/// # Arguments
+///
+/// * ` book ` - The book to open.
+/// * ` index ` - The index of the path to open.
+///
+/// # Errors
+/// This function may error if the book's variants do not exist,
+/// or if the command itself fails.
+fn open_book_in_dir(book: &Book, index: usize) -> Result<(), ApplicationError> {
+    // TODO: This doesn't work when run with install due to relative paths.
+    #[cfg(target_os = "windows")]
+    if let Some(path) = get_book_path(book, index) {
+        let open_book_path = PathBuf::from(".\\src\\open_book.py").canonicalize()?;
+        // TODO: Find a way to do this entirely in Rust
+        ProcessCommand::new("python")
+            .args(&[
+                open_book_path.display().to_string().as_str(),
+                path.display().to_string().as_str(),
+            ])
+            .spawn()?;
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(path) = get_book_path(book, index) {
+        ProcessCommand::new("nautilus")
+            .arg("--select")
+            .arg(path)
+            .spawn()?;
+    }
+    Ok(())
+}
+
 // fn books_in_dir<P: AsRef<Path>>(dir: P) -> Result<Vec<RawBook>, std::io::Error> {
 //     // TODO: Look at libraries with parallel directory reading.
 //     //  Handle errored reads somehow.
@@ -153,12 +228,20 @@ impl<D: IndexableDatabase> App<D> {
         SearchableBookView::new(self.db.clone())
     }
 
-    fn db(&self) -> Ref<D> {
-        self.db.as_ref().borrow()
-    }
-
-    fn db_mut(&mut self) -> RefMut<D> {
-        self.db.as_ref().borrow_mut()
+    /// Gets the book specified by the `BookIndex`,
+    /// or None if the particular book does not exist.
+    ///
+    /// # Arguments
+    ///
+    /// * ` b ` - A `BookIndex` to get a book by ID or by current selection.
+    pub fn get_book(
+        b: BookIndex,
+        bv: &SearchableBookView<D>,
+    ) -> Result<Arc<RwLock<Book>>, ApplicationError> {
+        match b {
+            BookIndex::Selected => Ok(bv.get_selected_book()?),
+            BookIndex::BookID(id) => Ok(bv.get_book(id)?),
+        }
     }
 
     pub fn edit_selected_book<S0: AsRef<str>, S1: AsRef<str>>(
@@ -182,9 +265,7 @@ impl<D: IndexableDatabase> App<D> {
         column: S0,
         new_value: S1,
     ) -> Result<(), ApplicationError> {
-        self.db_mut().edit_book_with_id(id, &column, &new_value)?;
-        self.register_update();
-        Ok(())
+        Ok(self.write(|db| db.edit_book_with_id(id, &column, &new_value))?)
     }
 
     pub fn remove_selected_book(
@@ -192,13 +273,12 @@ impl<D: IndexableDatabase> App<D> {
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError> {
         match book_view.remove_selected_book()? {
-            BookViewIndex::ID(id) => self.db_mut().remove_book(id)?,
+            BookViewIndex::ID(id) => self.write(|db| db.remove_book(id))?,
             BookViewIndex::Index(index) => {
-                self.db_mut().remove_book_indexed(index)?;
+                self.write(|db| db.remove_book_indexed(index))?;
                 book_view.refresh_db_size();
             }
         }
-        self.register_update();
         Ok(())
     }
 
@@ -208,29 +288,11 @@ impl<D: IndexableDatabase> App<D> {
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError> {
         book_view.remove_book(id);
-        self.db_mut().remove_book(id)?;
-        self.register_update();
-        Ok(())
-    }
-
-    /// Gets the book specified by the `BookIndex`,
-    /// or None if the particular book does not exist.
-    ///
-    /// # Arguments
-    ///
-    /// * ` b ` - A `BookIndex` to get a book by ID or by current selection.
-    pub fn get_book(
-        b: BookIndex,
-        bv: &SearchableBookView<D>,
-    ) -> Result<Arc<RwLock<Book>>, ApplicationError> {
-        match b {
-            BookIndex::Selected => Ok(bv.get_selected_book()?),
-            BookIndex::BookID(id) => Ok(bv.get_book(id)?),
-        }
+        Ok(self.write(|db| db.remove_book(id))?)
     }
 
     fn write<B>(&mut self, f: impl Fn(&mut D) -> B) -> B {
-        let v = f(self.db_mut().deref_mut());
+        let v = f(self.db.as_ref().borrow_mut().deref_mut());
         self.register_update();
         v
     }
@@ -252,7 +314,6 @@ impl<D: IndexableDatabase> App<D> {
             Command::DeleteBook(b) => {
                 match b {
                     BookIndex::Selected => self.remove_selected_book(book_view)?,
-                    // TODO: Should this also do bv's books?
                     BookIndex::BookID(id) => self.remove_book(id, book_view)?,
                 };
             }
@@ -291,13 +352,13 @@ impl<D: IndexableDatabase> App<D> {
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             Command::OpenBookInApp(b, index) => {
                 if let Ok(b) = Self::get_book(b, book_view) {
-                    self.open_book(&book!(b), index)?;
+                    open_book(&book!(b), index)?;
                 }
             }
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             Command::OpenBookInExplorer(b, index) => {
                 if let Ok(b) = Self::get_book(b, book_view) {
-                    self.open_book_in_dir(&book!(b), index)?;
+                    open_book_in_dir(&book!(b), index)?;
                 }
             }
             Command::FindMatches(search) => {
@@ -356,81 +417,6 @@ impl<D: IndexableDatabase> App<D> {
         }
     }
 
-    /// Returns the first available path amongst the variants of the book, or None if no such
-    /// path exists.
-    ///
-    /// # Arguments
-    ///
-    /// * ` book ` - The book to find a path for.
-    fn get_book_path(book: &Book, index: usize) -> Option<&Path> {
-        Some(book.get_variants()?.get(index)?.path())
-    }
-
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-    /// Opens the book in the native system viewer.
-    ///
-    /// # Arguments
-    ///
-    /// * ` book ` - The book to open.
-    ///
-    /// # Errors
-    /// This function may error if the book's variants do not exist,
-    /// or if the command itself fails.
-    fn open_book(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
-        if let Some(path) = Self::get_book_path(book, index) {
-            #[cfg(target_os = "windows")]
-            {
-                ProcessCommand::new("cmd.exe")
-                    .args(&["/C", "start", "explorer"])
-                    .arg(path)
-                    .spawn()?;
-            }
-            #[cfg(target_os = "linux")]
-            {
-                ProcessCommand::new("xdg-open").arg(path).spawn()?;
-            }
-            #[cfg(target_os = "macos")]
-            {
-                ProcessCommand::new("open").arg(path).spawn()?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Opens the book and selects it, in File Explorer on Windows, or in Nautilus on Linux.
-    /// Other operating systems not currently supported
-    ///
-    /// # Arguments
-    ///
-    /// * ` book ` - The book to open.
-    /// * ` index ` - The index of the path to open.
-    ///
-    /// # Errors
-    /// This function may error if the book's variants do not exist,
-    /// or if the command itself fails.
-    fn open_book_in_dir(&self, book: &Book, index: usize) -> Result<(), ApplicationError> {
-        // TODO: This doesn't work when run with install due to relative paths.
-        #[cfg(target_os = "windows")]
-        if let Some(path) = App::<D>::get_book_path(book, index) {
-            let open_book_path = PathBuf::from(".\\src\\open_book.py").canonicalize()?;
-            // TODO: Find a way to do this entirely in Rust
-            ProcessCommand::new("python")
-                .args(&[
-                    open_book_path.display().to_string().as_str(),
-                    path.display().to_string().as_str(),
-                ])
-                .spawn()?;
-        }
-        #[cfg(target_os = "linux")]
-        if let Some(path) = App::<D>::get_book_path(book, index) {
-            ProcessCommand::new("nautilus")
-                .arg("--select")
-                .arg(path)
-                .spawn()?;
-        }
-        Ok(())
-    }
-
     // used in AppInterface::run
     pub fn apply_sort(
         &mut self,
@@ -458,7 +444,7 @@ impl<D: IndexableDatabase> App<D> {
     }
 
     pub fn saved(&mut self) -> bool {
-        self.db().saved()
+        self.db.as_ref().borrow().saved()
     }
 
     pub fn has_help_string(&self) -> bool {
