@@ -195,7 +195,10 @@ impl<D: IndexableDatabase> App<D> {
     ) -> Result<(), ApplicationError> {
         match book_view.remove_selected_book()? {
             BookViewIndex::ID(id) => self.db_mut().remove_book(id)?,
-            BookViewIndex::Index(index) => self.db_mut().remove_book_indexed(index)?,
+            BookViewIndex::Index(index) => {
+                self.db_mut().remove_book_indexed(index)?;
+                book_view.refresh_db_size();
+            }
         }
         self.register_update();
         Ok(())
@@ -258,7 +261,7 @@ impl<D: IndexableDatabase> App<D> {
             }
             Command::DeleteAll => {
                 self.write(|db| db.clear())?;
-                table.set_column_update(ColumnUpdate::Regenerate);
+                book_view.clear();
             }
             Command::EditBook(b, field, new_value) => {
                 match b {

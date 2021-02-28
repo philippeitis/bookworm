@@ -68,6 +68,8 @@ pub trait BookView<D: AppDatabase> {
 
     fn refresh_window_size(&mut self, size: usize) -> bool;
 
+    fn clear(&mut self);
+
     fn window_size(&self) -> usize;
 
     fn select(&mut self, item: usize) -> bool;
@@ -227,6 +229,11 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
             .chain(std::iter::once(&mut self.root_cursor))
             .map(|a| a.refresh_window_size(size))
             .fold(false, |a, b| a | b)
+    }
+
+    fn clear(&mut self) {
+        self.scopes.clear();
+        self.root_cursor.refresh_height(0);
     }
 
     fn window_size(&self) -> usize {
