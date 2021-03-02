@@ -27,6 +27,15 @@ use crate::settings::SortSettings;
 use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
 
+const PYTHON_STRING: &str = r#"import sys
+import subprocess
+import os
+
+if __name__ == '__main__':
+    FILEBROWSER_PATH = os.path.join(os.getenv('WINDIR'), 'explorer.exe')
+    subprocess.Popen(f'{FILEBROWSER_PATH} /select,"{sys.argv[1]}"')
+"#;
+
 macro_rules! book {
     ($book: ident) => {
         $book.as_ref().read().unwrap()
@@ -166,7 +175,20 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), ApplicationError> {
     // TODO: This doesn't work when run with install due to relative paths.
     #[cfg(target_os = "windows")]
     if let Some(path) = get_book_path(book, index) {
-        let open_book_path = PathBuf::from(".\\src\\open_book.py").canonicalize()?;
+        use std::io::Write;
+
+        let mut open_book_path = std::env::current_dir().unwrap();
+        open_book_path.push("open_book.py");
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(&open_book_path)
+            .unwrap();
+
+        file.write_all(PYTHON_STRING.as_bytes()).unwrap();
+
         // TODO: Find a way to do this entirely in Rust
         ProcessCommand::new("python")
             .args(&[
