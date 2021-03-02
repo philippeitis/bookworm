@@ -13,8 +13,8 @@ use tui::Frame;
 
 use unicode_truncate::UnicodeTruncateStr;
 
-use clipboard::ClipboardContext;
-use clipboard::ClipboardProvider;
+#[cfg(feature = "copypaste")]
+use clipboard::{ClipboardContext, ClipboardProvider};
 
 use bookstore_app::settings::Color;
 use bookstore_app::{parse_args, App, ApplicationError, Command};
@@ -78,6 +78,26 @@ fn to_tui(c: bookstore_app::settings::Color) -> tui::style::Color {
         Color::LightCyan => TColor::LightCyan,
         Color::White => TColor::White,
     }
+}
+
+#[cfg(feature = "copypaste")]
+fn paste_into_clipboard(a: &str) {
+    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+    let _ = ctx.set_contents(a.to_owned());
+}
+
+#[cfg(not(feature = "copypaste"))]
+fn paste_into_clipboard(_a: &str) {}
+
+#[cfg(feature = "copypaste")]
+fn copy_from_clipboard() -> Option<String> {
+    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+    ctx.get_contents().ok()
+}
+
+#[cfg(not(feature = "copypaste"))]
+fn copy_from_clipboard() -> Option<String> {
+    None
 }
 
 impl TuiStyle for InterfaceStyle {
@@ -181,7 +201,6 @@ fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
 
 pub(crate) struct ColumnWidget<D: IndexableDatabase> {
     pub(crate) state: Rc<RefCell<UIState<D>>>,
-    pub(crate) had_selected: bool,
     pub(crate) offset: BlindOffset,
     pub(crate) book_area: Rect,
 }
@@ -208,7 +227,6 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
 
     fn render_into_frame(&mut self, _app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
         let chunk = if let Ok(b) = state!(self).book_view.get_selected_book() {
-            self.had_selected = true;
             let hchunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
@@ -225,7 +243,6 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
 
             hchunks[0]
         } else {
-            self.had_selected = false;
             chunk
         };
 
@@ -325,14 +342,15 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         self.state_mut().curr_command.pop();
                     }
                     KeyCode::Char(x) => {
-                        if x == 'v'
-                            && event.modifiers == KeyModifiers::CONTROL | KeyModifiers::SHIFT
-                        {
-                            let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-                            if let Ok(s) = ctx.get_contents() {
-                                for c in s.chars() {
-                                    self.state_mut().curr_command.push(c);
+                        if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
+                            if x == 'v' {
+                                if let Some(s) = copy_from_clipboard() {
+                                    for c in s.chars() {
+                                        self.state_mut().curr_command.push(c);
+                                    }
                                 }
+                            } else {
+                                self.state_mut().curr_command.push(x);
                             }
                         } else {
                             self.state_mut().curr_command.push(x);
@@ -541,17 +559,15 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                         self.edit.del();
                     }
                     KeyCode::Char(c) => {
-                        if event.modifiers == KeyModifiers::CONTROL | KeyModifiers::SHIFT {
+                        if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
                             if c == 'v' {
-                                let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-                                if let Ok(s) = ctx.get_contents() {
+                                if let Some(s) = copy_from_clipboard() {
                                     for c in s.chars() {
                                         self.edit.push(c);
                                     }
                                 }
                             } else if c == 'c' {
-                                let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-                                let _ = ctx.set_contents(self.edit.visible().to_owned());
+                                paste_into_clipboard(self.edit.visible())
                             } else {
                                 self.edit.push(c);
                             }

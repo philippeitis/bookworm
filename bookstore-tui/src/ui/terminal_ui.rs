@@ -124,7 +124,6 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             border_widget: BorderWidget::new(name.as_ref().to_string()),
             active_view: Box::new(ColumnWidget {
                 state: state.clone(),
-                had_selected: false,
                 offset: BlindOffset::new(),
                 book_area: Rect::default(),
             }),
@@ -149,7 +148,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                 let event = read()?;
                 match event {
                     Event::Key(KeyEvent {
-                        code: KeyCode::Char('c'),
+                        code: KeyCode::Char('q'),
                         modifiers: KeyModifiers::CONTROL,
                     }) => return Ok(true),
                     _ => {}
@@ -162,7 +161,6 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                             AppView::Columns => {
                                 self.active_view = Box::new(ColumnWidget {
                                     state: self.ui_state.clone(),
-                                    had_selected: false,
                                     offset: BlindOffset::new(),
                                     book_area: Rect::default(),
                                 })
