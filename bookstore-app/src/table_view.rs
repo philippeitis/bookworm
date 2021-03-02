@@ -1,6 +1,6 @@
 use unicase::UniCase;
 
-use bookstore_database::{IndexableDatabase, ScrollableBookView};
+use bookstore_database::{BookView, IndexableDatabase};
 use bookstore_records::book::ColumnIdentifier;
 
 use crate::ApplicationError;
@@ -27,8 +27,9 @@ impl TableView {
         }
     }
 
-    /// Updates the table data if a change occurs.
-    pub fn regenerate_columns<D: IndexableDatabase, S: ScrollableBookView<D>>(
+    /// Refreshes the table data according to the currently selected columns and the books
+    /// in the BookView's cursor.
+    pub fn regenerate_columns<D: IndexableDatabase, S: BookView<D>>(
         &mut self,
         bv: &S,
     ) -> Result<(), ApplicationError> {
@@ -38,25 +39,26 @@ impl TableView {
             return Ok(());
         }
 
+        // bv.get_books_cursored() and ColumnIdentifier::from are expensive, so
+        // we collect the ColumnIdentifiers into a Vec and only call get_books_cursored()
+        // once.
         let cols = self
             .selected_cols
             .iter()
             .map(|col| ColumnIdentifier::from(col.as_str()))
             .collect::<Vec<_>>();
 
-        for b in bv.get_books_cursored()? {
+        for book in bv.get_books_cursored()?.iter().map(|b| book!(b)) {
             for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
-                column.push(book!(b).get_column_or(&col, ""));
+                column.push(book.get_column_or(&col, ""));
             }
         }
+
         Ok(())
     }
 
-    pub fn remove_column(&mut self, column: UniCase<String>) {
-        let index = self.selected_cols.iter().position(|x| x.eq(&column));
-        if let Some(index) = index {
-            self.selected_cols.remove(index);
-        }
+    pub fn remove_column(&mut self, column: &UniCase<String>) {
+        self.selected_cols.retain(|x| x != column);
     }
 
     pub fn add_column(&mut self, column: UniCase<String>) {

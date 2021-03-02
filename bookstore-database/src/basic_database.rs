@@ -260,7 +260,6 @@ pub trait AppDatabase {
     /// This function will return an error if the database fails.
     fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError>;
 
-    // TODO: push this into bookview?
     /// Sorts books by comparing the specified column.
     ///
     /// # Arguments
@@ -269,7 +268,11 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn sort_books_by_col(&mut self, col: &str, reverse: bool) -> Result<(), DatabaseError>;
+    fn sort_books_by_col<S: AsRef<str>>(
+        &mut self,
+        col: S,
+        reverse: bool,
+    ) -> Result<(), DatabaseError>;
 
     /// Returns the number of books stored internally.
     fn size(&self) -> usize;
@@ -560,7 +563,11 @@ impl AppDatabase for BasicDatabase {
             })??)
     }
 
-    fn sort_books_by_col(&mut self, col: &str, reverse: bool) -> Result<(), DatabaseError> {
+    fn sort_books_by_col<S: AsRef<str>>(
+        &mut self,
+        col: S,
+        reverse: bool,
+    ) -> Result<(), DatabaseError> {
         self.backend.write(|db| {
             let col = ColumnIdentifier::from(col);
 

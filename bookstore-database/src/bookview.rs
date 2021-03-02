@@ -155,7 +155,6 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         col: S,
         reverse: bool,
     ) -> Result<(), DatabaseError> {
-        // self.db.sort_books_by_col(col.as_ref(), reverse)?;
         let col = ColumnIdentifier::from(col);
         if reverse {
             self.scopes.iter_mut().for_each(|(_, scope)| {

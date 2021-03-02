@@ -226,10 +226,8 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), ApplicationError> {
 // }
 
 pub struct App<D: AppDatabase> {
-    // Application data
     db: Rc<RefCell<D>>,
     active_help_string: Option<&'static str>,
-    // Actions to run on data
     sort_settings: SortSettings,
     updated: bool,
 }
@@ -364,10 +362,10 @@ impl<D: IndexableDatabase> App<D> {
                 }
             }
             Command::RemoveColumn(column) => {
-                table.remove_column(UniCase::new(column));
+                table.remove_column(&UniCase::new(column));
             }
             Command::SortColumn(column, rev) => {
-                self.update_selected_column(UniCase::new(column), rev, table);
+                self.update_selected_column(column, rev, table);
             }
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             Command::OpenBookInApp(b, index) => {
@@ -419,16 +417,11 @@ impl<D: IndexableDatabase> App<D> {
     ///
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
-    fn update_selected_column(
-        &mut self,
-        mut word: UniCase<String>,
-        reverse: bool,
-        table: &mut TableView,
-    ) {
-        match word.to_ascii_lowercase().as_str() {
-            "author" => word = UniCase::from(String::from("authors")),
-            _ => {}
-        }
+    fn update_selected_column(&mut self, word: String, reverse: bool, table: &mut TableView) {
+        let word = UniCase::new(match word.to_ascii_lowercase().as_str() {
+            "author" => String::from("authors"),
+            _ => word,
+        });
 
         if table.selected_cols().contains(&word) {
             self.sort_settings.column = word;
@@ -443,7 +436,7 @@ impl<D: IndexableDatabase> App<D> {
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), DatabaseError> {
         if !self.sort_settings.is_sorted {
-            let col = self.sort_settings.column.as_str();
+            let col = &self.sort_settings.column;
             let reverse = self.sort_settings.reverse;
             self.db
                 .as_ref()
@@ -451,6 +444,7 @@ impl<D: IndexableDatabase> App<D> {
                 .sort_books_by_col(col, reverse)?;
             book_view.sort_by_column(col, reverse)?;
             self.sort_settings.is_sorted = true;
+            self.register_update();
         }
         Ok(())
     }
