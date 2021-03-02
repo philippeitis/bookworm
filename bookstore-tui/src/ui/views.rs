@@ -457,11 +457,8 @@ impl<D: IndexableDatabase> EditWidget<D> {
             let column = {
                 self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
             };
-            match app.edit_selected_book(
-                column,
-                &self.edit.new_value,
-                &mut state_mut!(self).book_view,
-            ) {
+            match app.edit_selected_book(column, &self.edit.value, &mut state_mut!(self).book_view)
+            {
                 Ok(_) => {}
                 // Catch immutable column error and discard changes.
                 Err(ApplicationError::Book(BookError::ImmutableColumnError)) => {}
@@ -477,7 +474,7 @@ impl<D: IndexableDatabase> EditWidget<D> {
             .state()
             .get_selected_column_value(self.edit.selected)
             .to_owned();
-        self.edit.reset_orig(value);
+        self.edit = EditState::new(value, self.edit.selected);
     }
 }
 
@@ -515,7 +512,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
             for (j, word) in data.iter().enumerate() {
                 items.push(
                     if i == self.state().selected_column && j == self.edit.selected {
-                        let word = self.edit.visible();
+                        let word = &self.edit.value;
                         ListItem::new(Span::from(word.unicode_truncate_start(width).0))
                     } else {
                         ListItem::new(Span::from(word.unicode_truncate(width).0))
@@ -567,7 +564,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                                     }
                                 }
                             } else if c == 'c' {
-                                paste_into_clipboard(self.edit.visible())
+                                paste_into_clipboard(&self.edit.value)
                             } else {
                                 self.edit.push(c);
                             }
@@ -585,9 +582,6 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                     KeyCode::Delete => {
                         // TODO: Add code to delete forwards
                         //  (requires implementing cursor logic)
-                    }
-                    KeyCode::Right => {
-                        self.edit.edit_orig();
                     }
                     KeyCode::Down => {
                         self.dump_edit(app)?;

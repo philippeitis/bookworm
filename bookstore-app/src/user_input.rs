@@ -9,8 +9,7 @@ use crate::AutoCompleter;
 pub struct EditState {
     pub selected: usize,
     pub started_edit: bool,
-    pub orig_value: String,
-    pub new_value: String,
+    pub value: String,
 }
 
 impl Default for EditState {
@@ -18,60 +17,35 @@ impl Default for EditState {
         EditState {
             selected: 0,
             started_edit: false,
-            orig_value: String::new(),
-            new_value: String::new(),
+            value: String::new(),
         }
     }
 }
 
 impl EditState {
-    pub fn new<S: AsRef<str>>(orig_value: S, selected: usize) -> Self {
+    pub fn new<S: AsRef<str>>(value: S, selected: usize) -> Self {
         EditState {
             selected,
             started_edit: false,
-            orig_value: orig_value.as_ref().to_owned(),
-            new_value: String::new(),
+            value: value.as_ref().to_owned(),
         }
     }
 
     pub fn del(&mut self) {
         if self.started_edit {
-            self.new_value.pop();
+            self.value.pop();
         } else {
-            self.new_value.clear();
+            self.value.clear();
         }
         self.started_edit = true;
     }
 
     pub fn push(&mut self, c: char) {
         if !self.started_edit {
-            self.new_value.clear();
+            self.value.clear();
         }
         self.started_edit = true;
-        self.new_value.push(c);
-    }
-
-    pub fn edit_orig(&mut self) {
-        if !self.started_edit {
-            self.started_edit = true;
-            self.new_value = self.orig_value.clone();
-        }
-    }
-
-    pub fn reset_orig<S: AsRef<str>>(&mut self, orig_value: S) {
-        self.started_edit = false;
-        // TODO: Use .clone_into() when stabilized?
-        self.orig_value.clear();
-        self.orig_value.push_str(orig_value.as_ref());
-        self.new_value.clear();
-    }
-
-    pub fn visible(&self) -> &str {
-        if self.started_edit {
-            self.new_value.as_str()
-        } else {
-            self.orig_value.as_str()
-        }
+        self.value.push(c);
     }
 }
 
