@@ -91,10 +91,10 @@ impl BookMap {
     fn new_id(&mut self) -> u32 {
         let id = self.max_id;
         if self.max_id == u32::MAX {
-            panic!(format!(
+            panic!(
                 "Current ID is at maximum value of {} and can not be increased.",
                 u32::MAX
-            ));
+            );
         }
         self.max_id += 1;
         id
@@ -108,10 +108,10 @@ impl BookMap {
     fn borrow_id(&mut self) -> u32 {
         let id = self.max_id;
         if self.max_id == u32::MAX {
-            panic!(format!(
+            panic!(
                 "Current ID is at maximum value of {} and can not be increased.",
                 u32::MAX
-            ));
+            );
         }
         id + 1
     }
