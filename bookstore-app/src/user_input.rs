@@ -7,7 +7,6 @@ use crate::autocomplete::AutoCompleteError;
 use crate::AutoCompleter;
 
 pub struct EditState {
-    pub selected: usize,
     pub started_edit: bool,
     pub value: String,
 }
@@ -15,7 +14,6 @@ pub struct EditState {
 impl Default for EditState {
     fn default() -> Self {
         EditState {
-            selected: 0,
             started_edit: false,
             value: String::new(),
         }
@@ -23,9 +21,8 @@ impl Default for EditState {
 }
 
 impl EditState {
-    pub fn new<S: AsRef<str>>(value: S, selected: usize) -> Self {
+    pub fn new<S: AsRef<str>>(value: S) -> Self {
         EditState {
-            selected,
             started_edit: false,
             value: value.as_ref().to_owned(),
         }

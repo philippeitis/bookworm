@@ -470,11 +470,8 @@ impl<D: IndexableDatabase> EditWidget<D> {
 
     /// Used when column has been changed and edit should reflect new column's value.
     fn reset_edit(&mut self) {
-        let value = self
-            .state()
-            .get_selected_column_value(self.edit.selected)
-            .to_owned();
-        self.edit = EditState::new(value, self.edit.selected);
+        let value = self.state().get_selected_table_value().unwrap().to_owned();
+        self.edit = EditState::new(value);
     }
 }
 
@@ -499,8 +496,9 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
 
         let edit_style = self.state().style.edit_style();
         let select_style = self.state().style.select_style();
+        let selected = self.state().selected().unwrap();
 
-        for (i, ((title, data), &chunk)) in self
+        for (col, ((title, data), &chunk)) in self
             .state()
             .table_view
             .header_col_iter()
@@ -509,20 +507,18 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
         {
             let width = usize::from(chunk.width).saturating_sub(1);
             let mut items = Vec::with_capacity(data.len());
-            for (j, word) in data.iter().enumerate() {
-                items.push(
-                    if i == self.state().selected_column && j == self.edit.selected {
-                        let word = &self.edit.value;
-                        ListItem::new(Span::from(word.unicode_truncate_start(width).0))
-                    } else {
-                        ListItem::new(Span::from(word.unicode_truncate(width).0))
-                    },
-                );
+            for (row, word) in data.iter().enumerate() {
+                items.push(if selected == (col, row) {
+                    let word = &self.edit.value;
+                    ListItem::new(Span::from(word.unicode_truncate_start(width).0))
+                } else {
+                    ListItem::new(Span::from(word.unicode_truncate(width).0))
+                });
             }
 
             let list = List::new(items)
                 .block(Block::default().title(Span::from(title.to_string())))
-                .highlight_style(if i == self.state().selected_column {
+                .highlight_style(if col == self.state().selected_column {
                     edit_style
                 } else {
                     select_style

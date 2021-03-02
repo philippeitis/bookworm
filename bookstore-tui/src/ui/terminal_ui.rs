@@ -73,12 +73,16 @@ impl<D: IndexableDatabase> UIState<D> {
         self.table_view.regenerate_columns(&self.book_view)
     }
 
-    pub(crate) fn get_selected_column_value(&self, index: usize) -> &str {
-        &self.table_view.get_column(self.selected_column)[index]
+    pub(crate) fn get_selected_table_value(&self) -> Option<&str> {
+        Some(&self.table_view.get_column(self.selected_column)[self.book_view.selected()?])
     }
 
     pub(crate) fn num_cols(&self) -> usize {
         self.table_view.selected_cols().len()
+    }
+
+    pub(crate) fn selected(&self) -> Option<(usize, usize)> {
+        Some((self.selected_column, self.book_view.selected()?))
     }
 }
 
@@ -167,9 +171,9 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                             }
                             AppView::Edit => {
                                 let state = self.ui_state.deref().borrow();
-                                if let Some(x) = state.book_view.selected() {
+                                if let Some(selected_str) = state.get_selected_table_value() {
                                     self.active_view = Box::new(EditWidget {
-                                        edit: EditState::new(state.get_selected_column_value(x), x),
+                                        edit: EditState::new(selected_str),
                                         state: self.ui_state.clone(),
                                     });
                                 }
