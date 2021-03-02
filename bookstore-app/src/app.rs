@@ -26,13 +26,12 @@ use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
 
 #[cfg(target_os = "windows")]
-const PYTHON_STRING: &str = r#"import sys
+const OPEN_BOOK_IN_DIR_PY: &str = r#"import sys
 import subprocess
 import os
 
-if __name__ == '__main__':
-    FILEBROWSER_PATH = os.path.join(os.getenv('WINDIR'), 'explorer.exe')
-    subprocess.Popen(f'{FILEBROWSER_PATH} /select,"{sys.argv[1]}"')
+path = os.path.join(os.getenv('WINDIR'), 'explorer.exe')
+subprocess.Popen(f'{path} /select,"{sys.argv[1]}"')
 "#;
 
 macro_rules! book {
@@ -177,7 +176,7 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), ApplicationError> {
         use std::io::Write;
 
         let mut open_book_path = std::env::current_dir()?;
-        open_book_path.push("open_book.py");
+        open_book_path.push("open_book_in_dir.py");
 
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -185,7 +184,7 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), ApplicationError> {
             .create(true)
             .open(&open_book_path)?;
 
-        file.write_all(PYTHON_STRING.as_bytes())?;
+        file.write_all(OPEN_BOOK_IN_DIR_PY.as_bytes())?;
 
         // TODO: Find a way to do this entirely in Rust
         ProcessCommand::new("python")
