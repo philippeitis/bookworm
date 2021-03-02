@@ -67,10 +67,11 @@ impl From<AutoCompleteError> for CommandStringError {
 }
 
 impl CommandString {
-    fn vals_to_string(values: &mut dyn Iterator<Item = &(bool, std::string::String)>) -> String {
+    fn vals_to_string<I: IntoIterator<Item = (bool, std::string::String)>>(values: I) -> String {
         values
+            .into_iter()
             .map(|(escaped, raw_str)| {
-                if *escaped {
+                if escaped {
                     let mut s = String::with_capacity(2 + raw_str.len());
                     s.push('"');
                     s.push_str(raw_str.as_str());
@@ -115,9 +116,7 @@ impl CommandString {
     fn write_back(&mut self) {
         if self.autofilled.is_some() {
             let v = self.get_values_autofilled();
-            self.char_buf = CommandString::vals_to_string(&mut v.iter())
-                .chars()
-                .collect();
+            self.char_buf = CommandString::vals_to_string(v).chars().collect();
             self.autofilled = None;
         }
     }
@@ -205,7 +204,7 @@ impl CommandString {
 impl fmt::Display for CommandString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.autofilled.is_some() {
-            let mut vals = CommandString::vals_to_string(&mut self.get_values_autofilled().iter());
+            let mut vals = CommandString::vals_to_string(self.get_values_autofilled());
             if self.open_end && vals.ends_with('"') {
                 vals.pop();
             }
