@@ -342,34 +342,35 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         self.state_mut().curr_command.pop();
                     }
                     KeyCode::Char(x) => {
+                        let mut state = self.state_mut();
                         if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
                             if x == 'v' {
                                 if let Some(s) = copy_from_clipboard() {
                                     for c in s.chars() {
-                                        self.state_mut().curr_command.push(c);
+                                        state.curr_command.push(c);
                                     }
                                 }
                             } else {
-                                self.state_mut().curr_command.push(x);
+                                state.curr_command.push(x);
                             }
                         } else {
-                            self.state_mut().curr_command.push(x);
+                            state.curr_command.push(x);
                         }
                     }
                     KeyCode::Enter => {
-                        let args: Vec<_> = self
-                            .state()
+                        let mut state = self.state_mut();
+
+                        let args: Vec<_> = state
                             .curr_command
                             .get_values_autofilled()
                             .into_iter()
                             .map(|(_, a)| a)
                             .collect();
 
-                        self.state_mut().curr_command.clear();
+                        state.curr_command.clear();
 
                         match parse_args(args) {
                             Ok(command) => {
-                                let mut state = self.state_mut();
                                 let state_deref = state.deref_mut();
                                 let table_view = &mut state_deref.table_view;
                                 let book_view = &mut state_deref.book_view;
@@ -399,9 +400,10 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         }
                     }
                     KeyCode::Esc => {
-                        self.state_mut().modify_bv(|bv| bv.deselect());
-                        self.state_mut().curr_command.clear();
-                        self.state_mut().modify_bv(|bv| bv.pop_scope());
+                        let mut state = self.state_mut();
+                        state.modify_bv(|bv| bv.deselect());
+                        state.curr_command.clear();
+                        state.modify_bv(|bv| bv.pop_scope());
                     }
                     KeyCode::Delete => {
                         if self.state().curr_command.is_empty() {
