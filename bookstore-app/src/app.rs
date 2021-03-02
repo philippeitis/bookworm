@@ -25,6 +25,7 @@ use crate::settings::SortSettings;
 use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
 
+#[cfg(target_os = "windows")]
 const PYTHON_STRING: &str = r#"import sys
 import subprocess
 import os
@@ -175,17 +176,16 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), ApplicationError> {
     if let Some(path) = get_book_path(book, index) {
         use std::io::Write;
 
-        let mut open_book_path = std::env::current_dir().unwrap();
+        let mut open_book_path = std::env::current_dir()?;
         open_book_path.push("open_book.py");
 
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .truncate(true)
             .create(true)
-            .open(&open_book_path)
-            .unwrap();
+            .open(&open_book_path)?;
 
-        file.write_all(PYTHON_STRING.as_bytes()).unwrap();
+        file.write_all(PYTHON_STRING.as_bytes())?;
 
         // TODO: Find a way to do this entirely in Rust
         ProcessCommand::new("python")
