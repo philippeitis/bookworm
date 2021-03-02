@@ -539,10 +539,12 @@ impl AppDatabase for BasicDatabase {
                             }
                         }
                     }
-                    Search::CaseSensitive(column, search) => {
+                    Search::ExactSubstring(column, search) => {
                         let col = ColumnIdentifier::from(column);
+                        let search = regex::escape(&search);
+                        let matcher = Regex::new(search.as_str())?;
                         for (_, book) in db.books.iter() {
-                            if best_match(&search, &book!(book).get_column_or(&col, "")).is_some() {
+                            if matcher.is_match(&book!(book).get_column_or(&col, "")) {
                                 results.push(book.clone());
                             }
                         }

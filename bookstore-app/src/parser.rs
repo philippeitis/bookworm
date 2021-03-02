@@ -327,9 +327,9 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                         remove_string_quotes(args.next().ok_or_else(insuf)?),
                     )))
                 }
-                "c" => {
+                "e" => {
                     let mut args = args.into_iter();
-                    Ok(Command::FindMatches(Search::CaseSensitive(
+                    Ok(Command::FindMatches(Search::ExactSubstring(
                         args.next().ok_or_else(insuf)?,
                         remove_string_quotes(args.next().ok_or_else(insuf)?),
                     )))

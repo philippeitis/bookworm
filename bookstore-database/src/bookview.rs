@@ -297,13 +297,13 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
                         .map(|(_, b)| (book!(b).get_id(), b.clone()))
                         .collect()
                 }
-                Search::CaseSensitive(column, search) => {
+                Search::ExactSubstring(column, search) => {
                     let col = ColumnIdentifier::from(column);
+                    let search = regex::escape(&search);
+                    let matcher = Regex::new(search.as_str())?;
                     books
                         .iter()
-                        .filter(|(_, book)| {
-                            best_match(&search, &book!(book).get_column_or(&col, "")).is_some()
-                        })
+                        .filter(|(_, book)| matcher.is_match(&book!(book).get_column_or(&col, "")))
                         .map(|(_, b)| (book!(b).get_id(), b.clone()))
                         .collect()
                 }
