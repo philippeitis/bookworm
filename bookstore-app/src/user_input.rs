@@ -44,6 +44,14 @@ impl EditState {
         self.started_edit = true;
         self.value.push(c);
     }
+
+    pub fn extend(&mut self, s: &str) {
+        if !self.started_edit {
+            self.value.clear();
+        }
+        self.started_edit = true;
+        self.value.extend(s.chars());
+    }
 }
 
 #[derive(Default)]

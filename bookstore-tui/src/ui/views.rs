@@ -508,26 +508,28 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
             .enumerate()
         {
             let width = usize::from(chunk.width).saturating_sub(1);
-            let mut items = Vec::with_capacity(data.len());
-            for (row, word) in data.iter().enumerate() {
-                items.push(if selected == (col, row) {
-                    let word = &self.edit.value;
-                    ListItem::new(Span::from(word.unicode_truncate_start(width).0))
-                } else {
-                    ListItem::new(Span::from(word.unicode_truncate(width).0))
-                });
-            }
+            let items = data
+                .iter()
+                .enumerate()
+                .map(|(row, word)| {
+                    if selected == (col, row) {
+                        ListItem::new(Span::from(self.edit.value.unicode_truncate_start(width).0))
+                    } else {
+                        ListItem::new(Span::from(word.unicode_truncate(width).0))
+                    }
+                })
+                .collect::<Vec<_>>();
 
             let list = List::new(items)
                 .block(Block::default().title(Span::from(title.to_string())))
-                .highlight_style(if col == self.state().selected_column {
+                .highlight_style(if col == selected.0 {
                     edit_style
                 } else {
                     select_style
                 });
 
             let mut selected_row = ListState::default();
-            selected_row.select(self.state().book_view.selected());
+            selected_row.select(Some(selected.1));
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
         CommandWidget::new(&self.state().curr_command).render_into_frame(f, vchunks[1]);
@@ -557,9 +559,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                         if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
                             if c == 'v' {
                                 if let Some(s) = copy_from_clipboard() {
-                                    for c in s.chars() {
-                                        self.edit.push(c);
-                                    }
+                                    self.edit.extend(&s);
                                 }
                             } else if c == 'c' {
                                 paste_into_clipboard(&self.edit.value)
