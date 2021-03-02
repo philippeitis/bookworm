@@ -24,6 +24,7 @@ bookstore is a fast (hopefully) terminal based library management system (like C
     - home / end
   - Selecting books and editing their metadata using F2, or deleting them using Del
   - Specifying settings (selection colours, default columns, default sort settings) via TOML file
+  - Copying and pasting supported fields, on supported platforms via CTRL+C, CTRL+V
  
 # Planned Features
 - Cloud synchronization (eg. back up database and all books to Google Drive)
@@ -37,10 +38,19 @@ bookstore is a fast (hopefully) terminal based library management system (like C
   
 # Installation
 
+On Windows, MacOS
 ```bash
 git clone https://github.com/philippeitis/bookstore.git
 cd bookstore
-cargo install --path bookstore_tui
+cargo install --path bookstore-tui --features copypaste 
+```
+
+On Linux distros, additional dependencies are required for copy-paste support:
+```bash
+git clone https://github.com/philippeitis/bookstore.git
+cd bookstore
+sudo apt-get install xorg-dev libxcb1-dev
+cargo install --path bookstore-tui --features copypaste
 ```
 
 The minimum supported Rust version is current stable.
