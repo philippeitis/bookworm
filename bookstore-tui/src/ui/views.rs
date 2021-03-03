@@ -191,7 +191,6 @@ fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
 
 pub(crate) struct ColumnWidget<D: IndexableDatabase> {
     pub(crate) state: Rc<RefCell<UIState<D>>>,
-    // TODO: Make an optional book widget struct
     pub(crate) book_widget: Option<BookWidget>,
 }
 
