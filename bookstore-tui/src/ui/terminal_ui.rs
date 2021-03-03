@@ -16,7 +16,7 @@ use bookstore_app::user_input::{CommandString, EditState};
 use bookstore_app::{App, ApplicationError};
 use bookstore_database::{BookView, DatabaseError, IndexableDatabase, SearchableBookView};
 
-use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
+use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::views::{
     AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
 };
@@ -111,11 +111,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     ///
     /// # Errors
     /// None.
-    pub(crate) fn new<S: AsRef<str>>(
-        name: S,
-        settings: Settings,
-        app: App<D>,
-    ) -> Result<Self, TuiError> {
+    pub(crate) fn new<S: AsRef<str>>(name: S, settings: Settings, app: App<D>) -> Self {
         let state = Rc::new(RefCell::new(UIState {
             style: settings.interface_style,
             nav_settings: settings.navigation_settings,
@@ -124,17 +120,16 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             table_view: TableView::from(settings.columns),
             book_view: app.new_book_view(),
         }));
-        Ok(AppInterface {
+        AppInterface {
             border_widget: BorderWidget::new(name.as_ref().to_string()),
             active_view: Box::new(ColumnWidget {
                 state: state.clone(),
-                offset: BlindOffset::new(),
-                book_area: Rect::default(),
+                book_widget: None,
             }),
             ui_updated: false,
             ui_state: state,
             app,
-        })
+        }
     }
 
     /// Reads and handles user input. On success, returns a bool
@@ -165,8 +160,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                             AppView::Columns => {
                                 self.active_view = Box::new(ColumnWidget {
                                     state: self.ui_state.clone(),
-                                    offset: BlindOffset::new(),
-                                    book_area: Rect::default(),
+                                    book_widget: None,
                                 })
                             }
                             AppView::Edit => {
@@ -232,13 +226,8 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                         )
                     };
 
-                    if let Some(chunk_size) = self.active_view.allocate_chunk(chunk) {
-                        let mut state = self.ui_state.borrow_mut();
-                        state.book_view.refresh_window_size(chunk_size);
-                        let _ = state.update_column_data();
-                    }
-
-                    self.active_view.render_into_frame(&self.app, f, chunk);
+                    self.active_view.prepare_render(chunk);
+                    self.active_view.render_into_frame(f, chunk);
                 })?;
             }
 

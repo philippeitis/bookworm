@@ -71,7 +71,7 @@ fn main() -> Result<(), TuiError> {
     }
 
     let stdout = stdout();
-    let mut app = AppInterface::new("Really Cool Library", settings, app)?;
+    let mut app = AppInterface::new("Really Cool Library", settings, app);
 
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;

@@ -22,15 +22,9 @@ use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
 use bookstore_database::{BookView, IndexableDatabase, NestedBookView, ScrollableBookView};
 use bookstore_records::BookError;
 
-use crate::ui::scrollable_text::{BlindOffset, ScrollableText};
+use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::terminal_ui::UIState;
-use crate::ui::widgets::{book_to_widget_text, CommandWidget, Widget};
-
-macro_rules! state {
-    ($self: ident) => {
-        $self.state.as_ref().borrow()
-    };
-}
+use crate::ui::widgets::{BookWidget, CommandWidget, Widget};
 
 macro_rules! state_mut {
     ($self: ident) => {
@@ -117,8 +111,8 @@ impl TuiStyle for InterfaceStyle {
 // TODO: when https://github.com/crossterm-rs/crossterm/issues/507 is resolved,
 //  use code to allow a Resizable trait for EditWidget and ColumnWidget.
 pub(crate) trait ResizableWidget<D: IndexableDatabase, B: Backend> {
-    // TODO: Consider AppCommand enum? Could be used to do other things as well?
-    fn allocate_chunk(&self, chunk: Rect) -> Option<usize>;
+    // Prepares to render the app
+    fn prepare_render(&mut self, chunk: Rect);
 
     /// Renders the widget into the frame, using the provided space.
     ///
@@ -126,16 +120,12 @@ pub(crate) trait ResizableWidget<D: IndexableDatabase, B: Backend> {
     ///
     /// * ` f ` - A frame to render into.
     /// * ` chunk ` - A chunk to specify the size of the widget.
-    fn render_into_frame(&mut self, app: &App<D>, f: &mut Frame<B>, chunk: Rect);
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect);
 }
 
 pub(crate) trait InputHandler<D: IndexableDatabase> {
-    /// Renders the widget into the frame, using the provided space.
-    ///
-    /// # Arguments
-    ///
-    /// * ` f ` - A frame to render into.
-    /// * ` chunk ` - A chunk to specify the size of the widget.
+    /// Processes the event and modifies the internal state accordingly. May modify app_state,
+    /// depending on specific event.
     fn handle_input(
         &mut self,
         event: Event,
@@ -201,8 +191,8 @@ fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
 
 pub(crate) struct ColumnWidget<D: IndexableDatabase> {
     pub(crate) state: Rc<RefCell<UIState<D>>>,
-    pub(crate) offset: BlindOffset,
-    pub(crate) book_area: Rect,
+    // TODO: Make an optional book widget struct
+    pub(crate) book_widget: Option<BookWidget>,
 }
 
 impl<D: IndexableDatabase> ColumnWidget<D> {
@@ -213,34 +203,112 @@ impl<D: IndexableDatabase> ColumnWidget<D> {
     fn state_mut(&mut self) -> RefMut<UIState<D>> {
         self.state.as_ref().borrow_mut()
     }
+
+    fn refresh_book_widget(&mut self) {
+        let book = self.state().book_view.get_selected_book().ok();
+        self.book_widget = book.map(|book| BookWidget::new(Rect::default(), book));
+    }
+
+    fn scroll_up(&mut self) {
+        let changed = {
+            let mut state = self.state_mut();
+            let scroll = state.nav_settings.scroll;
+            if state.nav_settings.inverted {
+                state.modify_bv(|bv| bv.scroll_down(scroll))
+            } else {
+                state.modify_bv(|bv| bv.scroll_up(scroll))
+            }
+        };
+
+        if changed {
+            self.refresh_book_widget();
+        }
+    }
+
+    fn scroll_down(&mut self) {
+        let changed = {
+            let mut state = self.state_mut();
+            let scroll = state.nav_settings.scroll;
+            if state.nav_settings.inverted {
+                state.modify_bv(|bv| bv.scroll_up(scroll))
+            } else {
+                state.modify_bv(|bv| bv.scroll_down(scroll))
+            }
+        };
+
+        if changed {
+            self.refresh_book_widget();
+        }
+    }
+
+    fn page_down(&mut self) {
+        if self.state_mut().book_view.page_down() {
+            self.refresh_book_widget();
+        }
+    }
+
+    fn page_up(&mut self) {
+        if self.state_mut().book_view.page_up() {
+            self.refresh_book_widget();
+        }
+    }
+
+    fn home(&mut self) {
+        if self.state_mut().book_view.home() {
+            self.refresh_book_widget();
+        }
+    }
+
+    fn end(&mut self) {
+        if self.state_mut().book_view.end() {
+            self.refresh_book_widget();
+        }
+    }
+
+    fn select_up(&mut self) {
+        if self.state_mut().book_view.select_up() {
+            self.refresh_book_widget();
+        }
+    }
+
+    fn select_down(&mut self) {
+        if self.state_mut().book_view.select_down() {
+            self.refresh_book_widget();
+        }
+    }
 }
 
 impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget<D> {
-    fn allocate_chunk(&self, chunk: Rect) -> Option<usize> {
+    fn prepare_render(&mut self, chunk: Rect) {
+        let chunk = if let Some(book_widget) = &mut self.book_widget {
+            let hchunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
+                .split(chunk);
+            book_widget.set_chunk(hchunks[1]);
+            hchunks[0]
+        } else {
+            chunk
+        };
+
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
-        let curr_height = usize::from(vchunks[0].height);
-        Some(curr_height.saturating_sub(1))
+        let window_size = usize::from(vchunks[0].height).saturating_sub(1);
+        let mut state = self.state_mut();
+        state.book_view.refresh_window_size(window_size);
+        let _ = state.update_column_data();
     }
 
-    fn render_into_frame(&mut self, _app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
-        let chunk = if let Ok(b) = state!(self).book_view.get_selected_book() {
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
+        let chunk = if let Some(book_widget) = &self.book_widget {
             let hchunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(75), Constraint::Percentage(25)])
                 .split(chunk);
 
-            self.book_area = hchunks[1];
-            let b = &b.as_ref().read().unwrap();
-            let book_text = book_to_widget_text(b, self.book_area.width.saturating_sub(1) as usize);
-            self.offset
-                .refresh_window_height(self.book_area.height as usize);
-            let offset = self.offset.offset_with_height(book_text.lines.len());
-            let p = Paragraph::new(book_text).scroll((offset as u16, 0));
-            f.render_widget(p, self.book_area);
-
+            book_widget.render_into_frame(f, hchunks[1]);
             hchunks[0]
         } else {
             chunk
@@ -278,10 +346,6 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
     }
 }
 
-fn inside_rect(rect: Rect, col: u16, row: u16) -> bool {
-    col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
-}
-
 // NOTE: This is the only place where app scrolling takes place.
 impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
     fn handle_input(
@@ -295,35 +359,35 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                 (MouseEventKind::ScrollDown, c, r) => {
                     let inverted = self.state().nav_settings.inverted;
                     let scroll = self.state().nav_settings.scroll;
-                    if inside_rect(self.book_area, c, r) {
-                        if inverted {
-                            self.offset.scroll_up(scroll);
+                    if let Some(book_widget) = &mut self.book_widget {
+                        if book_widget.contains_point(c, r) {
+                            if inverted {
+                                book_widget.offset_mut().scroll_up(scroll);
+                            } else {
+                                book_widget.offset_mut().scroll_down(scroll);
+                            }
                         } else {
-                            self.offset.scroll_down(scroll);
+                            self.scroll_down();
                         }
                     } else {
-                        if inverted {
-                            self.state_mut().modify_bv(|bv| bv.scroll_up(scroll));
-                        } else {
-                            self.state_mut().modify_bv(|bv| bv.scroll_down(scroll));
-                        }
+                        self.scroll_down();
                     }
                 }
                 (MouseEventKind::ScrollUp, c, r) => {
                     let inverted = self.state().nav_settings.inverted;
                     let scroll = self.state().nav_settings.scroll;
-                    if inside_rect(self.book_area, c, r) {
-                        if inverted {
-                            self.offset.scroll_down(scroll);
+                    if let Some(book_widget) = &mut self.book_widget {
+                        if book_widget.contains_point(c, r) {
+                            if inverted {
+                                book_widget.offset_mut().scroll_down(scroll);
+                            } else {
+                                book_widget.offset_mut().scroll_up(scroll);
+                            }
                         } else {
-                            self.offset.scroll_up(scroll);
+                            self.scroll_up();
                         }
                     } else {
-                        if inverted {
-                            self.state_mut().modify_bv(|bv| bv.scroll_down(scroll));
-                        } else {
-                            self.state_mut().modify_bv(|bv| bv.scroll_up(scroll));
-                        }
+                        self.scroll_up();
                     }
                 }
                 _ => {
@@ -400,38 +464,30 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         }
                     }
                     KeyCode::Esc => {
-                        let mut state = self.state_mut();
-                        state.modify_bv(|bv| bv.deselect());
-                        state.curr_command.clear();
-                        state.modify_bv(|bv| bv.pop_scope());
+                        {
+                            let mut state = self.state_mut();
+                            state.modify_bv(|bv| bv.deselect());
+                            state.curr_command.clear();
+                            state.modify_bv(|bv| bv.pop_scope());
+                        }
+                        self.refresh_book_widget();
                     }
                     KeyCode::Delete => {
                         if self.state().curr_command.is_empty() {
                             app.remove_selected_book(&mut self.state_mut().book_view)?;
+                            self.refresh_book_widget();
                         } else {
                             // TODO: Add code to delete forwards
                             //  (requires implementing cursor logic)
                         }
                     }
                     // Scrolling
-                    KeyCode::Up => {
-                        self.state_mut().modify_bv(|bv| bv.select_up());
-                    }
-                    KeyCode::Down => {
-                        self.state_mut().modify_bv(|bv| bv.select_down());
-                    }
-                    KeyCode::PageDown => {
-                        self.state_mut().modify_bv(|bv| bv.page_down());
-                    }
-                    KeyCode::PageUp => {
-                        self.state_mut().modify_bv(|bv| bv.page_up());
-                    }
-                    KeyCode::Home => {
-                        self.state_mut().modify_bv(|bv| bv.home());
-                    }
-                    KeyCode::End => {
-                        self.state_mut().modify_bv(|bv| bv.end());
-                    }
+                    KeyCode::Up => self.select_up(),
+                    KeyCode::Down => self.select_down(),
+                    KeyCode::PageDown => self.page_down(),
+                    KeyCode::PageUp => self.page_up(),
+                    KeyCode::Home => self.home(),
+                    KeyCode::End => self.end(),
                     _ => return Ok(ApplicationTask::DoNothing),
                 }
             }
@@ -478,27 +534,30 @@ impl<D: IndexableDatabase> EditWidget<D> {
 }
 
 impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<D> {
-    fn allocate_chunk(&self, chunk: Rect) -> Option<usize> {
+    fn prepare_render(&mut self, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        let curr_height = usize::from(vchunks[0].height);
-        Some(curr_height.saturating_sub(1))
+        let window = usize::from(vchunks[0].height).saturating_sub(1);
+        let mut state = self.state_mut();
+        state.book_view.refresh_window_size(window);
+        let _ = state.update_column_data();
     }
 
-    fn render_into_frame(&mut self, _app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        let hchunks = split_chunk_into_columns(chunk, self.state().num_cols() as u16);
+        let state = self.state();
+        let hchunks = split_chunk_into_columns(chunk, state.num_cols() as u16);
 
-        let edit_style = self.state().style.edit_style();
-        let select_style = self.state().style.select_style();
-        let selected = self.state().selected().unwrap();
+        let edit_style = state.style.edit_style();
+        let select_style = state.style.select_style();
+        let selected = state.selected().unwrap();
 
         for (col, ((title, data), &chunk)) in self
             .state()
@@ -532,7 +591,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
             selected_row.select(Some(selected.1));
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
-        CommandWidget::new(&self.state().curr_command).render_into_frame(f, vchunks[1]);
+        CommandWidget::new(&state.curr_command).render_into_frame(f, vchunks[1]);
     }
 }
 
@@ -622,24 +681,28 @@ impl<D: IndexableDatabase> HelpWidget<D> {
 }
 
 impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for HelpWidget<D> {
-    fn allocate_chunk(&self, _chunk: Rect) -> Option<usize> {
-        None
-    }
-
-    fn render_into_frame(&mut self, _app: &App<D>, f: &mut Frame<B>, chunk: Rect) {
+    fn prepare_render(&mut self, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
         self.text.refresh_window_height(vchunks[0].height as usize);
-        let paragraph = Paragraph::new(self.text.text().clone())
+    }
+
+    fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
+        let vchunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
+            .split(chunk);
+
+        let paragraph = Paragraph::new(self.text.text())
             .scroll((self.text.offset() as u16, 0))
             .style(Style::default());
 
         f.render_widget(paragraph, vchunks[0]);
         let text = Text::styled(
-            "Press ESC to return".to_string(),
+            "Press ESC to return",
             Style::default().add_modifier(Modifier::BOLD),
         );
 

@@ -51,7 +51,7 @@ impl ScrollableText {
         self.window_height = height;
     }
 
-    pub(crate) fn text(&self) -> &String {
+    pub(crate) fn text(&self) -> &str {
         &self.text
     }
 }
@@ -94,8 +94,12 @@ impl BlindOffset {
         self.offset = usize::MAX;
     }
 
-    pub(crate) fn offset_with_height(&mut self, height: usize) -> usize {
+    pub(crate) fn fit_offset_in_height(&mut self, height: usize) -> usize {
         self.offset = height.saturating_sub(self.window_height).min(self.offset);
+        self.offset
+    }
+
+    pub(crate) fn offset(&self) -> usize {
         self.offset
     }
 
