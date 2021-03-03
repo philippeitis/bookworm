@@ -50,7 +50,7 @@ impl EditState {
             self.value.clear();
         }
         self.started_edit = true;
-        self.value.extend(s.chars());
+        self.value.push_str(s);
     }
 }
 
@@ -86,7 +86,7 @@ impl CommandString {
                     s.push('"');
                     s
                 } else {
-                    raw_str.to_owned()
+                    raw_str
                 }
             })
             .join(" ")
