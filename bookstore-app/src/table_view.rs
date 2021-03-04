@@ -14,19 +14,13 @@ macro_rules! book {
 /// TableView acts as a way to avoid errors in the rendering step - by pre-loading all
 /// data before entering the rendering step, the rendering step itself can avoid
 /// BookView::get_books_cursored()'s Result.
+#[derive(Default)]
 pub struct TableView {
     selected_cols: Vec<UniCase<String>>,
     column_data: Vec<Vec<String>>,
 }
 
 impl TableView {
-    pub fn new() -> Self {
-        TableView {
-            selected_cols: vec![],
-            column_data: vec![],
-        }
-    }
-
     /// Refreshes the table data according to the currently selected columns and the books
     /// in the BookView's cursor.
     pub fn regenerate_columns<D: IndexableDatabase, S: BookView<D>>(
@@ -50,7 +44,7 @@ impl TableView {
 
         for book in bv.get_books_cursored()?.iter().map(|b| book!(b)) {
             for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
-                column.push(book.get_column_or(&col, ""));
+                column.push(book.get_column(&col).unwrap_or_else(String::new));
             }
         }
 

@@ -48,7 +48,7 @@ fn main() -> Result<(), TuiError> {
     let db = Database::open(opts.database)?;
 
     let mut app = App::new(db);
-    let mut placeholder_table_view = TableView::new();
+    let mut placeholder_table_view = TableView::default();
     let mut book_view = app.new_book_view();
     if !command.is_empty() {
         for command in command.split(|v| v == "--") {
