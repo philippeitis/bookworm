@@ -288,14 +288,18 @@ impl RawBook {
             self.series = other.series.clone();
         }
 
-        if let Some(variants) = &other.variants {
-            self.variants
-                .as_mut()
-                .map(|v| v.extend_from_slice(variants));
+        if let Some(other_variants) = &other.variants {
+            match self.variants.as_mut() {
+                None => self.variants = Some(other_variants.clone()),
+                Some(variants) => variants.extend_from_slice(other_variants),
+            }
         }
 
-        if let Some(map) = other.extended_tags.clone() {
-            self.extended_tags.as_mut().map(|e| e.extend(map));
+        if let Some(other_tags) = other.extended_tags.clone() {
+            match self.extended_tags.as_mut() {
+                None => self.extended_tags = Some(other_tags),
+                Some(tags) => tags.extend(other_tags),
+            }
         }
     }
 }
