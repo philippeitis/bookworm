@@ -461,7 +461,7 @@ mod test {
                     assert_eq!(&e, err);
                 }
             }
-            assert_eq!(book.get_column(&col, ""), expected.to_owned());
+            assert_eq!(book.get_column(&col), Some(expected.to_string()));
         }
     }
 }
