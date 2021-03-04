@@ -127,47 +127,22 @@ impl RawBook {
         self.description.as_ref()
     }
 
-    pub fn get_column_or<S: AsRef<str>>(&self, column: &ColumnIdentifier, default: S) -> String {
-        match column {
-            ColumnIdentifier::Title => self
-                .get_title()
-                .clone()
-                .unwrap_or_else(|| default.as_ref())
-                .to_owned(),
-            ColumnIdentifier::Author => match self.get_authors() {
-                None => default.as_ref().to_owned(),
-                Some(authors) => authors.join(", "),
-            },
+    pub fn get_column(&self, column: &ColumnIdentifier) -> Option<String> {
+        Some(match column {
+            ColumnIdentifier::Title => self.get_title()?.to_string(),
+            ColumnIdentifier::Author => self.get_authors()?.join(", "),
             ColumnIdentifier::Series => {
-                if let Some((series_name, nth_in_series)) = self.get_series() {
-                    if let Some(nth_in_series) = nth_in_series {
-                        format!("{} [{}]", series_name, nth_in_series)
-                    } else {
-                        series_name.clone()
-                    }
+                let (series_name, nth_in_series) = self.get_series()?;
+                if let Some(nth_in_series) = nth_in_series {
+                    format!("{} [{}]", series_name, nth_in_series)
                 } else {
-                    default.as_ref().to_owned()
+                    series_name.clone()
                 }
             }
-            ColumnIdentifier::Description => {
-                if let Some(desc) = &self.description {
-                    desc.clone()
-                } else {
-                    default.as_ref().to_string()
-                }
-            }
-            ColumnIdentifier::ExtendedTag(x) => {
-                if let Some(d) = &self.extended_tags {
-                    match d.get(x) {
-                        None => default.as_ref().to_owned(),
-                        Some(s) => s.to_owned(),
-                    }
-                } else {
-                    default.as_ref().to_owned()
-                }
-            }
-            _ => default.as_ref().to_owned(),
-        }
+            ColumnIdentifier::Description => self.description.as_ref()?.to_string(),
+            ColumnIdentifier::ExtendedTag(x) => self.extended_tags.as_ref()?.get(x)?.to_string(),
+            _ => return None,
+        })
     }
 }
 
@@ -290,7 +265,7 @@ impl RawBook {
             }
             ColumnIdentifier::ID => Ordering::Equal,
             ColumnIdentifier::Title => self.get_title().cmp(&other.get_title()),
-            c => self.get_column_or(c, "").cmp(&other.get_column_or(c, "")),
+            c => self.get_column(c).cmp(&other.get_column(c)),
         }
     }
 }
@@ -312,21 +287,15 @@ impl RawBook {
         if self.series.is_none() {
             self.series = other.series.clone();
         }
-        match self.variants.as_mut() {
-            None => self.variants = other.variants.clone(),
-            Some(v) => {
-                if let Some(vars) = other.variants.clone() {
-                    v.extend(vars);
-                }
-            }
+
+        if let Some(variants) = &other.variants {
+            self.variants
+                .as_mut()
+                .map(|v| v.extend_from_slice(variants));
         }
-        match self.extended_tags.as_mut() {
-            None => self.extended_tags = other.extended_tags.clone(),
-            Some(e) => {
-                if let Some(map) = other.extended_tags.clone() {
-                    e.extend(map);
-                }
-            }
+
+        if let Some(map) = other.extended_tags.clone() {
+            self.extended_tags.as_mut().map(|e| e.extend(map));
         }
     }
 }
@@ -364,10 +333,10 @@ impl Book {
         self.raw_book.get_description()
     }
 
-    pub fn get_column_or<S: AsRef<str>>(&self, column: &ColumnIdentifier, default: S) -> String {
+    pub fn get_column(&self, column: &ColumnIdentifier) -> Option<String> {
         match column {
-            ColumnIdentifier::ID => self.id.to_string(),
-            x => self.raw_book.get_column_or(x, default),
+            ColumnIdentifier::ID => Some(self.id.to_string()),
+            x => self.raw_book.get_column(x),
         }
     }
 
@@ -391,7 +360,7 @@ impl Book {
     }
 
     /// Creates a `Book` with the given ID and core metadata.
-    pub fn from_raw_book(raw_book: RawBook, id: u32) -> Book {
+    pub fn from_raw_book(id: u32, raw_book: RawBook) -> Book {
         Book { id, raw_book }
     }
 
@@ -488,7 +457,7 @@ mod test {
                     assert_eq!(&e, err);
                 }
             }
-            assert_eq!(book.get_column_or(&col, ""), expected.to_owned());
+            assert_eq!(book.get_column(&col, ""), expected.to_owned());
         }
     }
 }

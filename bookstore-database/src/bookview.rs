@@ -175,6 +175,7 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 
     fn remove_book(&mut self, id: u32) {
         for (cursor, map) in self.scopes.iter_mut() {
+            // Required to maintain sort order.
             if map.shift_remove(&id).is_none() {
                 break;
             } else {
@@ -293,7 +294,10 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
                     let matcher = Regex::new(search.as_str())?;
                     books
                         .iter()
-                        .filter(|(_, book)| matcher.is_match(&book!(book).get_column_or(&col, "")))
+                        .filter(|(_, book)| {
+                            matcher
+                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
+                        })
                         .map(|(_, b)| (book!(b).get_id(), b.clone()))
                         .collect()
                 }
@@ -303,7 +307,10 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
                     let matcher = Regex::new(search.as_str())?;
                     books
                         .iter()
-                        .filter(|(_, book)| matcher.is_match(&book!(book).get_column_or(&col, "")))
+                        .filter(|(_, book)| {
+                            matcher
+                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
+                        })
                         .map(|(_, b)| (book!(b).get_id(), b.clone()))
                         .collect()
                 }
@@ -312,7 +319,11 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
                     books
                         .iter()
                         .filter(|(_, book)| {
-                            best_match(&search, &book!(book).get_column_or(&col, "")).is_some()
+                            best_match(
+                                &search,
+                                &book!(book).get_column(&col).unwrap_or_else(String::new),
+                            )
+                            .is_some()
                         })
                         .map(|(_, b)| (book!(b).get_id(), b.clone()))
                         .collect()

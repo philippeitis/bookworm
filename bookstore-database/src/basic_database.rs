@@ -380,7 +380,7 @@ impl AppDatabase for BasicDatabase {
     fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError> {
         let (id, len) = self.backend.write(|db| {
             let id = db.new_id();
-            let book = Book::from_raw_book(book, id);
+            let book = Book::from_raw_book(id, book);
             db.books.insert(id, Arc::new(RwLock::new(book)));
             (id, db.books.len())
         })?;
@@ -397,7 +397,7 @@ impl AppDatabase for BasicDatabase {
         self.len = self.backend.write(|db| {
             books.into_iter().for_each(|book| {
                 let id = db.new_id();
-                let book = Book::from_raw_book(book, id);
+                let book = Book::from_raw_book(id, book);
                 db.books.insert(id, Arc::new(RwLock::new(book)));
                 ids.push(id);
             });
@@ -534,7 +534,9 @@ impl AppDatabase for BasicDatabase {
                         let col = ColumnIdentifier::from(column);
                         let matcher = Regex::new(search.as_str())?;
                         for (_, book) in db.books.iter() {
-                            if matcher.is_match(&book!(book).get_column_or(&col, "")) {
+                            if matcher
+                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
+                            {
                                 results.push(book.clone());
                             }
                         }
@@ -544,7 +546,9 @@ impl AppDatabase for BasicDatabase {
                         let search = regex::escape(&search);
                         let matcher = Regex::new(search.as_str())?;
                         for (_, book) in db.books.iter() {
-                            if matcher.is_match(&book!(book).get_column_or(&col, "")) {
+                            if matcher
+                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
+                            {
                                 results.push(book.clone());
                             }
                         }
@@ -553,8 +557,11 @@ impl AppDatabase for BasicDatabase {
                         let col = ColumnIdentifier::from(column);
                         let insensitive = search.to_ascii_lowercase();
                         for (_, book) in db.books.iter() {
-                            if best_match(&insensitive, &book!(book).get_column_or(&col, ""))
-                                .is_some()
+                            if best_match(
+                                &insensitive,
+                                &book!(book).get_column(&col).unwrap_or_else(String::new),
+                            )
+                            .is_some()
                             {
                                 results.push(book.clone());
                             }
