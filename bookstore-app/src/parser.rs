@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use bookstore_database::search::SearchMode;
+use bookstore_database::search::{Search, SearchMode};
+use bookstore_records::book::ColumnIdentifier;
 
 #[derive(Debug)]
 pub enum Flag {
@@ -35,7 +36,7 @@ pub enum Command {
     Quit,
     Write,
     WriteAndQuit,
-    FindMatches(SearchMode, String, String),
+    FindMatches(Search),
     Help(String),
     GeneralHelp,
 }
@@ -54,7 +55,7 @@ impl Command {
             DeleteBook(b) | EditBook(b, _, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
                 b == &BookIndex::Selected
             }
-            AddColumn(_) | RemoveColumn(_) | SortColumn(_, _) | FindMatches(..) => true,
+            AddColumn(_) | RemoveColumn(_) | SortColumn(_, _) | FindMatches(_) => true,
             _ => false,
         }
     }
@@ -311,36 +312,23 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             Some(Flag::Flag(arg)) => Ok(Command::RemoveColumn(arg)),
             _ => Err(CommandError::InvalidCommand),
         },
-        "!f" => match flags.into_iter().next() {
-            Some(Flag::StartingArguments(args)) => {
-                let mut args = args.into_iter();
-                Ok(Command::FindMatches(
-                    SearchMode::Default,
-                    args.next().ok_or_else(insuf)?,
-                    remove_string_quotes(args.next().ok_or_else(insuf)?),
-                ))
-            }
-            Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
-                "r" => {
-                    let mut args = args.into_iter();
-                    Ok(Command::FindMatches(
-                        SearchMode::Regex,
-                        args.next().ok_or_else(insuf)?,
-                        remove_string_quotes(args.next().ok_or_else(insuf)?),
-                    ))
-                }
-                "e" => {
-                    let mut args = args.into_iter();
-                    Ok(Command::FindMatches(
-                        SearchMode::ExactSubstring,
-                        args.next().ok_or_else(insuf)?,
-                        remove_string_quotes(args.next().ok_or_else(insuf)?),
-                    ))
-                }
+        "!f" => {
+            let (mode, args) = match flags.into_iter().next() {
+                Some(Flag::StartingArguments(args)) => Ok((SearchMode::Default, args)),
+                Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
+                    "r" => Ok((SearchMode::Regex, args)),
+                    "e" => Ok((SearchMode::ExactSubstring, args)),
+                    _ => Err(CommandError::InvalidCommand),
+                },
                 _ => Err(CommandError::InvalidCommand),
-            },
-            _ => Err(CommandError::InvalidCommand),
-        },
+            }?;
+            let mut args = args.into_iter();
+            Ok(Command::FindMatches(Search {
+                mode,
+                column: ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
+                search: remove_string_quotes(args.next().ok_or_else(insuf)?),
+            }))
+        }
         "!o" => {
             let mut f = false;
             let mut loc_exists = false;

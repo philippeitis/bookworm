@@ -4,12 +4,10 @@ use std::path;
 use std::sync::{Arc, RwLock};
 
 use indexmap::IndexMap;
-use regex::{Error as RegexError, Regex};
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "sqlite")]
 use sqlx::Error as SQLError;
-use sublime_fuzzy::best_match;
 use unicase::UniCase;
 
 use bookstore_records::{
@@ -17,7 +15,7 @@ use bookstore_records::{
     Book, BookError,
 };
 
-use crate::search::SearchMode;
+use crate::search::{Error as SearchError, Search};
 
 macro_rules! book {
     ($book: ident) => {
@@ -34,7 +32,7 @@ macro_rules! book_mut {
 #[derive(Debug)]
 pub enum DatabaseError {
     Io(std::io::Error),
-    Regex(RegexError),
+    Search(SearchError),
     Book(BookError),
     BookNotFound(u32),
     IndexOutOfBounds(usize),
@@ -56,9 +54,9 @@ impl From<BookError> for DatabaseError {
     }
 }
 
-impl From<RegexError> for DatabaseError {
-    fn from(e: RegexError) -> Self {
-        DatabaseError::Regex(e)
+impl From<SearchError> for DatabaseError {
+    fn from(e: SearchError) -> Self {
+        DatabaseError::Search(e)
     }
 }
 
@@ -258,12 +256,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn find_matches<S0: AsRef<str>, S1: AsRef<str>>(
-        &self,
-        search: SearchMode,
-        column: S0,
-        search_string: S1,
-    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError>;
+    fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError>;
 
     /// Sorts books by comparing the specified column.
     ///
@@ -529,54 +522,18 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn find_matches<S0: AsRef<str>, S1: AsRef<str>>(
-        &self,
-        search: SearchMode,
-        column: S0,
-        search_string: S1,
-    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
+    fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
         Ok(self
             .backend
             .read(|db| -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
                 let mut results = vec![];
-                match search {
-                    SearchMode::Regex => {
-                        let col = ColumnIdentifier::from(column);
-                        let matcher = Regex::new(search_string.as_ref())?;
-                        for (_, book) in db.books.iter() {
-                            if matcher
-                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
-                            {
-                                results.push(book.clone());
-                            }
-                        }
-                    }
-                    SearchMode::ExactSubstring => {
-                        let col = ColumnIdentifier::from(column);
-                        let search_string = regex::escape(search_string.as_ref());
-                        let matcher = Regex::new(search_string.as_ref())?;
-                        for (_, book) in db.books.iter() {
-                            if matcher
-                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
-                            {
-                                results.push(book.clone());
-                            }
-                        }
-                    }
-                    SearchMode::Default => {
-                        let col = ColumnIdentifier::from(column);
-                        for (_, book) in db.books.iter() {
-                            if best_match(
-                                search_string.as_ref(),
-                                &book!(book).get_column(&col).unwrap_or_else(String::new),
-                            )
-                            .is_some()
-                            {
-                                results.push(book.clone());
-                            }
-                        }
+                let matcher = search.into_matcher()?;
+                for (_, book) in db.books.iter() {
+                    if matcher.is_match(&book!(book)) {
+                        results.push(book.clone());
                     }
                 }
+
                 Ok(results)
             })??)
     }

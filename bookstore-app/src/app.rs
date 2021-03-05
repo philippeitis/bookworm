@@ -378,8 +378,8 @@ impl<D: IndexableDatabase> App<D> {
                     open_book_in_dir(&book!(b), index)?;
                 }
             }
-            Command::FindMatches(search, column, search_string) => {
-                book_view.push_scope(search, column, search_string)?;
+            Command::FindMatches(search) => {
+                book_view.push_scope(search)?;
                 self.register_update();
             }
             Command::Write => self.write(|d| d.save())?,

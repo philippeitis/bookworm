@@ -1,17 +1,15 @@
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use indexmap::map::IndexMap;
-use regex::{Error as RegexError, Regex};
-use sublime_fuzzy::best_match;
 use unicase::UniCase;
 
 use bookstore_records::{book::ColumnIdentifier, Book, BookError};
 
 use crate::basic_database::IndexableDatabase;
-use crate::search::SearchMode;
+use crate::search::{Error as SearchError, Search};
 use crate::{AppDatabase, DatabaseError, PageCursor};
-use std::sync::{Arc, RwLock};
 
 macro_rules! book {
     ($book: ident) => {
@@ -38,8 +36,8 @@ impl From<DatabaseError> for BookViewError {
     }
 }
 
-impl From<RegexError> for BookViewError {
-    fn from(_: RegexError) -> Self {
+impl From<SearchError> for BookViewError {
+    fn from(_: SearchError) -> Self {
         BookViewError::SearchError
     }
 }
@@ -102,12 +100,7 @@ pub trait ScrollableBookView<D: AppDatabase>: BookView<D> {
 }
 
 pub trait NestedBookView<D: AppDatabase>: BookView<D> {
-    fn push_scope<S0: AsRef<str>, S1: AsRef<str>>(
-        &mut self,
-        search: SearchMode,
-        column: S0,
-        search_string: S1,
-    ) -> Result<(), BookViewError>;
+    fn push_scope(&mut self, search: Search) -> Result<(), BookViewError>;
 
     fn pop_scope(&mut self) -> bool;
 }
@@ -282,16 +275,11 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 }
 
 impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
-    fn push_scope<S0: AsRef<str>, S1: AsRef<str>>(
-        &mut self,
-        search: SearchMode,
-        column: S0,
-        search_string: S1,
-    ) -> Result<(), BookViewError> {
+    fn push_scope(&mut self, search: Search) -> Result<(), BookViewError> {
         let results: IndexMap<_, _> = match self.scopes.last() {
             None => self
                 .db()
-                .find_matches(search, column, search_string)?
+                .find_matches(search)?
                 .into_iter()
                 .map(|book| {
                     let id = book!(book).get_id();
@@ -299,47 +287,14 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
                 })
                 .collect(),
 
-            Some((_, books)) => match search {
-                SearchMode::Regex => {
-                    let col = ColumnIdentifier::from(column);
-                    let matcher = Regex::new(search_string.as_ref())?;
-                    books
-                        .iter()
-                        .filter(|(_, book)| {
-                            matcher
-                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
-                        })
-                        .map(|(_, b)| (book!(b).get_id(), b.clone()))
-                        .collect()
-                }
-                SearchMode::ExactSubstring => {
-                    let col = ColumnIdentifier::from(column);
-                    let search = regex::escape(search_string.as_ref());
-                    let matcher = Regex::new(search.as_str())?;
-                    books
-                        .iter()
-                        .filter(|(_, book)| {
-                            matcher
-                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
-                        })
-                        .map(|(_, b)| (book!(b).get_id(), b.clone()))
-                        .collect()
-                }
-                SearchMode::Default => {
-                    let col = ColumnIdentifier::from(column);
-                    books
-                        .iter()
-                        .filter(|(_, book)| {
-                            best_match(
-                                search_string.as_ref(),
-                                &book!(book).get_column(&col).unwrap_or_else(String::new),
-                            )
-                            .is_some()
-                        })
-                        .map(|(_, b)| (book!(b).get_id(), b.clone()))
-                        .collect()
-                }
-            },
+            Some((_, books)) => {
+                let matcher = search.into_matcher()?;
+                books
+                    .iter()
+                    .filter(|(_, book)| matcher.is_match(&book!(book)))
+                    .map(|(_, b)| (book!(b).get_id(), b.clone()))
+                    .collect()
+            }
         };
 
         self.scopes.push((

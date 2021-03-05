@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{BookError, BookVariant};
 
 /// Identifies the columns a Book provides.
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ColumnIdentifier {
     Title,
     Author,
