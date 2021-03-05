@@ -172,11 +172,11 @@ pub trait AppDatabase {
     /// for that particular ID.
     ///
     /// # Arguments
-    /// * ` ids ` - The IDs of the book to be removed.
+    /// * ` ids ` - An iterator yielding the IDs of the book to be removed.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn remove_books(&mut self, ids: Vec<BookID>) -> Result<(), DatabaseError>;
+    fn remove_books(&mut self, ids: &HashSet<BookID>) -> Result<(), DatabaseError>;
 
     fn clear(&mut self) -> Result<(), DatabaseError>;
 
@@ -199,7 +199,10 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn get_books(&self, ids: Vec<BookID>) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError>;
+    fn get_books<I: IntoIterator<Item = BookID>>(
+        &self,
+        ids: I,
+    ) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError>;
 
     /// Returns a copy of every book in the database. If a database error occurs while reading,
     /// the error is returned.
@@ -413,9 +416,8 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn remove_books(&mut self, ids: Vec<BookID>) -> Result<(), DatabaseError> {
+    fn remove_books(&mut self, ids: &HashSet<BookID>) -> Result<(), DatabaseError> {
         self.len = self.backend.write(|db| {
-            let ids = ids.iter().collect::<HashSet<_>>();
             db.books.retain(|id, _| !ids.contains(id));
             db.books.len()
         })?;
@@ -443,10 +445,15 @@ impl AppDatabase for BasicDatabase {
         })?
     }
 
-    fn get_books(&self, ids: Vec<BookID>) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError> {
-        Ok(self
-            .backend
-            .read(|db| ids.iter().map(|&id| db.books.get(&id).cloned()).collect())?)
+    fn get_books<I: IntoIterator<Item = BookID>>(
+        &self,
+        ids: I,
+    ) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError> {
+        Ok(self.backend.read(|db| {
+            ids.into_iter()
+                .map(|id| db.books.get(&id).cloned())
+                .collect()
+        })?)
     }
 
     fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
@@ -699,7 +706,6 @@ mod test {
         book1.set_column(&a, "hello world [2]").unwrap();
 
         assert_ne!(book0, book1);
-
 
         let res = db.insert_book(book0.inner().to_owned());
         assert!(res.is_ok());

@@ -62,7 +62,7 @@ pub trait BookView<D: AppDatabase> {
 
     fn remove_book(&mut self, id: BookID);
 
-    fn remove_books(&mut self, ids: HashSet<BookID>);
+    fn remove_books(&mut self, ids: &HashSet<BookID>);
 
     fn get_selected_book(&self) -> Result<Arc<RwLock<Book>>, BookViewError>;
 
@@ -191,7 +191,7 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    fn remove_books(&mut self, ids: HashSet<BookID>) {
+    fn remove_books(&mut self, ids: &HashSet<BookID>) {
         for (cursor, map) in self.scopes.iter_mut() {
             // Required to maintain sort order.
             map.retain(|id, _| !ids.contains(id));
