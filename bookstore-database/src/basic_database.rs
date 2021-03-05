@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::ops::{Bound, RangeBounds};
 use std::path;
 use std::sync::{Arc, RwLock};
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Error as SQLError;
 use unicase::UniCase;
 
+use bookstore_records::book::BookID;
 use bookstore_records::{
     book::{ColumnIdentifier, RawBook},
     Book, BookError,
@@ -34,7 +36,7 @@ pub enum DatabaseError {
     Io(std::io::Error),
     Search(SearchError),
     Book(BookError),
-    BookNotFound(u32),
+    BookNotFound(BookID),
     IndexOutOfBounds(usize),
     #[cfg(not(feature = "sqlite"))]
     Backend(RustbreakError),
@@ -74,10 +76,19 @@ impl From<SQLError> for DatabaseError {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub(crate) struct BookMap {
     max_id: u32,
-    books: IndexMap<u32, Arc<RwLock<Book>>>,
+    books: IndexMap<BookID, Arc<RwLock<Book>>>,
+}
+
+impl Default for BookMap {
+    fn default() -> Self {
+        BookMap {
+            max_id: 1,
+            books: IndexMap::default(),
+        }
+    }
 }
 
 impl BookMap {
@@ -86,7 +97,7 @@ impl BookMap {
     ///
     /// # Errors
     /// Will panic if the ID can no longer be correctly increased.
-    fn new_id(&mut self) -> u32 {
+    fn new_id(&mut self) -> BookID {
         let id = self.max_id;
         if self.max_id == u32::MAX {
             panic!(
@@ -95,23 +106,7 @@ impl BookMap {
             );
         }
         self.max_id += 1;
-        id
-    }
-
-    /// Return a monotonically increasing ID to use for a new
-    /// book.
-    ///
-    /// # Errors
-    /// Will panic if the ID can no longer be correctly increased.
-    fn borrow_id(&mut self) -> u32 {
-        let id = self.max_id;
-        if self.max_id == u32::MAX {
-            panic!(
-                "Current ID is at maximum value of {} and can not be increased.",
-                u32::MAX
-            );
-        }
-        id + 1
+        BookID::try_from(id).unwrap()
     }
 }
 
@@ -153,7 +148,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError>;
+    fn insert_book(&mut self, book: RawBook) -> Result<BookID, DatabaseError>;
 
     /// Stores each book into the database, and returns a Vec of corresponding IDs.
     ///
@@ -162,7 +157,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails
-    fn insert_books(&mut self, books: Vec<RawBook>) -> Result<Vec<u32>, DatabaseError>;
+    fn insert_books(&mut self, books: Vec<RawBook>) -> Result<Vec<BookID>, DatabaseError>;
 
     /// Removes the book with the given ID. If no book with the given ID exists, no change occurs.
     ///
@@ -171,7 +166,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError>;
+    fn remove_book(&mut self, id: BookID) -> Result<(), DatabaseError>;
 
     /// Removes all books with the given IDs. If a book with a given ID does not exist, no change
     /// for that particular ID.
@@ -181,7 +176,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError>;
+    fn remove_books(&mut self, ids: Vec<BookID>) -> Result<(), DatabaseError>;
 
     fn clear(&mut self) -> Result<(), DatabaseError>;
 
@@ -194,7 +189,7 @@ pub trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails or no book is found
     /// with the given ID.
-    fn get_book(&self, id: u32) -> Result<Arc<RwLock<Book>>, DatabaseError>;
+    fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError>;
 
     /// Finds and returns all books with the given IDs. If a book with a given ID does not exist,
     /// None is returned for that particular ID.
@@ -204,7 +199,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError>;
+    fn get_books(&self, ids: Vec<BookID>) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError>;
 
     /// Returns a copy of every book in the database. If a database error occurs while reading,
     /// the error is returned.
@@ -235,7 +230,7 @@ pub trait AppDatabase {
     /// This function will return an error if the database fails.
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        id: u32,
+        id: BookID,
         column: S0,
         new_value: S1,
     ) -> Result<(), DatabaseError>;
@@ -375,7 +370,7 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError> {
+    fn insert_book(&mut self, book: RawBook) -> Result<BookID, DatabaseError> {
         let (id, len) = self.backend.write(|db| {
             let id = db.new_id();
             let book = Book::from_raw_book(id, book);
@@ -389,7 +384,7 @@ impl AppDatabase for BasicDatabase {
         Ok(id)
     }
 
-    fn insert_books(&mut self, books: Vec<RawBook>) -> Result<Vec<u32>, DatabaseError> {
+    fn insert_books(&mut self, books: Vec<RawBook>) -> Result<Vec<BookID>, DatabaseError> {
         let mut ids = vec![];
 
         self.len = self.backend.write(|db| {
@@ -407,7 +402,7 @@ impl AppDatabase for BasicDatabase {
         Ok(ids)
     }
 
-    fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError> {
+    fn remove_book(&mut self, id: BookID) -> Result<(), DatabaseError> {
         self.len = self.backend.write(|db| {
             db.books.shift_remove(&id);
             db.books.len()
@@ -418,7 +413,7 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError> {
+    fn remove_books(&mut self, ids: Vec<BookID>) -> Result<(), DatabaseError> {
         self.len = self.backend.write(|db| {
             let ids = ids.iter().collect::<HashSet<_>>();
             db.books.retain(|id, _| !ids.contains(id));
@@ -441,17 +436,17 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn get_book(&self, id: u32) -> Result<Arc<RwLock<Book>>, DatabaseError> {
+    fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError> {
         self.backend.read(|db| match db.books.get(&id) {
             None => Err(DatabaseError::BookNotFound(id)),
             Some(book) => Ok(book.clone()),
         })?
     }
 
-    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError> {
+    fn get_books(&self, ids: Vec<BookID>) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError> {
         Ok(self
             .backend
-            .read(|db| ids.iter().map(|id| db.books.get(id).cloned()).collect())?)
+            .read(|db| ids.iter().map(|&id| db.books.get(&id).cloned()).collect())?)
     }
 
     // TODO: Make this return a Vec of references?
@@ -471,7 +466,7 @@ impl AppDatabase for BasicDatabase {
 
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        id: u32,
+        id: BookID,
         column: S0,
         new_value: S1,
     ) -> Result<(), DatabaseError> {
@@ -486,9 +481,8 @@ impl AppDatabase for BasicDatabase {
 
     fn merge_similar(&mut self) -> Result<(), DatabaseError> {
         self.len = self.backend.write(|db| {
-            let mut ref_map: HashMap<(String, String), u32> = HashMap::new();
+            let mut ref_map: HashMap<(String, String), BookID> = HashMap::new();
             let mut merges = vec![];
-            let dummy_id = db.borrow_id();
             for book in db.books.values() {
                 let book = book!(book);
                 if let Some(title) = book.get_title() {
@@ -504,7 +498,7 @@ impl AppDatabase for BasicDatabase {
                 }
             }
 
-            let dummy = Arc::new(RwLock::new(Book::with_id(dummy_id)));
+            let dummy = Arc::new(RwLock::new(Book::dummy()));
             for (b1, b2_id) in merges.iter() {
                 // Dummy allows for O(n) time book removal while maintaining sort
                 // and getting owned copy of book.
@@ -515,7 +509,7 @@ impl AppDatabase for BasicDatabase {
                     }
                 }
             }
-            db.books.retain(|_, book| book!(book).get_id() != dummy_id);
+            db.books.retain(|_, book| !book!(book).is_dummy());
             db.books.len()
         })?;
         self.saved = false;
@@ -616,13 +610,8 @@ impl IndexableDatabase for BasicDatabase {
 
     fn remove_book_indexed(&mut self, index: usize) -> Result<(), DatabaseError> {
         self.len = self.backend.write(|db| {
-            let id = if let Some((id, _)) = db.books.get_index(index) {
-                Some(*id)
-            } else {
-                None
-            };
-            if let Some(id) = id {
-                db.books.shift_remove(&id);
+            if index < db.books.len() {
+                db.books.shift_remove_index(index);
             }
             db.books.len()
         })?;
@@ -656,6 +645,7 @@ impl IndexableDatabase for BasicDatabase {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::convert::TryFrom;
     use std::ops::Deref;
     use tempfile;
 
@@ -729,7 +719,8 @@ mod test {
     #[test]
     fn test_book_does_not_exist() {
         let db = temp_db();
-        for i in 0..1000 {
+        for i in 1..1000 {
+            let i = NonZeroU32::try_from(i).unwrap();
             let get_book = db.get_book(i);
             assert!(get_book.is_err());
             match get_book.unwrap_err() {

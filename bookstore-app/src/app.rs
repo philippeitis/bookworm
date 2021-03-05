@@ -16,6 +16,7 @@ use bookstore_database::{
     bookview::BookViewError, AppDatabase, BookView, DatabaseError, IndexableDatabase,
     NestedBookView, SearchableBookView,
 };
+use bookstore_records::book::BookID;
 use bookstore_records::{book::RawBook, Book, BookError};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
@@ -257,7 +258,7 @@ impl<D: IndexableDatabase> App<D> {
     ) -> Result<Arc<RwLock<Book>>, ApplicationError> {
         match b {
             BookIndex::Selected => Ok(bv.get_selected_book()?),
-            BookIndex::BookID(id) => Ok(bv.get_book(id)?),
+            BookIndex::ID(id) => Ok(bv.get_book(id)?),
         }
     }
 
@@ -278,7 +279,7 @@ impl<D: IndexableDatabase> App<D> {
 
     pub fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        id: u32,
+        id: BookID,
         column: S0,
         new_value: S1,
     ) -> Result<(), ApplicationError> {
@@ -301,7 +302,7 @@ impl<D: IndexableDatabase> App<D> {
 
     pub fn remove_book(
         &mut self,
-        id: u32,
+        id: BookID,
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError> {
         book_view.remove_book(id);
@@ -331,7 +332,7 @@ impl<D: IndexableDatabase> App<D> {
             Command::DeleteBook(b) => {
                 match b {
                     BookIndex::Selected => self.remove_selected_book(book_view)?,
-                    BookIndex::BookID(id) => self.remove_book(id, book_view)?,
+                    BookIndex::ID(id) => self.remove_book(id, book_view)?,
                 };
             }
             Command::DeleteAll => {
@@ -341,7 +342,7 @@ impl<D: IndexableDatabase> App<D> {
             Command::EditBook(b, field, new_value) => {
                 match b {
                     BookIndex::Selected => self.edit_selected_book(field, new_value, book_view)?,
-                    BookIndex::BookID(id) => self.edit_book_with_id(id, &field, &new_value)?,
+                    BookIndex::ID(id) => self.edit_book_with_id(id, &field, &new_value)?,
                 };
                 self.sort_settings.is_sorted = false;
             }

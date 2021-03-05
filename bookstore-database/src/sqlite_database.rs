@@ -15,7 +15,7 @@ use crate::search::SearchMode;
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
 const CREATE_BOOKS: &str = r#"CREATE TABLE `books` (
-`book_id` INTEGER PRIMARY KEY,
+`book_id` INTEGER NOT NULL PRIMARY KEY,
 `title` TEXT DEFAULT NULL,
 `series_name` TEXT DEFAULT NULL,
 `series_id` NUM DEFAULT NULL

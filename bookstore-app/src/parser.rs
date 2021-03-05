@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use bookstore_database::search::{Search, SearchMode};
-use bookstore_records::book::ColumnIdentifier;
+use bookstore_records::book::{BookID, ColumnIdentifier};
 
 #[derive(Debug)]
 pub enum Flag {
@@ -17,7 +17,7 @@ pub enum Flag {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BookIndex {
     Selected,
-    BookID(u32),
+    ID(BookID),
 }
 
 #[derive(Debug, PartialEq)]
@@ -230,8 +230,8 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                         }
                     }
                     Flag::StartingArguments(args) => {
-                        if let Ok(i) = u32::from_str(args[0].as_str()) {
-                            Ok(Command::DeleteBook(BookIndex::BookID(i)))
+                        if let Ok(i) = BookID::from_str(args[0].as_str()) {
+                            Ok(Command::DeleteBook(BookIndex::ID(i)))
                         } else {
                             Err(CommandError::InvalidCommand)
                         }
@@ -249,8 +249,8 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 let b = args.next().ok_or_else(insuf)?;
 
                 if let Some(c) = args.next() {
-                    if let Ok(id) = u32::from_str(a.as_str()) {
-                        return Ok(Command::EditBook(BookIndex::BookID(id), b, c));
+                    if let Ok(id) = BookID::from_str(a.as_str()) {
+                        return Ok(Command::EditBook(BookIndex::ID(id), b, c));
                     }
                 }
 
@@ -343,19 +343,16 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                     Flag::FlagWithArgument(c, args) => {
                         if c == "f" {
                             if let Some(ind_book) = args.get(0) {
-                                if let Ok(bi) = u32::from_str(ind_book.as_str()) {
+                                if let Ok(bi) = BookID::from_str(ind_book.as_str()) {
                                     if let Some(ind_var) = args.get(1) {
                                         if let Ok(vi) = usize::from_str(ind_var.as_str()) {
                                             return Ok(Command::OpenBookInExplorer(
-                                                BookIndex::BookID(bi),
+                                                BookIndex::ID(bi),
                                                 vi,
                                             ));
                                         }
                                     }
-                                    return Ok(Command::OpenBookInExplorer(
-                                        BookIndex::BookID(bi),
-                                        0,
-                                    ));
+                                    return Ok(Command::OpenBookInExplorer(BookIndex::ID(bi), 0));
                                 }
                             }
                         }
@@ -377,19 +374,19 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 }
             }
             if loc_exists {
-                if let Ok(loc) = u32::from_str(loc.as_str()) {
+                if let Ok(loc) = BookID::from_str(loc.as_str()) {
                     if index_exists {
                         if let Ok(index) = usize::from_str(index.as_str()) {
                             return Ok(if f {
-                                Command::OpenBookInExplorer(BookIndex::BookID(loc), index)
+                                Command::OpenBookInExplorer(BookIndex::ID(loc), index)
                             } else {
-                                Command::OpenBookInApp(BookIndex::BookID(loc), index)
+                                Command::OpenBookInApp(BookIndex::ID(loc), index)
                             });
                         }
                     } else if f {
-                        return Ok(Command::OpenBookInExplorer(BookIndex::BookID(loc), 0));
+                        return Ok(Command::OpenBookInExplorer(BookIndex::ID(loc), 0));
                     } else {
-                        return Ok(Command::OpenBookInApp(BookIndex::BookID(loc), 0));
+                        return Ok(Command::OpenBookInApp(BookIndex::ID(loc), 0));
                     }
                 }
             }

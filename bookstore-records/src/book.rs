@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{BookError, BookVariant};
 
+pub type BookID = std::num::NonZeroU32;
+
 /// Identifies the columns a Book provides.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ColumnIdentifier {
@@ -308,7 +310,7 @@ impl RawBook {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 /// A `RawBook`, and associated ID.
 pub struct Book {
-    id: u32,
+    id: Option<BookID>,
     raw_book: RawBook,
 }
 
@@ -340,7 +342,7 @@ impl Book {
 
     pub fn get_column(&self, column: &ColumnIdentifier) -> Option<String> {
         match column {
-            ColumnIdentifier::ID => Some(self.id.to_string()),
+            ColumnIdentifier::ID => Some(self.get_u32_id().to_string()),
             x => self.raw_book.get_column(x),
         }
     }
@@ -357,20 +359,31 @@ impl Book {
     ///
     /// # Arguments
     /// * ` id ` - the id to assign this book.
-    pub fn with_id(id: u32) -> Book {
+    pub fn dummy() -> Book {
         Book {
-            id,
+            id: None,
             raw_book: RawBook::default(),
         }
     }
 
-    /// Creates a `Book` with the given ID and core metadata.
-    pub fn from_raw_book(id: u32, raw_book: RawBook) -> Book {
-        Book { id, raw_book }
+    pub fn is_dummy(&self) -> bool {
+        self.id.is_none()
     }
 
-    pub fn get_id(&self) -> u32 {
-        self.id
+    /// Creates a `Book` with the given ID and core metadata.
+    pub fn from_raw_book(id: BookID, raw_book: RawBook) -> Book {
+        Book {
+            id: Some(id),
+            raw_book,
+        }
+    }
+
+    pub fn get_u32_id(&self) -> u32 {
+        self.id.map(|id| u32::from(id)).unwrap_or(0)
+    }
+
+    pub fn get_id(&self) -> BookID {
+        self.id.unwrap()
     }
 }
 
@@ -405,7 +418,7 @@ impl Book {
     /// * ` column ` - the column of interest.
     pub fn cmp_column(&self, other: &Self, column: &ColumnIdentifier) -> Ordering {
         match column {
-            ColumnIdentifier::ID => self.get_id().cmp(&other.get_id()),
+            ColumnIdentifier::ID => self.get_u32_id().cmp(&other.get_u32_id()),
             col => self.raw_book.cmp_column(&other.raw_book, col),
         }
     }

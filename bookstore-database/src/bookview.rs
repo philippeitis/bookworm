@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 use indexmap::map::IndexMap;
 use unicase::UniCase;
 
+use bookstore_records::book::BookID;
 use bookstore_records::{book::ColumnIdentifier, Book, BookError};
 
 use crate::basic_database::IndexableDatabase;
@@ -26,7 +27,7 @@ pub enum BookViewError {
 }
 
 pub enum BookViewIndex {
-    ID(u32),
+    ID(BookID),
     Index(usize),
 }
 
@@ -56,9 +57,9 @@ pub trait BookView<D: AppDatabase> {
     fn sort_by_column<S: AsRef<str>>(&mut self, col: S, reverse: bool)
         -> Result<(), DatabaseError>;
 
-    fn get_book(&self, id: u32) -> Result<Arc<RwLock<Book>>, DatabaseError>;
+    fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError>;
 
-    fn remove_book(&mut self, id: u32);
+    fn remove_book(&mut self, id: BookID);
 
     fn get_selected_book(&self) -> Result<Arc<RwLock<Book>>, BookViewError>;
 
@@ -106,7 +107,7 @@ pub trait NestedBookView<D: AppDatabase>: BookView<D> {
 }
 
 pub struct SearchableBookView<D: AppDatabase> {
-    scopes: Vec<(PageCursor, IndexMap<u32, Arc<RwLock<Book>>>)>,
+    scopes: Vec<(PageCursor, IndexMap<BookID, Arc<RwLock<Book>>>)>,
     // The "root" scope.
     root_cursor: PageCursor,
     db: Rc<RefCell<D>>,
@@ -167,11 +168,11 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         Ok(())
     }
 
-    fn get_book(&self, id: u32) -> Result<Arc<RwLock<Book>>, DatabaseError> {
+    fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError> {
         self.db().get_book(id)
     }
 
-    fn remove_book(&mut self, id: u32) {
+    fn remove_book(&mut self, id: BookID) {
         for (cursor, map) in self.scopes.iter_mut() {
             // Required to maintain sort order.
             if map.shift_remove(&id).is_none() {
