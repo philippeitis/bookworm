@@ -31,6 +31,20 @@ jobs:
         override: true
     - name: Build
       run: cargo test --verbose
+  test_ubuntu_install:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+    - name: Run install steps
+      run: sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
+    - name: Test bookstore with copypaste
+      run: cargo +nightly test -Z package-features --features bookstore-tui/copypaste
   fmt:
     runs-on: ubuntu-latest
     strategy:
