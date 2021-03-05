@@ -240,7 +240,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn merge_similar(&mut self) -> Result<(), DatabaseError>;
+    fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError>;
 
     /// Finds books, using the match to compare the specified column to the search string.
     ///
@@ -449,7 +449,6 @@ impl AppDatabase for BasicDatabase {
             .read(|db| ids.iter().map(|&id| db.books.get(&id).cloned()).collect())?)
     }
 
-    // TODO: Make this return a Vec of references?
     fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
         Ok(self
             .backend
@@ -479,8 +478,8 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn merge_similar(&mut self) -> Result<(), DatabaseError> {
-        self.len = self.backend.write(|db| {
+    fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError> {
+        let (ids, len) = self.backend.write(|db| {
             let mut ref_map: HashMap<(String, String), BookID> = HashMap::new();
             let mut merges = vec![];
             for book in db.books.values() {
@@ -503,6 +502,8 @@ impl AppDatabase for BasicDatabase {
                 // Dummy allows for O(n) time book removal while maintaining sort
                 // and getting owned copy of book.
                 let b2 = db.books.insert(*b2_id, dummy.clone());
+                // b1, b2 always exist: ref_map only stores b1, and any given b2 can only merge into
+                // a b1, and never a b2, and a b1 never merges into b2, since b1 comes first.
                 if let Some(b1) = db.books.get_mut(b1) {
                     if let Some(b2) = b2 {
                         book_mut!(b1).merge_mut(&book!(b2));
@@ -510,10 +511,11 @@ impl AppDatabase for BasicDatabase {
                 }
             }
             db.books.retain(|_, book| !book!(book).is_dummy());
-            db.books.len()
+            (merges.into_iter().map(|(_, m)| m).collect(), db.books.len())
         })?;
         self.saved = false;
-        Ok(())
+        self.len = len;
+        Ok(ids)
     }
 
     fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {

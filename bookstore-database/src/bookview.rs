@@ -1,4 +1,5 @@
 use std::cell::{Ref, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
@@ -60,6 +61,8 @@ pub trait BookView<D: AppDatabase> {
     fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError>;
 
     fn remove_book(&mut self, id: BookID);
+
+    fn remove_books(&mut self, ids: HashSet<BookID>);
 
     fn get_selected_book(&self) -> Result<Arc<RwLock<Book>>, BookViewError>;
 
@@ -183,6 +186,19 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
                     if s == cursor.window_size() && s != 0 {
                         cursor.select(Some(s - 1));
                     }
+                }
+            }
+        }
+    }
+
+    fn remove_books(&mut self, ids: HashSet<BookID>) {
+        for (cursor, map) in self.scopes.iter_mut() {
+            // Required to maintain sort order.
+            map.retain(|id, _| !ids.contains(id));
+            cursor.refresh_height(map.len());
+            if let Some(s) = cursor.selected() {
+                if s == cursor.window_size() && s != 0 {
+                    cursor.select(Some(s - 1));
                 }
             }
         }

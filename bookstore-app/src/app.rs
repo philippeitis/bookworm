@@ -392,7 +392,8 @@ impl<D: IndexableDatabase> App<D> {
                 return Ok(false);
             }
             Command::TryMergeAllBooks => {
-                self.write(|db| db.merge_similar())?;
+                let ids = self.write(|db| db.merge_similar())?;
+                book_view.remove_books(ids);
             }
             Command::Help(flag) => {
                 if let Some(s) = help_strings(&flag) {
