@@ -673,11 +673,12 @@ mod test {
         let mut db = temp_db();
 
         let book = RawBook::default();
+        let id = BookID::try_from(1).unwrap();
         let res = db.insert_book(book.clone());
         assert!(res.is_ok());
-        assert_eq!(res.unwrap(), 0);
-        let fetched = db.get_book(0).unwrap();
-        db.remove_book(0).unwrap();
+        assert_eq!(res.unwrap(), id);
+        let fetched = db.get_book(id).unwrap();
+        db.remove_book(id).unwrap();
         assert_eq!(book!(fetched).deref().inner(), &book);
     }
 
@@ -686,27 +687,32 @@ mod test {
         let mut db = temp_db();
 
         let a = ColumnIdentifier::Series;
-        let mut book0 = Book::with_id(0);
+
+        let id1 = BookID::try_from(1).unwrap();
+        let id2 = BookID::try_from(2).unwrap();
+
+        let mut book0 = Book::from_raw_book(id1, RawBook::default());
         book0.set_column(&a, "hello world [1]").unwrap();
-        let mut book1 = Book::with_id(1);
+        let mut book1 = Book::from_raw_book(id2, RawBook::default());
         book1.set_column(&a, "hello world [2]").unwrap();
 
         assert_ne!(book0, book1);
 
+
         let res = db.insert_book(book0.inner().to_owned());
         assert!(res.is_ok());
-        assert_eq!(res.unwrap(), 0);
+        assert_eq!(res.unwrap(), id1);
 
         let res = db.insert_book(book1.inner().to_owned());
         assert!(res.is_ok());
-        assert_eq!(res.unwrap(), 1);
+        assert_eq!(res.unwrap(), id2);
 
-        let fetched1 = db.get_book(1);
+        let fetched1 = db.get_book(id2);
         assert!(fetched1.is_ok());
         let fetched1 = fetched1.unwrap();
         assert_eq!(book!(fetched1).get_series(), book1.get_series());
 
-        let fetched0 = db.get_book(0);
+        let fetched0 = db.get_book(id1);
         assert!(fetched0.is_ok());
         let fetched0 = fetched0.unwrap();
         assert_eq!(book!(fetched0).get_series(), book0.get_series());
@@ -720,7 +726,7 @@ mod test {
     fn test_book_does_not_exist() {
         let db = temp_db();
         for i in 1..1000 {
-            let i = NonZeroU32::try_from(i).unwrap();
+            let i = BookID::try_from(i).unwrap();
             let get_book = db.get_book(i);
             assert!(get_book.is_err());
             match get_book.unwrap_err() {

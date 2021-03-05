@@ -451,14 +451,16 @@ impl fmt::Display for Book {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::convert::TryFrom;
 
     #[test]
     fn test_setting_columns() {
-        let mut book = Book::with_id(0);
+        let id = BookID::try_from(1).unwrap();
+        let mut book = Book::from_raw_book(id, RawBook::default());
         let test_sets = [
             ("title", "hello", Ok(()), "hello"),
             ("authors", "world", Ok(()), "world"),
-            ("id", "5", Err(BookError::ImmutableColumnError), "0"),
+            ("id", "5", Err(BookError::ImmutableColumnError), "1"),
             ("series", "hello world", Ok(()), "hello world"),
             ("series", "hello world [1.2]", Ok(()), "hello world [1.2]"),
             ("random_tag", "random value", Ok(()), "random value"),
