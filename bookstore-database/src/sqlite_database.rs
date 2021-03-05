@@ -11,7 +11,7 @@ use unicase::UniCase;
 use bookstore_records::book::RawBook;
 use bookstore_records::Book;
 
-use crate::search::Search;
+use crate::search::SearchMode;
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
 const CREATE_BOOKS: &str = r#"CREATE TABLE `books` (
@@ -183,7 +183,7 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn find_matches(&self, search: Search) -> Result<Vec<Book>, DatabaseError> {
+    fn find_matches(&self, search: SearchMode) -> Result<Vec<Book>, DatabaseError> {
         unimplemented!()
     }
 

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use bookstore_database::search::Search;
+use bookstore_database::search::SearchMode;
 
 #[derive(Debug)]
 pub enum Flag {
@@ -35,7 +35,7 @@ pub enum Command {
     Quit,
     Write,
     WriteAndQuit,
-    FindMatches(Search),
+    FindMatches(SearchMode, String, String),
     Help(String),
     GeneralHelp,
 }
@@ -54,7 +54,7 @@ impl Command {
             DeleteBook(b) | EditBook(b, _, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
                 b == &BookIndex::Selected
             }
-            AddColumn(_) | RemoveColumn(_) | SortColumn(_, _) | FindMatches(_) => true,
+            AddColumn(_) | RemoveColumn(_) | SortColumn(_, _) | FindMatches(..) => true,
             _ => false,
         }
     }
@@ -314,25 +314,28 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
         "!f" => match flags.into_iter().next() {
             Some(Flag::StartingArguments(args)) => {
                 let mut args = args.into_iter();
-                Ok(Command::FindMatches(Search::Default(
+                Ok(Command::FindMatches(
+                    SearchMode::Default,
                     args.next().ok_or_else(insuf)?,
                     remove_string_quotes(args.next().ok_or_else(insuf)?),
-                )))
+                ))
             }
             Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
                 "r" => {
                     let mut args = args.into_iter();
-                    Ok(Command::FindMatches(Search::Regex(
+                    Ok(Command::FindMatches(
+                        SearchMode::Regex,
                         args.next().ok_or_else(insuf)?,
                         remove_string_quotes(args.next().ok_or_else(insuf)?),
-                    )))
+                    ))
                 }
                 "e" => {
                     let mut args = args.into_iter();
-                    Ok(Command::FindMatches(Search::ExactSubstring(
+                    Ok(Command::FindMatches(
+                        SearchMode::ExactSubstring,
                         args.next().ok_or_else(insuf)?,
                         remove_string_quotes(args.next().ok_or_else(insuf)?),
-                    )))
+                    ))
                 }
                 _ => Err(CommandError::InvalidCommand),
             },

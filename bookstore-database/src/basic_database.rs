@@ -17,7 +17,7 @@ use bookstore_records::{
     Book, BookError,
 };
 
-use crate::search::Search;
+use crate::search::SearchMode;
 
 macro_rules! book {
     ($book: ident) => {
@@ -258,7 +258,12 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError>;
+    fn find_matches<S0: AsRef<str>, S1: AsRef<str>>(
+        &self,
+        search: SearchMode,
+        column: S0,
+        search_string: S1,
+    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError>;
 
     /// Sorts books by comparing the specified column.
     ///
@@ -524,15 +529,20 @@ impl AppDatabase for BasicDatabase {
         Ok(())
     }
 
-    fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
+    fn find_matches<S0: AsRef<str>, S1: AsRef<str>>(
+        &self,
+        search: SearchMode,
+        column: S0,
+        search_string: S1,
+    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
         Ok(self
             .backend
             .read(|db| -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError> {
                 let mut results = vec![];
                 match search {
-                    Search::Regex(column, search) => {
+                    SearchMode::Regex => {
                         let col = ColumnIdentifier::from(column);
-                        let matcher = Regex::new(search.as_str())?;
+                        let matcher = Regex::new(search_string.as_ref())?;
                         for (_, book) in db.books.iter() {
                             if matcher
                                 .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
@@ -541,10 +551,10 @@ impl AppDatabase for BasicDatabase {
                             }
                         }
                     }
-                    Search::ExactSubstring(column, search) => {
+                    SearchMode::ExactSubstring => {
                         let col = ColumnIdentifier::from(column);
-                        let search = regex::escape(&search);
-                        let matcher = Regex::new(search.as_str())?;
+                        let search_string = regex::escape(search_string.as_ref());
+                        let matcher = Regex::new(search_string.as_ref())?;
                         for (_, book) in db.books.iter() {
                             if matcher
                                 .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
@@ -553,12 +563,11 @@ impl AppDatabase for BasicDatabase {
                             }
                         }
                     }
-                    Search::Default(column, search) => {
+                    SearchMode::Default => {
                         let col = ColumnIdentifier::from(column);
-                        let insensitive = search.to_ascii_lowercase();
                         for (_, book) in db.books.iter() {
                             if best_match(
-                                &insensitive,
+                                search_string.as_ref(),
                                 &book!(book).get_column(&col).unwrap_or_else(String::new),
                             )
                             .is_some()

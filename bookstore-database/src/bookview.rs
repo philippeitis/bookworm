@@ -9,7 +9,7 @@ use unicase::UniCase;
 use bookstore_records::{book::ColumnIdentifier, Book, BookError};
 
 use crate::basic_database::IndexableDatabase;
-use crate::search::Search;
+use crate::search::SearchMode;
 use crate::{AppDatabase, DatabaseError, PageCursor};
 use std::sync::{Arc, RwLock};
 
@@ -102,7 +102,12 @@ pub trait ScrollableBookView<D: AppDatabase>: BookView<D> {
 }
 
 pub trait NestedBookView<D: AppDatabase>: BookView<D> {
-    fn push_scope(&mut self, search: Search) -> Result<(), BookViewError>;
+    fn push_scope<S0: AsRef<str>, S1: AsRef<str>>(
+        &mut self,
+        search: SearchMode,
+        column: S0,
+        search_string: S1,
+    ) -> Result<(), BookViewError>;
 
     fn pop_scope(&mut self) -> bool;
 }
@@ -277,20 +282,39 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 }
 
 impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
-    fn push_scope(&mut self, search: Search) -> Result<(), BookViewError> {
+    fn push_scope<S0: AsRef<str>, S1: AsRef<str>>(
+        &mut self,
+        search: SearchMode,
+        column: S0,
+        search_string: S1,
+    ) -> Result<(), BookViewError> {
         let results: IndexMap<_, _> = match self.scopes.last() {
             None => self
                 .db()
-                .find_matches(search)?
+                .find_matches(search, column, search_string)?
                 .into_iter()
                 .map(|book| {
                     let id = book!(book).get_id();
                     (id, book)
                 })
                 .collect(),
+
             Some((_, books)) => match search {
-                Search::Regex(column, search) => {
+                SearchMode::Regex => {
                     let col = ColumnIdentifier::from(column);
+                    let matcher = Regex::new(search_string.as_ref())?;
+                    books
+                        .iter()
+                        .filter(|(_, book)| {
+                            matcher
+                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
+                        })
+                        .map(|(_, b)| (book!(b).get_id(), b.clone()))
+                        .collect()
+                }
+                SearchMode::ExactSubstring => {
+                    let col = ColumnIdentifier::from(column);
+                    let search = regex::escape(search_string.as_ref());
                     let matcher = Regex::new(search.as_str())?;
                     books
                         .iter()
@@ -301,26 +325,13 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
                         .map(|(_, b)| (book!(b).get_id(), b.clone()))
                         .collect()
                 }
-                Search::ExactSubstring(column, search) => {
-                    let col = ColumnIdentifier::from(column);
-                    let search = regex::escape(&search);
-                    let matcher = Regex::new(search.as_str())?;
-                    books
-                        .iter()
-                        .filter(|(_, book)| {
-                            matcher
-                                .is_match(&book!(book).get_column(&col).unwrap_or_else(String::new))
-                        })
-                        .map(|(_, b)| (book!(b).get_id(), b.clone()))
-                        .collect()
-                }
-                Search::Default(column, search) => {
+                SearchMode::Default => {
                     let col = ColumnIdentifier::from(column);
                     books
                         .iter()
                         .filter(|(_, book)| {
                             best_match(
-                                &search,
+                                search_string.as_ref(),
                                 &book!(book).get_column(&col).unwrap_or_else(String::new),
                             )
                             .is_some()
