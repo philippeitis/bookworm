@@ -124,12 +124,12 @@ pub(crate) trait ResizableWidget<D: IndexableDatabase, B: Backend> {
 }
 
 pub(crate) trait InputHandler<D: IndexableDatabase> {
-    /// Processes the event and modifies the internal state accordingly. May modify app_state,
+    /// Processes the event and modifies the internal state accordingly. May modify app,
     /// depending on specific event.
     fn handle_input(
         &mut self,
         event: Event,
-        app_state: &mut App<D>,
+        app: &mut App<D>,
     ) -> Result<ApplicationTask, ApplicationError>;
 }
 
@@ -524,6 +524,13 @@ impl<D: IndexableDatabase> EditWidget<D> {
         }
         Ok(())
     }
+
+    // fn edit_command(&mut self) -> Command {
+    //     let column = {
+    //         self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
+    //     };
+    //     Command::EditBook(BookIndex::Selected, column.into_inner(), self.edit.value.clone())
+    // }
 
     /// Used when column has been changed and edit should reflect new column's value.
     fn reset_edit(&mut self) {

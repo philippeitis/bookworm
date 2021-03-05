@@ -211,7 +211,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                 self.app.apply_sort(&mut state.book_view)?;
             }
 
-            if self.app.take_update() || self.take_update() {
+            if self.app.take_update() | self.take_update() {
                 terminal.draw(|f| {
                     self.border_widget.saved = self.app.saved();
                     self.border_widget.render_into_frame(f, f.size());
@@ -233,9 +233,8 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
 
             match self.get_input() {
                 Ok(true) => return Ok(terminal.clear()?),
-                _ => {
-                    // TODO: Handle errors here.
-                }
+                Ok(false) => {}
+                Err(_e) => {} // TODO: Handle errors
             }
         }
     }
