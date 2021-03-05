@@ -49,7 +49,7 @@ On Linux distros, additional dependencies are required for copy-paste support:
 ```bash
 git clone https://github.com/philippeitis/bookstore.git
 cd bookstore
-sudo apt-get install xorg-dev libxcb1-dev
+sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
 cargo install --path bookstore-tui --features copypaste
 ```
 
