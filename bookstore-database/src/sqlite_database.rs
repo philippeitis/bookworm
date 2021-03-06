@@ -1,17 +1,17 @@
-use std::collections::hash_map::RandomState;
 use std::collections::HashSet;
 use std::ops::{Bound, RangeBounds};
 use std::path;
+use std::sync::{Arc, RwLock};
 
-use itertools::Itertools;
 use sqlx::migrate::MigrateDatabase;
+use sqlx::sqlite::SqliteError;
 use sqlx::{Connection, Sqlite, SqliteConnection};
 use unicase::UniCase;
 
-use bookstore_records::book::RawBook;
+use bookstore_records::book::{BookID, RawBook};
 use bookstore_records::Book;
 
-use crate::search::SearchMode;
+use crate::search::Search;
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
 const CREATE_BOOKS: &str = r#"CREATE TABLE `books` (
@@ -85,37 +85,43 @@ pub struct SQLiteDatabase {
 //  DELETE_BOOK_ID should clear anything that overwrites given book, except when
 //  an ordering is enforced in previous command.
 impl AppDatabase for SQLiteDatabase {
-    fn open<P>(file_path: P) -> Result<Self, DatabaseError>
+    type Error = DatabaseError<SqliteError>;
+
+    fn open<P>(file_path: P) -> Result<Self, DatabaseError<Self::Error>>
     where
         P: AsRef<path::Path>,
         Self: Sized,
     {
-        let path = file_path.as_ref().display().to_string();
-        if !Sqlite::database_exists(path.as_str()).await.unwrap() {
-            Sqlite::create_database(path.as_str()).await.unwrap();
-        }
-        let database = SqliteConnection::connect(path.as_str()).await.unwrap();
-        Ok(Self {
-            backend: database,
-            cols: Default::default(),
-            len: 0,
-            saved: false,
-        })
-    }
-
-    fn save(&mut self) -> Result<(), DatabaseError> {
+        // let path = file_path.as_ref().display().to_string();
+        // if !Sqlite::database_exists(path.as_str()).await.unwrap() {
+        //     Sqlite::create_database(path.as_str()).await.unwrap();
+        // }
+        // let database = SqliteConnection::connect(path.as_str()).await.unwrap();
+        // Ok(Self {
+        //     backend: database,
+        //     cols: Default::default(),
+        //     len: 0,
+        //     saved: false,
+        // })
         unimplemented!()
     }
 
-    fn insert_book(&mut self, book: RawBook) -> Result<u32, DatabaseError> {
+    fn save(&mut self) -> Result<(), DatabaseError<Self::Error>> {
         unimplemented!()
     }
 
-    fn insert_books(&mut self, books: Vec<RawBook>) -> Result<Vec<u32>, DatabaseError> {
+    fn insert_book(&mut self, book: RawBook) -> Result<BookID, DatabaseError<Self::Error>> {
         unimplemented!()
     }
 
-    fn remove_book(&mut self, id: u32) -> Result<(), DatabaseError> {
+    fn insert_books(
+        &mut self,
+        books: Vec<RawBook>,
+    ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
+        unimplemented!()
+    }
+
+    fn remove_book(&mut self, id: BookID) -> Result<(), DatabaseError<Self::Error>> {
         // let query = format!("DELETE FROM books WHERE book_id = {}", id);
         // let idx = id as i64;
         // let data = sqlx::query!("DELETE FROM books WHERE book_id = ?", idx)
@@ -124,7 +130,7 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn remove_books(&mut self, ids: Vec<u32>) -> Result<(), DatabaseError> {
+    fn remove_books(&mut self, ids: &HashSet<BookID>) -> Result<(), DatabaseError<Self::Error>> {
         // let query = format!("DELETE FROM books WHERE book_id IN ({})", ids.iter().join(", "));
         // let query = sqlx::query(&query).execute(&mut self.backend).await?;
         // let ids = ids.into_iter().map(|id| id as i64).collect::<Vec<_>>();
@@ -132,7 +138,7 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn clear(&mut self) -> Result<(), DatabaseError> {
+    fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
         // let query = format!("DELETE FROM books");
         // let data = sqlx::query!("DELETE FROM books")
         //     .fetch_all(&mut self.backend)
@@ -140,7 +146,7 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn get_book(&self, id: u32) -> Result<Book, DatabaseError> {
+    fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
         //     let query = format!("SELECT * FROM books WHERE book_id = {}", id);
         // let data = sqlx::query!("SELECT * FROM books WHERE book_id = ?", id)
         //     .fetch_all(&mut self.backend)
@@ -148,19 +154,22 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn get_books(&self, ids: Vec<u32>) -> Result<Vec<Option<Book>>, DatabaseError> {
+    fn get_books<I: IntoIterator<Item = BookID>>(
+        &self,
+        ids: I,
+    ) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError<Self::Error>> {
         // let query = format!("SELECT * FROM books WHERE book_id IN ({})", ids.iter().join(", "));
         // let data = sqlx::query!("SELECT * FROM books WHERE book_id IN ?", ids);
         unimplemented!()
     }
 
-    fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError> {
+    fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
         // let query = format!("SELECT * FROM {} ORDER BY {} {}");
         // let data = sqlx::query!("SELECT * FROM {} ORDER BY ? ?");
         unimplemented!()
     }
 
-    fn get_available_columns(&self) -> &HashSet<UniCase<String>, RandomState> {
+    fn get_available_columns(&self) -> &HashSet<UniCase<String>> {
         &self.cols
     }
 
@@ -170,24 +179,33 @@ impl AppDatabase for SQLiteDatabase {
 
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        id: u32,
+        id: BookID,
         column: S0,
         new_value: S1,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), DatabaseError<Self::Error>> {
         // let query = format!("UPDATE {} SET {} = {} WHERE book_id = {}");
         // let data = sqlx::query!("SELECT * FROM {} ORDER BY ? ?");
         unimplemented!()
     }
 
-    fn merge_similar(&mut self) -> Result<(), DatabaseError> {
+    fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
         unimplemented!()
     }
 
-    fn find_matches(&self, search: SearchMode) -> Result<Vec<Book>, DatabaseError> {
+    fn find_matches(
+        &self,
+        search: Search,
+    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
         unimplemented!()
     }
 
-    fn sort_books_by_col(&mut self, col: &str, reverse: bool) -> Result<(), DatabaseError> {}
+    fn sort_books_by_col<S: AsRef<str>>(
+        &mut self,
+        col: S,
+        reverse: bool,
+    ) -> Result<(), DatabaseError<Self::Error>> {
+        unimplemented!();
+    }
 
     fn size(&self) -> usize {
         self.len
@@ -202,7 +220,7 @@ impl IndexableDatabase for SQLiteDatabase {
     fn get_books_indexed(
         &self,
         indices: impl RangeBounds<usize>,
-    ) -> Result<Vec<Book>, DatabaseError> {
+    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
         let start = match indices.start_bound() {
             Bound::Included(i) => *i,
             Bound::Excluded(i) => *i + 1,
@@ -223,11 +241,11 @@ impl IndexableDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn get_book_indexed(&self, index: usize) -> Result<Book, DatabaseError> {
+    fn get_book_indexed(&self, index: usize) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
         unimplemented!()
     }
 
-    fn remove_book_indexed(&mut self, index: usize) -> Result<(), DatabaseError> {
+    fn remove_book_indexed(&mut self, index: usize) -> Result<(), DatabaseError<Self::Error>> {
         unimplemented!()
     }
 
@@ -236,7 +254,7 @@ impl IndexableDatabase for SQLiteDatabase {
         index: usize,
         column: S0,
         new_value: S1,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), DatabaseError<Self::Error>> {
         unimplemented!()
     }
 }
