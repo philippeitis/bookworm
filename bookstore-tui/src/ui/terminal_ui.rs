@@ -21,36 +21,37 @@ use crate::ui::views::{
     AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
 };
 use crate::ui::widgets::{BorderWidget, Widget};
+use bookstore_database::bookview::BookViewError;
 
 #[derive(Debug)]
-pub(crate) enum TuiError {
-    Terminal(ErrorKind),
-    Application(ApplicationError),
+pub(crate) enum TuiError<DBError> {
+    Application(ApplicationError<DBError>),
+    Database(DatabaseError<DBError>),
     Io(std::io::Error),
-    Database(DatabaseError),
+    Terminal(ErrorKind),
 }
 
-impl From<ErrorKind> for TuiError {
-    fn from(e: ErrorKind) -> Self {
-        TuiError::Terminal(e)
-    }
-}
-
-impl From<ApplicationError> for TuiError {
-    fn from(e: ApplicationError) -> Self {
+impl<DBError> From<ApplicationError<DBError>> for TuiError<DBError> {
+    fn from(e: ApplicationError<DBError>) -> Self {
         TuiError::Application(e)
     }
 }
 
-impl From<std::io::Error> for TuiError {
+impl<DBError> From<DatabaseError<DBError>> for TuiError<DBError> {
+    fn from(e: DatabaseError<DBError>) -> Self {
+        TuiError::Database(e)
+    }
+}
+
+impl<DBError> From<std::io::Error> for TuiError<DBError> {
     fn from(e: std::io::Error) -> Self {
         TuiError::Io(e)
     }
 }
 
-impl From<DatabaseError> for TuiError {
-    fn from(e: DatabaseError) -> Self {
-        TuiError::Database(e)
+impl<DBError> From<ErrorKind> for TuiError<DBError> {
+    fn from(e: ErrorKind) -> Self {
+        TuiError::Terminal(e)
     }
 }
 
@@ -69,7 +70,7 @@ impl<D: IndexableDatabase> UIState<D> {
         f(&mut self.book_view)
     }
 
-    pub(crate) fn update_column_data(&mut self) -> Result<(), ApplicationError> {
+    pub(crate) fn update_column_data(&mut self) -> Result<(), BookViewError<D::Error>> {
         self.table_view.regenerate_columns(&self.book_view)
     }
 
@@ -141,7 +142,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     ///
     /// # Errors
     /// This function may error if executing a particular action fails.
-    fn get_input(&mut self) -> Result<bool, TuiError> {
+    fn get_input(&mut self) -> Result<bool, TuiError<D::Error>> {
         loop {
             if poll(Duration::from_millis(500))? {
                 let event = read()?;
@@ -204,7 +205,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     ///
     /// # Errors
     /// This function will return an error if running the program fails for any reason.
-    pub(crate) fn run(&mut self, terminal: &mut Terminal<B>) -> Result<(), TuiError> {
+    pub(crate) fn run(&mut self, terminal: &mut Terminal<B>) -> Result<(), TuiError<D::Error>> {
         loop {
             {
                 let mut state = self.ui_state.borrow_mut();

@@ -130,7 +130,7 @@ pub(crate) trait InputHandler<D: IndexableDatabase> {
         &mut self,
         event: Event,
         app: &mut App<D>,
-    ) -> Result<ApplicationTask, ApplicationError>;
+    ) -> Result<ApplicationTask, ApplicationError<D::Error>>;
 }
 
 /// Takes `word`, and cuts excess letters to ensure that it fits within
@@ -351,7 +351,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
         &mut self,
         event: Event,
         app: &mut App<D>,
-    ) -> Result<ApplicationTask, ApplicationError> {
+    ) -> Result<ApplicationTask, ApplicationError<D::Error>> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Mouse(m) => match (m.kind, m.column, m.row) {
@@ -509,7 +509,7 @@ impl<D: IndexableDatabase> EditWidget<D> {
     }
 
     /// Used to save the edit to the book being modified.
-    fn dump_edit(&mut self, app: &mut App<D>) -> Result<(), ApplicationError> {
+    fn dump_edit(&mut self, app: &mut App<D>) -> Result<(), ApplicationError<D::Error>> {
         if self.edit.started_edit {
             let column = {
                 self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
@@ -606,7 +606,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
         &mut self,
         event: Event,
         app: &mut App<D>,
-    ) -> Result<ApplicationTask, ApplicationError> {
+    ) -> Result<ApplicationTask, ApplicationError<D::Error>> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             // TODO: Should this behave more like Excel / Google Sheets:
@@ -721,7 +721,7 @@ impl<D: IndexableDatabase> InputHandler<D> for HelpWidget<D> {
         &mut self,
         event: Event,
         _app: &mut App<D>,
-    ) -> Result<ApplicationTask, ApplicationError> {
+    ) -> Result<ApplicationTask, ApplicationError<D::Error>> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Mouse(m) => match m.kind {

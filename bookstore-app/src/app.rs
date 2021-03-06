@@ -7,8 +7,6 @@ use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
 use rayon::prelude::*;
-#[cfg(feature = "sqlite")]
-use sqlx::Error as SQLError;
 use unicase::UniCase;
 
 use bookstore_database::bookview::BookViewIndex;
@@ -42,32 +40,30 @@ macro_rules! book {
 }
 
 #[derive(Debug)]
-pub enum ApplicationError {
+pub enum ApplicationError<DBError> {
     IO(std::io::Error),
     Book(BookError),
-    Database(DatabaseError),
-    BookView(BookViewError),
+    Database(DatabaseError<DBError>),
+    BookView(BookViewError<DBError>),
     NoBookSelected,
     Err(()),
     UserInput(CommandStringError),
-    #[cfg(feature = "sqlite")]
-    SQL(SQLError),
 }
 
-impl From<std::io::Error> for ApplicationError {
+impl<DBError> From<std::io::Error> for ApplicationError<DBError> {
     fn from(e: std::io::Error) -> Self {
         ApplicationError::IO(e)
     }
 }
 
-impl From<()> for ApplicationError {
+impl<DBError> From<()> for ApplicationError<DBError> {
     fn from(_: ()) -> Self {
         ApplicationError::Err(())
     }
 }
 
-impl From<DatabaseError> for ApplicationError {
-    fn from(e: DatabaseError) -> Self {
+impl<DBError> From<DatabaseError<DBError>> for ApplicationError<DBError> {
+    fn from(e: DatabaseError<DBError>) -> Self {
         match e {
             DatabaseError::Io(e) => ApplicationError::IO(e),
             DatabaseError::Book(e) => ApplicationError::Book(e),
@@ -76,14 +72,14 @@ impl From<DatabaseError> for ApplicationError {
     }
 }
 
-impl From<BookError> for ApplicationError {
+impl<DBError> From<BookError> for ApplicationError<DBError> {
     fn from(e: BookError) -> Self {
         ApplicationError::Book(e)
     }
 }
 
-impl From<BookViewError> for ApplicationError {
-    fn from(e: BookViewError) -> Self {
+impl<DBError> From<BookViewError<DBError>> for ApplicationError<DBError> {
+    fn from(e: BookViewError<DBError>) -> Self {
         match e {
             BookViewError::NoBookSelected => ApplicationError::NoBookSelected,
             x => ApplicationError::BookView(x),
@@ -91,16 +87,9 @@ impl From<BookViewError> for ApplicationError {
     }
 }
 
-impl From<CommandStringError> for ApplicationError {
+impl<DBError> From<CommandStringError> for ApplicationError<DBError> {
     fn from(e: CommandStringError) -> Self {
         ApplicationError::UserInput(e)
-    }
-}
-
-#[cfg(feature = "sqlite")]
-impl From<SQLError> for ApplicationError {
-    fn from(e: SQLError) -> Self {
-        ApplicationError::SQL(e)
     }
 }
 
@@ -138,7 +127,7 @@ fn get_book_path(book: &Book, index: usize) -> Option<&Path> {
 /// # Errors
 /// This function may error if the book's variants do not exist,
 /// or if the command itself fails.
-fn open_book(book: &Book, index: usize) -> Result<(), ApplicationError> {
+fn open_book(book: &Book, index: usize) -> Result<(), std::io::Error> {
     if let Some(path) = get_book_path(book, index) {
         #[cfg(target_os = "windows")]
         {
@@ -170,7 +159,7 @@ fn open_book(book: &Book, index: usize) -> Result<(), ApplicationError> {
 /// # Errors
 /// This function may error if the book's variants do not exist,
 /// or if the command itself fails.
-fn open_book_in_dir(book: &Book, index: usize) -> Result<(), ApplicationError> {
+fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
     // TODO: This doesn't work when run with install due to relative paths.
     #[cfg(target_os = "windows")]
     if let Some(path) = get_book_path(book, index) {
@@ -255,7 +244,7 @@ impl<D: IndexableDatabase> App<D> {
     pub fn get_book(
         b: BookIndex,
         bv: &SearchableBookView<D>,
-    ) -> Result<Arc<RwLock<Book>>, ApplicationError> {
+    ) -> Result<Arc<RwLock<Book>>, ApplicationError<D::Error>> {
         match b {
             BookIndex::Selected => Ok(bv.get_selected_book()?),
             BookIndex::ID(id) => Ok(bv.get_book(id)?),
@@ -267,7 +256,7 @@ impl<D: IndexableDatabase> App<D> {
         column: S0,
         new_value: S1,
         book_view: &mut SearchableBookView<D>,
-    ) -> Result<(), ApplicationError> {
+    ) -> Result<(), ApplicationError<D::Error>> {
         let id = book_view
             .get_selected_book()?
             .as_ref()
@@ -282,14 +271,14 @@ impl<D: IndexableDatabase> App<D> {
         id: BookID,
         column: S0,
         new_value: S1,
-    ) -> Result<(), ApplicationError> {
+    ) -> Result<(), ApplicationError<D::Error>> {
         Ok(self.write(|db| db.edit_book_with_id(id, &column, &new_value))?)
     }
 
     pub fn remove_selected_book(
         &mut self,
         book_view: &mut SearchableBookView<D>,
-    ) -> Result<(), ApplicationError> {
+    ) -> Result<(), ApplicationError<D::Error>> {
         match book_view.remove_selected_book()? {
             BookViewIndex::ID(id) => self.write(|db| db.remove_book(id))?,
             BookViewIndex::Index(index) => {
@@ -304,7 +293,7 @@ impl<D: IndexableDatabase> App<D> {
         &mut self,
         id: BookID,
         book_view: &mut SearchableBookView<D>,
-    ) -> Result<(), ApplicationError> {
+    ) -> Result<(), ApplicationError<D::Error>> {
         book_view.remove_book(id);
         Ok(self.write(|db| db.remove_book(id))?)
     }
@@ -327,7 +316,7 @@ impl<D: IndexableDatabase> App<D> {
         command: parser::Command,
         table: &mut TableView,
         book_view: &mut SearchableBookView<D>,
-    ) -> Result<bool, ApplicationError> {
+    ) -> Result<bool, ApplicationError<D::Error>> {
         match command {
             Command::DeleteBook(b) => {
                 match b {
@@ -435,7 +424,7 @@ impl<D: IndexableDatabase> App<D> {
     pub fn apply_sort(
         &mut self,
         book_view: &mut SearchableBookView<D>,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), DatabaseError<D::Error>> {
         if !self.sort_settings.is_sorted {
             let col = &self.sort_settings.column;
             let reverse = self.sort_settings.reverse;

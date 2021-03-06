@@ -1,9 +1,8 @@
 use unicase::UniCase;
 
+use bookstore_database::bookview::BookViewError;
 use bookstore_database::{BookView, IndexableDatabase};
 use bookstore_records::book::ColumnIdentifier;
-
-use crate::ApplicationError;
 
 macro_rules! book {
     ($book: ident) => {
@@ -26,7 +25,7 @@ impl TableView {
     pub fn regenerate_columns<D: IndexableDatabase, S: BookView<D>>(
         &mut self,
         bv: &S,
-    ) -> Result<(), ApplicationError> {
+    ) -> Result<(), BookViewError<D::Error>> {
         self.column_data = vec![Vec::with_capacity(bv.window_size()); self.selected_cols.len()];
 
         if bv.window_size() == 0 {
