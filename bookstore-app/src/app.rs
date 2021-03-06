@@ -46,19 +46,12 @@ pub enum ApplicationError<DBError> {
     Database(DatabaseError<DBError>),
     BookView(BookViewError<DBError>),
     NoBookSelected,
-    Err(()),
     UserInput(CommandStringError),
 }
 
 impl<DBError> From<std::io::Error> for ApplicationError<DBError> {
     fn from(e: std::io::Error) -> Self {
         ApplicationError::IO(e)
-    }
-}
-
-impl<DBError> From<()> for ApplicationError<DBError> {
-    fn from(_: ()) -> Self {
-        ApplicationError::Err(())
     }
 }
 
