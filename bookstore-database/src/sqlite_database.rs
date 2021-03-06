@@ -241,7 +241,10 @@ impl IndexableDatabase for SQLiteDatabase {
         unimplemented!()
     }
 
-    fn get_book_indexed(&self, index: usize) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
+    fn get_book_indexed(
+        &self,
+        index: usize,
+    ) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
         unimplemented!()
     }
 
