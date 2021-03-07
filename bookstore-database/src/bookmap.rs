@@ -34,7 +34,11 @@ impl Default for BookMap {
         BookMap {
             max_id: 1,
             books: IndexMap::default(),
-            cols: HashSet::default(),
+            cols: ["title", "authors", "series", "id", "description"]
+                .iter()
+                .map(|s| s.to_string())
+                .map(UniCase::new)
+                .collect(),
         }
     }
 }
@@ -59,6 +63,7 @@ impl BookMap {
 }
 
 impl BookMap {
+    #[allow(dead_code)]
     pub(crate) fn from_values_unchecked(
         books: IndexMap<BookID, Arc<RwLock<Book>>>,
         cols: HashSet<UniCase<String>>,
