@@ -25,10 +25,10 @@ bookstore is a fast (hopefully) terminal based library management system (like C
   - Selecting books and editing their metadata using F2, or deleting them using Del
   - Specifying settings (selection colours, default columns, default sort settings) via TOML file
   - Copying and pasting supported fields, on supported platforms via CTRL+C, CTRL+V
- 
+- SQLite database backend (optional)
+  - Modifications are syncronized to the SQLite backend at the path specified via --database
 # Planned Features
 - Cloud synchronization (eg. back up database and all books to Google Drive)
-- More robust backend database (eg. SQLite)
 - Support for supplementary files (eg. more than one cover for a book)
 - Thorough Deduplication
 - Reflecting external libraries as if they are native (eg. access Project Gutenberg directly)
@@ -56,3 +56,14 @@ cargo install --path bookstore-tui --features copypaste
 The minimum supported Rust version is current stable.
 
 Note that not all terminals are fully supported - Windows Command Prompt and Ubuntu's default terminal are tested and work correctly. However, scrolling with the mouse does not work in Windows Terminal. 
+
+# TODOs
+- Better error reporting in UI
+- Automatic duplicate detection and merging
+
+# SQLite:
+`bash
+git clone https://github.com/philippeitis/bookstore.git
+cd bookstore
+cargo install --path bookstore-tui --features copypaste --features sqlite
+`

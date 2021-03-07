@@ -21,3 +21,4 @@ clipboard = { version = "0.5.0", optional = true }
 
 [features]
 copypaste = ["clipboard"]
+sqlite = ["bookstore-database/sqlite"]

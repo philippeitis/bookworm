@@ -14,7 +14,11 @@ use tui::Terminal;
 
 use bookstore_app::table_view::TableView;
 use bookstore_app::{parse_args, App, Settings};
-use bookstore_database::{AppDatabase, BasicDatabase};
+use bookstore_database::AppDatabase;
+#[cfg(not(feature = "sqlite"))]
+use bookstore_database::BasicDatabase as Database;
+#[cfg(feature = "sqlite")]
+use bookstore_database::SQLiteDatabase as Database;
 
 use crate::ui::{AppInterface, TuiError};
 
@@ -28,7 +32,7 @@ struct Opts {
     database: PathBuf,
 }
 
-fn main() -> Result<(), TuiError<<BasicDatabase as AppDatabase>::Error>> {
+fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
     let (opts, command) = {
         let args: Vec<_> = env::args().collect();
         if args.is_empty() {
@@ -45,7 +49,7 @@ fn main() -> Result<(), TuiError<<BasicDatabase as AppDatabase>::Error>> {
     };
 
     let settings = Settings::open(opts.settings).unwrap_or_default();
-    let db = BasicDatabase::open(opts.database)?;
+    let db = Database::open(opts.database)?;
 
     let mut app = App::new(db);
     let mut placeholder_table_view = TableView::default();
