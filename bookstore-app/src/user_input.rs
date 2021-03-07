@@ -82,7 +82,7 @@ impl CommandString {
                 if escaped {
                     let mut s = String::with_capacity(2 + raw_str.len());
                     s.push('"');
-                    s.push_str(raw_str.as_str());
+                    s.push_str(raw_str.replace('"', "\\\"").as_str());
                     s.push('"');
                     s
                 } else {
@@ -192,6 +192,7 @@ impl CommandString {
             start: 0,
             complete: false,
             escaped: false,
+            was_escaped: false,
             sub_string: String::new(),
         }
     }
@@ -249,10 +250,12 @@ pub struct CommandStringIter<'a> {
     quoted: Quoted,
     start: usize,
     complete: bool,
+    was_escaped: bool,
     escaped: bool,
     sub_string: String,
 }
 
+// TODO: Make CommandStringIter able to reproduce exact text input?
 impl<'a> Iterator for CommandStringIter<'a> {
     type Item = (bool, String);
 
@@ -266,6 +269,7 @@ impl<'a> Iterator for CommandStringIter<'a> {
             .enumerate()
         {
             if self.escaped {
+                self.was_escaped = true;
                 self.sub_string.push(c);
                 self.escaped = false;
                 continue;
@@ -280,7 +284,7 @@ impl<'a> Iterator for CommandStringIter<'a> {
                                 self.start += end + 1;
                                 std::mem::take(&mut self.sub_string)
                             };
-                            return Some((false, s));
+                            return Some((std::mem::replace(&mut self.was_escaped, false), s));
                         }
                     } else {
                         self.sub_string.push(c);
@@ -313,7 +317,7 @@ impl<'a> Iterator for CommandStringIter<'a> {
         } else {
             self.complete = true;
             Some((
-                self.quoted != Quoted::NotQuoted,
+                self.was_escaped || self.quoted != Quoted::NotQuoted,
                 std::mem::take(&mut self.sub_string),
             ))
         }
@@ -352,13 +356,14 @@ mod test {
                 "a \"b\" c 12",
                 vec![(false, "a"), (true, "b"), (false, "c"), (false, "12")],
             ),
-            ("a \\b", vec![(false, "a"), (false, "b")]),
+            ("a \\b", vec![(false, "a"), (true, "b")]),
             ("a \" aaaa \\\" b", vec![(false, "a"), (true, " aaaa \" b")]),
             (
                 "a ' hello ' \" hello \"",
                 vec![(false, "a"), (true, " hello "), (true, " hello ")],
             ),
             ("' \" ' \" ' \"", vec![(true, " \" "), (true, " \' ")]),
+            ("a\\ b", vec![(true, "a b")]),
         ];
 
         for (word, expected) in samples {
