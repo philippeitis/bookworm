@@ -151,6 +151,13 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                         code: KeyCode::Char('q'),
                         modifiers: KeyModifiers::CONTROL,
                     }) => return Ok(true),
+                    Event::Key(KeyEvent {
+                        code: KeyCode::Char('s'),
+                        modifiers: KeyModifiers::CONTROL,
+                    }) => {
+                        self.app.save()?;
+                        return Ok(false);
+                    }
                     _ => {}
                 }
                 match self.active_view.handle_input(event, &mut self.app)? {

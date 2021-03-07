@@ -392,6 +392,10 @@ impl<D: IndexableDatabase> App<D> {
         Ok(true)
     }
 
+    pub fn save(&mut self) -> Result<(), DatabaseError<D::Error>> {
+        self.write(|db| db.save())
+    }
+
     /// Updates the required sorting settings if the column changes.
     ///
     /// # Arguments

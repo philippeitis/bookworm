@@ -8,8 +8,8 @@ bookstore is a fast (hopefully) terminal based library management system (like C
   - Sort ascending/descending: `!s [column] -d?`
   - Add/Remove column: `!c -?[column]`
   - Add book(s): `!a path\to\book.ext` | `!a -d path\to\books`
-  - Quit: `!q`
-  - Write: `!w`
+  - Quit: `!q` | CTRL + Q
+  - Write: `!w` | CTRL + S
   - Write and quit: `!wq`
   - Merging all books with matching metadata: `!m -a`
   - Opening books in native file viewer (Windows, MacOS, Linux) or File Explorer (Windows only): `!o [id]?` | `!o -f [id]?`
