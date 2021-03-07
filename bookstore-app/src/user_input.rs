@@ -188,9 +188,11 @@ impl CommandString {
     pub fn get_values(&self) -> CommandStringIter {
         CommandStringIter {
             command_string: &self,
-            escaped: false,
+            quoted: Quoted::NotQuoted,
             start: 0,
             complete: false,
+            escaped: false,
+            sub_string: String::new(),
         }
     }
 
@@ -223,17 +225,32 @@ impl fmt::Display for CommandString {
     }
 }
 
-pub struct CommandStringIter<'a> {
-    command_string: &'a CommandString,
-    escaped: bool,
-    start: usize,
-    complete: bool,
+#[derive(Debug, Eq, PartialEq)]
+enum Quoted {
+    // "
+    DQuoted,
+    // '
+    SQuoted,
+    NotQuoted,
 }
 
-impl<'a> CommandStringIter<'a> {
-    fn char_buf(&self) -> &[char] {
-        &self.command_string.char_buf[self.start..]
+impl From<char> for Quoted {
+    fn from(c: char) -> Self {
+        match c {
+            '"' => Self::DQuoted,
+            '\'' => Self::SQuoted,
+            _ => Self::NotQuoted,
+        }
     }
+}
+
+pub struct CommandStringIter<'a> {
+    command_string: &'a CommandString,
+    quoted: Quoted,
+    start: usize,
+    complete: bool,
+    escaped: bool,
+    sub_string: String,
 }
 
 impl<'a> Iterator for CommandStringIter<'a> {
@@ -248,37 +265,46 @@ impl<'a> Iterator for CommandStringIter<'a> {
             .iter()
             .enumerate()
         {
+            if self.escaped {
+                self.sub_string.push(c);
+                self.escaped = false;
+                continue;
+            }
             match c {
                 ' ' => {
-                    if !self.escaped {
+                    if self.quoted == Quoted::NotQuoted {
                         if end == 0 {
                             self.start += 1;
                         } else {
                             let s = {
-                                let buf = self.char_buf()[..end].iter().collect();
                                 self.start += end + 1;
-                                buf
+                                std::mem::take(&mut self.sub_string)
                             };
-                            return Some((self.escaped, s));
+                            return Some((false, s));
                         }
+                    } else {
+                        self.sub_string.push(c);
                     }
                 }
-                '"' => {
-                    if self.escaped {
+                '"' | '\'' => {
+                    let quote = Quoted::from(c);
+                    if self.quoted == quote {
                         let s = {
-                            let buf = self.char_buf()[..end.saturating_sub(1)].iter().collect();
                             self.start += end + 1;
-                            self.escaped = false;
-                            buf
+                            self.quoted = Quoted::NotQuoted;
+                            std::mem::take(&mut self.sub_string)
                         };
 
                         return Some((true, s));
                     } else if end == 0 {
-                        self.escaped = true;
+                        self.quoted = quote;
                         self.start += 1;
+                    } else {
+                        self.sub_string.push(c);
                     }
                 }
-                _ => {}
+                '\\' => self.escaped = true,
+                c => self.sub_string.push(c),
             }
         }
 
@@ -286,7 +312,10 @@ impl<'a> Iterator for CommandStringIter<'a> {
             None
         } else {
             self.complete = true;
-            Some((self.escaped, self.char_buf().iter().collect()))
+            Some((
+                self.quoted != Quoted::NotQuoted,
+                std::mem::take(&mut self.sub_string),
+            ))
         }
     }
 }
@@ -323,6 +352,13 @@ mod test {
                 "a \"b\" c 12",
                 vec![(false, "a"), (true, "b"), (false, "c"), (false, "12")],
             ),
+            ("a \\b", vec![(false, "a"), (false, "b")]),
+            ("a \" aaaa \\\" b", vec![(false, "a"), (true, " aaaa \" b")]),
+            (
+                "a ' hello ' \" hello \"",
+                vec![(false, "a"), (true, " hello "), (true, " hello ")],
+            ),
+            ("' \" ' \" ' \"", vec![(true, " \" "), (true, " \' ")]),
         ];
 
         for (word, expected) in samples {
