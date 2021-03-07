@@ -1,12 +1,18 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::ffi::OsString;
 use std::num::NonZeroU64;
 use std::ops::{Bound, DerefMut, RangeBounds};
+#[cfg(unix)]
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
+#[cfg(windows)]
+use bytevec::{ByteDecodable, ByteEncodable};
 use futures::executor::block_on;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::{Connection, Sqlite, SqliteConnection};
@@ -38,7 +44,7 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
 
 const CREATE_VARIANTS: &str = r#"CREATE TABLE `variants` (
 `book_type` TEXT NOT NULL,
-`path` TEXT NOT NULL,
+`path` BLOB NOT NULL,
 `local_title` TEXT DEFAULT NULL,
 `identifier` TEXT DEFAULT NULL,
 `language` TEXT DEFAULT NULL,
@@ -116,7 +122,7 @@ struct BookData {
 struct VariantData {
     book_id: i64,
     book_type: String,
-    path: String,
+    path: Vec<u8>,
     local_title: Option<String>,
     language: Option<String>,
     identifier: Option<String>,
@@ -128,6 +134,21 @@ struct TagData {
     tag_name: String,
     tag_value: String,
     book_id: i64,
+}
+
+#[cfg(windows)]
+fn v8_to_v16(a: Vec<u8>) -> Vec<u16> {
+    a.chunks(2)
+        .map(|c| u16::from_be_bytes([c[0], c[1]]))
+        .collect()
+}
+
+#[cfg(windows)]
+fn v16_to_v8(a: Vec<u16>) -> Vec<u8> {
+    a.into_iter()
+        .map(|c| c.to_be_bytes())
+        .flat_map(|v| v.iter().cloned())
+        .collect()
 }
 
 impl From<BookData> for Book {
@@ -148,7 +169,10 @@ impl From<VariantData> for BookVariant {
     fn from(vd: VariantData) -> Self {
         BookVariant {
             book_type: ron::from_str(&vd.book_type).unwrap(),
-            path: PathBuf::from_str(&vd.path).unwrap(),
+            #[cfg(unix)]
+            path: PathBuf::from(OsString::from_vec(vd.path)),
+            #[cfg(windows)]
+            path: PathBuf::from(OsString::from_wide(v8_to_v16(vd.path))),
             local_title: vd.local_title,
             identifier: vd
                 .identifier
@@ -283,7 +307,10 @@ impl AppDatabase for SQLiteDatabase {
         if let Some(variants) = book.get_variants() {
             for variant in variants {
                 let book_type = ron::to_string(variant.book_type()).unwrap();
-                let path = variant.path().display().to_string();
+                #[cfg(unix)]
+                let path = variant.path().as_os_str().as_bytes();
+                #[cfg(windows)]
+                let path = v16_to_v8(variant.path().as_os_str().encode_wide());
                 let local_title = &variant.local_title;
                 let identifier = variant
                     .identifier
