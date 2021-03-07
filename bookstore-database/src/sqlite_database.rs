@@ -8,7 +8,6 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 use futures::executor::block_on;
-use indexmap::map::IndexMap;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::{Connection, Sqlite, SqliteConnection};
 use unicase::UniCase;
@@ -50,34 +49,6 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
     ON DELETE CASCADE
 );"#;
-
-const FETCH_ID: &str = r#"SELECT * FROM {} WHERE book_id = {}";"#;
-const FETCH_IDS: &str = r#"SELECT * FROM {} WHERE book_id IN ({}, )";"#;
-const DELETE_BOOK: &str = r#"DELETE FROM books WHERE book_id = {}"#;
-const DELETE_BOOKS: &str = r#"DELETE FROM books WHERE book_id IN ({},)"#;
-const DELETE_ALL: &str = r#"DELETE FROM books"#;
-const EDIT_BOOK_BY_ID: &str = r#"UPDATE {} SET {} = {} WHERE book_id = {}"#;
-const GET_ALL_COLUMNS: &str = r#"SELECT DISTINCT tag_name FROM extended_tags"#;
-
-// TODO: FIND_MATCHES_* - look at SQLite FTS5.
-// TODO: MERGE_SIMILAR?
-const FIND_MATCHES_REGEX: &str = r#"SELECT * FROM {} WHERE {} REGEXP {};"#;
-const GET_SIZE: &str = r#"SELECT COUNT(*) FROM books;"#;
-
-const FETCH_SINGLE_INDEX: &str = r#"SELECT * FROM {} ORDER BY {} {} LIMIT 1 OFFSET {};"#;
-//                               all values         ascending or descending
-//                                  |     table   column  |  number of books
-//                                  v      v           v  v        v    start index
-const FETCH_RANGE_INDEX: &str = r#"SELECT * FROM {} ORDER BY {} {} LIMIT {} OFFSET {};"#;
-const FETCH_ALL: &str = r#"SELECT * FROM {} ORDER BY {} {};"#;
-const DELETE_BOOK_INDEX: &str = r#"DELETE FROM books ORDER BY {} {} LIMIT 1 OFFSET {}"#;
-const DELETE_BOOKS_INDEX: &str = r#"DELETE FROM books ORDER BY {} {} LIMIT {} OFFSET {}"#;
-const EDIT_BOOK_BY_INDEX: &str = r#"UPDATE {} SET {} = {} WHERE book_id = {} LIMIT 1 OFFSET {}"#;
-
-pub struct SQLiteDatabase {
-    backend: RefCell<SqliteConnection>,
-    local_cache: BookMap,
-}
 
 macro_rules! execute_query {
     ($self:ident, $query_str:expr) => ({
@@ -129,27 +100,9 @@ macro_rules! run_query_as {
     })
 }
 
-macro_rules! run_query_str {
-    ($self: ident, $query_str: expr) => {{
-        let mut mut_backend = $self.backend.borrow_mut();
-        block_on(async {
-            sqlx::query($query_str.as_ref())
-                .fetch_all(mut_backend.deref_mut())
-                .await
-        })
-        .map_err(DatabaseError::Backend)
-    }};
-}
-
 macro_rules! book {
     ($book: ident) => {
         $book.as_ref().read().unwrap()
-    };
-}
-
-macro_rules! book_mut {
-    ($book: ident) => {
-        $book.as_ref().write().unwrap()
     };
 }
 
@@ -158,6 +111,23 @@ struct BookData {
     title: Option<String>,
     series_name: Option<String>,
     series_id: Option<f32>,
+}
+
+struct VariantData {
+    book_id: i64,
+    book_type: String,
+    path: String,
+    local_title: Option<String>,
+    language: Option<String>,
+    identifier: Option<String>,
+    description: Option<String>,
+    id: Option<i64>,
+}
+
+struct TagData {
+    tag_name: String,
+    tag_value: String,
+    book_id: i64,
 }
 
 impl From<BookData> for Book {
@@ -172,17 +142,6 @@ impl From<BookData> for Book {
         };
         Book::from_raw_book(NonZeroU64::try_from(bd.book_id as u64).unwrap(), rb)
     }
-}
-
-struct VariantData {
-    book_id: i64,
-    book_type: String,
-    path: String,
-    local_title: Option<String>,
-    language: Option<String>,
-    identifier: Option<String>,
-    description: Option<String>,
-    id: Option<i64>,
 }
 
 impl From<VariantData> for BookVariant {
@@ -205,10 +164,9 @@ impl From<VariantData> for BookVariant {
     }
 }
 
-struct TagData {
-    tag_name: String,
-    tag_value: String,
-    book_id: i64,
+pub struct SQLiteDatabase {
+    backend: RefCell<SqliteConnection>,
+    local_cache: BookMap,
 }
 
 impl SQLiteDatabase {
@@ -232,6 +190,7 @@ impl SQLiteDatabase {
             }
         }
 
+        // To get all columns: "SELECT DISTINCT tag_name FROM extended_tags"
         let mut prime_cols = HashSet::new();
         for &col in &["title", "authors", "series", "id", "description"] {
             prime_cols.insert(col.to_owned());
@@ -263,10 +222,7 @@ impl SQLiteDatabase {
     }
 }
 
-// TODO: Should we read everything into in-memory cache so that we can return
-//  books synchronously?
-//  Eg. Changes mirrored to internal cache, then written into SQLite
-//  db via another process?
+// TODO: Should we use a separate process to mirror changes to SQL database?
 //  Would push writes to queue:
 //  DELETE_ALL should clear queue, since everything will be deleted.
 //  DELETE_BOOK_ID should clear anything that overwrites given book, except when
@@ -290,23 +246,23 @@ impl AppDatabase for SQLiteDatabase {
         let database = block_on(async { SqliteConnection::connect(path.as_str()).await })
             .map_err(DatabaseError::Backend)?;
 
-        let mut m = Self {
+        let mut db = Self {
             backend: RefCell::new(database),
             local_cache: BookMap::default(),
         };
 
         if !db_exists {
-            run_query_str!(m, CREATE_BOOKS)?;
-            run_query_str!(m, CREATE_EXTENDED_TAGS)?;
-            run_query_str!(m, CREATE_VARIANTS)?;
+            execute_query_str!(db, CREATE_BOOKS)?;
+            execute_query_str!(db, CREATE_EXTENDED_TAGS)?;
+            execute_query_str!(db, CREATE_VARIANTS)?;
+        } else {
+            db.load_books()?;
         }
-
-        m.load_books()?;
-        Ok(m)
+        Ok(db)
     }
 
     fn save(&mut self) -> Result<(), DatabaseError<Self::Error>> {
-        unimplemented!()
+        Ok(())
     }
 
     fn insert_book(&mut self, book: RawBook) -> Result<BookID, DatabaseError<Self::Error>> {
@@ -404,7 +360,7 @@ impl AppDatabase for SQLiteDatabase {
 
     fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books"
-        let data = execute_query!(self, "DELETE FROM books")?;
+        execute_query!(self, "DELETE FROM books")?;
         self.local_cache.clear();
         Ok(())
     }
@@ -420,8 +376,7 @@ impl AppDatabase for SQLiteDatabase {
         &self,
         ids: I,
     ) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError<Self::Error>> {
-        // let query = format!("SELECT * FROM books WHERE book_id IN ({})", ids.iter().join(", "));
-        // let data = sqlx::query!("SELECT * FROM books WHERE book_id IN ?", ids);
+        // SELECT * FROM {} WHERE book_id IN ({}, );
         Ok(ids
             .into_iter()
             .map(|id| self.local_cache.get_book(id))
@@ -429,8 +384,7 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
-        // let query = format!("SELECT * FROM {} ORDER BY {} {}");
-        // let data = sqlx::query!("SELECT * FROM {} ORDER BY ? ?");
+        // "SELECT * FROM {} ORDER BY {} {};"
         Ok(self.local_cache.get_all_books())
     }
 
@@ -444,9 +398,7 @@ impl AppDatabase for SQLiteDatabase {
         column: S0,
         new_value: S1,
     ) -> Result<(), DatabaseError<Self::Error>> {
-        // let query = format!("UPDATE {} SET {} = {} WHERE book_id = {}");
-        // let data = sqlx::query!("SELECT * FROM {} ORDER BY ? ?");
-        let column_id: ColumnIdentifier = column.as_ref().into();
+        // "UPDATE {} SET {} = {} WHERE book_id = {};"
         if !self
             .local_cache
             .edit_book_with_id(id, &column, &new_value)?
@@ -455,7 +407,7 @@ impl AppDatabase for SQLiteDatabase {
         }
         let idx = u64::from(id) as i64;
         let new_value = new_value.as_ref();
-        match column_id {
+        match column.as_ref().into() {
             ColumnIdentifier::Title => {
                 execute_query!(
                     self,
@@ -467,7 +419,7 @@ impl AppDatabase for SQLiteDatabase {
             ColumnIdentifier::Author => {
                 execute_query!(
                     self,
-                    "UPDATE extended_tags SET tag_name = 'author', tag_value = ? WHERE book_id = ?",
+                    "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES('author', ?, ?);",
                     new_value,
                     idx
                 )?;
@@ -531,6 +483,8 @@ impl AppDatabase for SQLiteDatabase {
         &self,
         search: Search,
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
+        // "SELECT * FROM {} WHERE {} REGEXP {};"
+        // FIND_MATCHES_* - look at SQLite FTS5.
         Ok(self.local_cache.find_matches(search)?)
     }
 
@@ -544,6 +498,7 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     fn size(&self) -> usize {
+        // "SELECT COUNT(*) FROM books;"
         self.local_cache.len()
     }
 
@@ -557,6 +512,7 @@ impl IndexableDatabase for SQLiteDatabase {
         &self,
         indices: impl RangeBounds<usize>,
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
+        // "SELECT * FROM {} ORDER BY {} {} LIMIT {} OFFSET {};
         let start = match indices.start_bound() {
             Bound::Included(i) => *i,
             Bound::Excluded(i) => *i + 1,
@@ -583,12 +539,15 @@ impl IndexableDatabase for SQLiteDatabase {
         &self,
         index: usize,
     ) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
+        // "SELECT * FROM {} ORDER BY {} {} LIMIT 1 OFFSET {};"
         self.local_cache
             .get_book_indexed(index)
             .ok_or(DatabaseError::IndexOutOfBounds(index))
     }
 
     fn remove_book_indexed(&mut self, index: usize) -> Result<(), DatabaseError<Self::Error>> {
+        // "DELETE FROM books ORDER BY {} {} LIMIT 1 OFFSET {}"
+        // "DELETE FROM books ORDER BY {} {} LIMIT {} OFFSET {}"
         let book = self
             .local_cache
             .get_book_indexed(index)
@@ -603,6 +562,7 @@ impl IndexableDatabase for SQLiteDatabase {
         column: S0,
         new_value: S1,
     ) -> Result<(), DatabaseError<Self::Error>> {
+        // "UPDATE {} SET {} = {} ORDER BY {} {} LIMIT 1 OFFSET {}"
         let book = self
             .local_cache
             .get_book_indexed(index)
