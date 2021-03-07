@@ -186,13 +186,11 @@ impl BookMap {
         merges.into_iter().map(|(_, m)| m).collect()
     }
 
-    pub fn find_matches(&self, search: Search) -> Result<Vec<Arc<RwLock<Book>>>, Error> {
-        let mut results = vec![];
-        let matcher = search.into_matcher()?;
-        for (_, book) in self.books.iter() {
-            if matcher.is_match(&book!(book)) {
-                results.push(book.clone());
-            }
+    pub fn find_matches(&self, searches: &[Search]) -> Result<Vec<Arc<RwLock<Book>>>, Error> {
+        let mut results: Vec<_> = self.books.values().cloned().collect();
+        for search in searches {
+            let matcher = search.clone().into_matcher()?;
+            results.retain(|book| matcher.is_match(&book!(book)));
         }
         Ok(results)
     }

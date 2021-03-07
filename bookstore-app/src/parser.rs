@@ -37,7 +37,7 @@ pub enum Command {
     Quit,
     Write,
     WriteAndQuit,
-    FindMatches(Search),
+    FindMatches(Box<[Search]>),
     Help(String),
     GeneralHelp,
 }
@@ -263,6 +263,10 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                     chunks.push((field, value));
                 }
 
+                if chunks.is_empty() {
+                    return Err(CommandError::InsufficientArguments);
+                }
+
                 if let Some(id) = id {
                     Ok(Command::EditBook(
                         BookIndex::ID(id),
@@ -309,10 +313,10 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 };
             }
 
-            if !sort_cols.is_empty() {
-                Ok(Command::SortColumns(sort_cols.into_boxed_slice()))
-            } else {
+            if sort_cols.is_empty() {
                 Err(CommandError::InsufficientArguments)
+            } else {
+                Ok(Command::SortColumns(sort_cols.into_boxed_slice()))
             }
         }
         "!c" => match flags.into_iter().next() {
@@ -323,21 +327,37 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             _ => Err(CommandError::InvalidCommand),
         },
         "!f" => {
-            let (mode, args) = match flags.into_iter().next() {
-                Some(Flag::StartingArguments(args)) => Ok((SearchMode::Default, args)),
-                Some(Flag::FlagWithArgument(flag, args)) => match flag.as_str() {
-                    "r" => Ok((SearchMode::Regex, args)),
-                    "e" => Ok((SearchMode::ExactSubstring, args)),
+            let mut matches = vec![];
+            for flag in flags.into_iter() {
+                let (mode, args) = match flag {
+                    Flag::StartingArguments(args) => Ok((SearchMode::Default, args)),
+                    Flag::FlagWithArgument(flag, args) => match flag.as_str() {
+                        "r" => Ok((SearchMode::Regex, args)),
+                        "e" => Ok((SearchMode::ExactSubstring, args)),
+                        _ => Err(CommandError::InvalidCommand),
+                    },
                     _ => Err(CommandError::InvalidCommand),
-                },
-                _ => Err(CommandError::InvalidCommand),
-            }?;
-            let mut args = args.into_iter();
-            Ok(Command::FindMatches(Search {
-                mode,
-                column: ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
-                search: remove_string_quotes(args.next().ok_or_else(insuf)?),
-            }))
+                }?;
+                let mut args = args.into_iter();
+                matches.push(Search {
+                    mode,
+                    column: ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
+                    search: remove_string_quotes(args.next().ok_or_else(insuf)?),
+                });
+                while let Some(col) = args.next() {
+                    let search = args.next().ok_or_else(insuf)?;
+                    matches.push(Search {
+                        mode: SearchMode::Default,
+                        column: ColumnIdentifier::from(col),
+                        search: remove_string_quotes(search),
+                    });
+                }
+            }
+            if matches.is_empty() {
+                Err(CommandError::InsufficientArguments)
+            } else {
+                Ok(Command::FindMatches(matches.into_boxed_slice()))
+            }
         }
         "!o" => {
             let mut f = false;

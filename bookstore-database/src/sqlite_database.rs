@@ -480,11 +480,11 @@ impl AppDatabase for SQLiteDatabase {
 
     fn find_matches(
         &self,
-        search: Search,
+        searches: &[Search],
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
         // "SELECT * FROM {} WHERE {} REGEXP {};"
         // FIND_MATCHES_* - look at SQLite FTS5.
-        Ok(self.local_cache.find_matches(search)?)
+        Ok(self.local_cache.find_matches(searches)?)
     }
 
     fn sort_books_by_cols<S: AsRef<str>>(

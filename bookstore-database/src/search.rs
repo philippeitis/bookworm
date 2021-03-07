@@ -21,7 +21,7 @@ impl From<RegexError> for Error {
         Error::Regex(e)
     }
 }
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Search {
     pub mode: SearchMode,
     pub column: ColumnIdentifier,

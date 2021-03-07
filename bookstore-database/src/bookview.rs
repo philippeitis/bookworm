@@ -112,7 +112,7 @@ pub trait ScrollableBookView<D: AppDatabase>: BookView<D> {
 }
 
 pub trait NestedBookView<D: AppDatabase>: BookView<D> {
-    fn push_scope(&mut self, search: Search) -> Result<(), BookViewError<D::Error>>;
+    fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>>;
 
     fn pop_scope(&mut self) -> bool;
 }
@@ -315,11 +315,11 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 }
 
 impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
-    fn push_scope(&mut self, search: Search) -> Result<(), BookViewError<D::Error>> {
+    fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>> {
         let results: IndexMap<_, _> = match self.scopes.last() {
             None => self
                 .db()
-                .find_matches(search)?
+                .find_matches(searches)?
                 .into_iter()
                 .map(|book| {
                     let id = book!(book).get_id();
@@ -328,11 +328,15 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
                 .collect(),
 
             Some((_, books)) => {
-                let matcher = search.into_matcher()?;
-                books
-                    .iter()
-                    .filter(|(_, book)| matcher.is_match(&book!(book)))
-                    .map(|(_, b)| (book!(b).get_id(), b.clone()))
+                let mut results: Vec<_> = books.values().cloned().collect();
+                for search in searches {
+                    let matcher = search.clone().into_matcher()?;
+                    results.retain(|book| matcher.is_match(&book!(book)));
+                }
+
+                results
+                    .into_iter()
+                    .map(|b| (book!(b).get_id(), b.clone()))
                     .collect()
             }
         };

@@ -37,7 +37,7 @@ pub const EDIT_HELP_STRING: &str = r#"USAGE:
 
 ARGUMENTS:
 <id>: (Optional) The numeric ID of the book to edit. If not specified, edits the selected item.
-(<column, new_value>)+: One or more column-value pairs, where column values will be set to new_value.
+(<column>, <new_value>)+: One or more column-value pairs, where column values will be set to new_value.
 "#;
 
 pub const MERGE_HELP_STRING: &str = r#"USAGE:
@@ -71,11 +71,13 @@ pub const SEARCH_HELP_STRING: &str = r#"USAGE:
 
 FLAGS:
 -r: Uses <match> as a regular expression.
--c: Uses <match> as a case-sensitive string.
+-e: Uses <match> as an exact substring.
 
 ARGUMENTS:
-<column>: The column on which to sort the books.
-<match>: The string to match on.
+(FLAG? <column> <match>):
+FLAG: A flag describing how to use <match>. If none is provided, uses fuzzy search.
+<column>: The column to match
+<match>: The value to match on
 "#;
 
 pub const OPEN_HELP_STRING: &str = r#"USAGE:

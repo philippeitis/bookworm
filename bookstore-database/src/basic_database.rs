@@ -176,7 +176,7 @@ pub trait AppDatabase {
     /// This function will return an error if the database fails.
     fn find_matches(
         &self,
-        search: Search,
+        search: &[Search],
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>>;
 
     /// Sorts books by comparing the specified columns and reverses.
@@ -425,11 +425,11 @@ impl AppDatabase for BasicDatabase {
 
     fn find_matches(
         &self,
-        search: Search,
+        searches: &[Search],
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
         Ok(self
             .backend
-            .read(|db| db.find_matches(search))
+            .read(|db| db.find_matches(searches))
             .map_err(DatabaseError::Backend)??)
     }
 
