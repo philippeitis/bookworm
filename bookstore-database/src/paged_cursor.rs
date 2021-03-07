@@ -12,6 +12,7 @@ trait ReplaceAndEqual {
 }
 
 impl<T: PartialEq + Copy> ReplaceAndEqual for T {
+    #[inline(always)]
     fn replace_and_equal(&mut self, other: Self) -> bool {
         std::mem::replace(self, other) == other
     }
@@ -167,16 +168,6 @@ impl PageCursor {
         t_change || s_change
     }
 
-    // /// Returns a reference to the internal data.
-    // pub(crate) fn data(&self) -> &Vec<T> {
-    //     &self.data
-    // }
-    //
-    // /// Returns a mutable reference to the internal data.
-    // pub(crate) fn data_mut(&mut self) -> &mut Vec<T> {
-    //     self.data.as_mut()
-    // }
-
     /// Adjusts the start of the window so that it doesn't go past the end of the data, if possible.
     pub(crate) fn refresh(&mut self) {
         if self.top_index + self.window_size > self.height {
@@ -238,9 +229,6 @@ impl PageCursor {
     pub(crate) fn window_range(&self) -> std::ops::Range<usize> {
         self.top_index..(self.top_index + self.window_size).min(self.height)
     }
-
-    // TODO: Add in_window to allow determining if a change requires a UI
-    //  update?
 }
 
 #[cfg(test)]
