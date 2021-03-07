@@ -339,7 +339,7 @@ impl<D: IndexableDatabase> App<D> {
             }
             Command::AddColumn(column) => {
                 let column = UniCase::new(column);
-                if book_view.has_column(&column) {
+                if book_view.has_column(&column)? {
                     table.add_column(column);
                 }
             }

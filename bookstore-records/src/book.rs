@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{BookError, BookVariant};
 
-pub type BookID = std::num::NonZeroU32;
+pub type BookID = std::num::NonZeroU64;
 
 /// Identifies the columns a Book provides.
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -45,8 +45,8 @@ pub struct RawBook {
     pub authors: Option<Vec<String>>,
     pub series: Option<(String, Option<f32>)>,
     pub description: Option<String>,
-    variants: Option<Vec<BookVariant>>,
-    extended_tags: Option<HashMap<String, String>>,
+    pub variants: Option<Vec<BookVariant>>,
+    pub extended_tags: Option<HashMap<String, String>>,
 }
 
 impl RawBook {
@@ -147,6 +147,28 @@ impl RawBook {
             _ => return None,
         })
     }
+
+    pub fn push_variant(&mut self, variant: BookVariant) {
+        match self.variants.as_mut() {
+            None => self.variants = Some(vec![variant]),
+            Some(v) => v.push(variant),
+        }
+    }
+}
+
+pub fn str_to_series(value: &str) -> Option<(String, Option<f32>)> {
+    if value.ends_with(']') {
+        // Replace with rsplit_once when stable.
+        let mut words = value.rsplitn(2, char::is_whitespace);
+        if let Some(id) = words.next() {
+            if let Some(series) = words.next() {
+                if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str()) {
+                    return Some((series.to_owned(), Some(id)));
+                }
+            }
+        }
+    }
+    Some((value.to_owned(), None))
 }
 
 impl RawBook {
@@ -181,20 +203,7 @@ impl RawBook {
                 return Err(BookError::ImmutableColumnError);
             }
             ColumnIdentifier::Series => {
-                if value.ends_with(']') {
-                    // Replace with rsplit_once when stable.
-                    let mut words = value.rsplitn(2, char::is_whitespace);
-                    if let Some(id) = words.next() {
-                        if let Some(series) = words.next() {
-                            if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str())
-                            {
-                                self.series = Some((series.to_owned(), Some(id)));
-                            }
-                        }
-                    }
-                } else {
-                    self.series = Some((value.to_owned(), None));
-                }
+                self.series = str_to_series(value);
             }
             ColumnIdentifier::ExtendedTag(column) => {
                 if let Some(d) = self.extended_tags.as_mut() {
@@ -351,6 +360,11 @@ impl Book {
     pub fn inner(&self) -> &RawBook {
         &self.raw_book
     }
+
+    #[allow(dead_code)]
+    pub fn inner_mut(&mut self) -> &mut RawBook {
+        &mut self.raw_book
+    }
 }
 
 impl Book {
@@ -378,8 +392,8 @@ impl Book {
         }
     }
 
-    pub fn get_u32_id(&self) -> u32 {
-        self.id.map(|id| u32::from(id)).unwrap_or(0)
+    pub fn get_u32_id(&self) -> u64 {
+        self.id.map(|id| u64::from(id)).unwrap_or(0)
     }
 
     pub fn get_id(&self) -> BookID {

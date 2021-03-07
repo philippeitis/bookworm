@@ -1,33 +1,16 @@
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
+use std::collections::HashSet;
 use std::ops::{Bound, RangeBounds};
 use std::path;
 use std::sync::{Arc, RwLock};
 
-use indexmap::IndexMap;
 use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
-use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
 use bookstore_records::book::BookID;
-use bookstore_records::{
-    book::{ColumnIdentifier, RawBook},
-    Book, BookError,
-};
+use bookstore_records::{book::RawBook, Book, BookError};
 
+use crate::bookmap::BookMap;
 use crate::search::{Error as SearchError, Search};
-
-macro_rules! book {
-    ($book: ident) => {
-        $book.as_ref().read().unwrap()
-    };
-}
-
-macro_rules! book_mut {
-    ($book: ident) => {
-        $book.as_ref().write().unwrap()
-    };
-}
 
 #[derive(Debug)]
 pub enum DatabaseError<DBError> {
@@ -54,40 +37,6 @@ impl<DBError> From<BookError> for DatabaseError<DBError> {
 impl<DBError> From<SearchError> for DatabaseError<DBError> {
     fn from(e: SearchError) -> Self {
         DatabaseError::Search(e)
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub(crate) struct BookMap {
-    max_id: u32,
-    books: IndexMap<BookID, Arc<RwLock<Book>>>,
-}
-
-impl Default for BookMap {
-    fn default() -> Self {
-        BookMap {
-            max_id: 1,
-            books: IndexMap::default(),
-        }
-    }
-}
-
-impl BookMap {
-    /// Return a monotonically increasing ID to use for a new
-    /// book.
-    ///
-    /// # Errors
-    /// Will panic if the ID can no longer be correctly increased.
-    fn new_id(&mut self) -> BookID {
-        let id = self.max_id;
-        if self.max_id == u32::MAX {
-            panic!(
-                "Current ID is at maximum value of {} and can not be increased.",
-                u32::MAX
-            );
-        }
-        self.max_id += 1;
-        BookID::try_from(id).unwrap()
     }
 }
 
@@ -186,14 +135,11 @@ pub trait AppDatabase {
     /// This function will return an error if the database fails.
     fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>>;
 
-    /// Returns a list of columns that exist for at least one book in the database.
-    fn get_available_columns(&self) -> &HashSet<UniCase<String>>;
-
     /// Returns whether the provided column exists in at least one book in the database.
     ///
     /// # Arguments
     /// * ` col ` - The column to check.
-    fn has_column(&self, col: &UniCase<String>) -> bool;
+    fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>>;
 
     /// Finds the book with the given ID, then sets the given value for the book to `new_value`.
     /// If all steps are successful, returns a copy of the book to use, otherwise returning
@@ -317,7 +263,6 @@ pub trait IndexableDatabase: AppDatabase + Sized {
 pub struct BasicDatabase {
     backend: FileDatabase<BookMap, Ron>,
     /// All available columns. Case-insensitive.
-    cols: HashSet<UniCase<String>>,
     len: usize,
     saved: bool,
 }
@@ -331,33 +276,15 @@ impl AppDatabase for BasicDatabase {
     {
         let backend = FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)
             .map_err(DatabaseError::Backend)?;
-        let (cols, len) = backend
-            .read(|db| {
-                let mut c = HashSet::new();
-
-                for &col in &["title", "authors", "series", "id", "description"] {
-                    c.insert(col.to_owned());
-                }
-
-                for book in db.books.values() {
-                    let book = book!(book);
-                    let columns = book.get_extended_columns();
-                    if let Some(e) = columns {
-                        for key in e.keys() {
-                            if !c.contains(key) {
-                                c.insert(key.to_owned());
-                            }
-                        }
-                    }
-                }
-
-                (c.into_iter().map(UniCase::new).collect(), db.books.len())
+        let len = backend
+            .write(|db| {
+                db.init_columns();
+                db.len()
             })
             .map_err(DatabaseError::Backend)?;
 
         Ok(BasicDatabase {
             backend,
-            cols,
             len,
             saved: true,
         })
@@ -373,10 +300,8 @@ impl AppDatabase for BasicDatabase {
         let (id, len) = self
             .backend
             .write(|db| {
-                let id = db.new_id();
-                let book = Book::from_raw_book(id, book);
-                db.books.insert(id, Arc::new(RwLock::new(book)));
-                (id, db.books.len())
+                let id = db.insert_raw_book(book);
+                (id, db.len())
             })
             .map_err(DatabaseError::Backend)?;
 
@@ -396,12 +321,9 @@ impl AppDatabase for BasicDatabase {
             .backend
             .write(|db| {
                 books.into_iter().for_each(|book| {
-                    let id = db.new_id();
-                    let book = Book::from_raw_book(id, book);
-                    db.books.insert(id, Arc::new(RwLock::new(book)));
-                    ids.push(id);
+                    ids.push(db.insert_raw_book(book));
                 });
-                db.books.len()
+                db.len()
             })
             .map_err(DatabaseError::Backend)?;
 
@@ -414,8 +336,8 @@ impl AppDatabase for BasicDatabase {
         self.len = self
             .backend
             .write(|db| {
-                db.books.shift_remove(&id);
-                db.books.len()
+                db.remove_book(id);
+                db.len()
             })
             .map_err(DatabaseError::Backend)?;
 
@@ -428,8 +350,8 @@ impl AppDatabase for BasicDatabase {
         self.len = self
             .backend
             .write(|db| {
-                db.books.retain(|id, _| !ids.contains(id));
-                db.books.len()
+                db.remove_books(ids);
+                db.len()
             })
             .map_err(DatabaseError::Backend)?;
 
@@ -442,8 +364,8 @@ impl AppDatabase for BasicDatabase {
         self.len = self
             .backend
             .write(|db| {
-                db.books.clear();
-                db.books.len()
+                db.clear();
+                db.len()
             })
             .map_err(DatabaseError::Backend)?;
 
@@ -454,10 +376,7 @@ impl AppDatabase for BasicDatabase {
 
     fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
         self.backend
-            .read(|db| match db.books.get(&id) {
-                None => Err(DatabaseError::BookNotFound(id)),
-                Some(book) => Ok(book.clone()),
-            })
+            .read(|db| db.get_book(id).ok_or(DatabaseError::BookNotFound(id)))
             .map_err(DatabaseError::Backend)?
     }
 
@@ -467,27 +386,21 @@ impl AppDatabase for BasicDatabase {
     ) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError<Self::Error>> {
         Ok(self
             .backend
-            .read(|db| {
-                ids.into_iter()
-                    .map(|id| db.books.get(&id).cloned())
-                    .collect()
-            })
+            .read(|db| ids.into_iter().map(|id| db.get_book(id)).collect())
             .map_err(DatabaseError::Backend)?)
     }
 
     fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
         Ok(self
             .backend
-            .read(|db| db.books.values().cloned().collect())
+            .read(|db| db.get_all_books())
             .map_err(DatabaseError::Backend)?)
     }
 
-    fn get_available_columns(&self) -> &HashSet<UniCase<String>> {
-        &self.cols
-    }
-
-    fn has_column(&self, col: &UniCase<String>) -> bool {
-        self.cols.contains(col)
+    fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>> {
+        self.backend
+            .read(|db| db.has_column(col))
+            .map_err(DatabaseError::Backend)
     }
 
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
@@ -497,13 +410,9 @@ impl AppDatabase for BasicDatabase {
         new_value: S1,
     ) -> Result<(), DatabaseError<Self::Error>> {
         self.backend
-            .write(|db| match db.books.get_mut(&id) {
-                None => Err(DatabaseError::BookNotFound(id)),
-                Some(book) => Ok(book_mut!(book).set_column(&column.as_ref().into(), new_value)?),
-            })
+            .write(|db| db.edit_book_with_id(id, column, new_value))
             .map_err(DatabaseError::Backend)??;
         self.saved = false;
-        self.cols.insert(UniCase::new(column.as_ref().to_owned()));
         Ok(())
     }
 
@@ -511,38 +420,8 @@ impl AppDatabase for BasicDatabase {
         let (ids, len) = self
             .backend
             .write(|db| {
-                let mut ref_map: HashMap<(String, String), BookID> = HashMap::new();
-                let mut merges = vec![];
-                for book in db.books.values() {
-                    let book = book!(book);
-                    if let Some(title) = book.get_title() {
-                        if let Some(authors) = book.get_authors() {
-                            let a: String = authors.join(", ").to_ascii_lowercase();
-                            let val = (title.to_ascii_lowercase(), a);
-                            if let Some(id) = ref_map.get(&val) {
-                                merges.push((*id, book.get_id()));
-                            } else {
-                                ref_map.insert(val, book.get_id());
-                            }
-                        }
-                    }
-                }
-
-                let dummy = Arc::new(RwLock::new(Book::dummy()));
-                for (b1, b2_id) in merges.iter() {
-                    // Dummy allows for O(n) time book removal while maintaining sort
-                    // and getting owned copy of book.
-                    let b2 = db.books.insert(*b2_id, dummy.clone());
-                    // b1, b2 always exist: ref_map only stores b1, and any given b2 can only merge into
-                    // a b1, and never a b2, and a b1 never merges into b2, since b1 comes first.
-                    if let Some(b1) = db.books.get_mut(b1) {
-                        if let Some(b2) = b2 {
-                            book_mut!(b1).merge_mut(&book!(b2));
-                        }
-                    }
-                }
-                db.books.retain(|_, book| !book!(book).is_dummy());
-                (merges.into_iter().map(|(_, m)| m).collect(), db.books.len())
+                let merges = db.merge_similar();
+                (merges, db.len())
             })
             .map_err(DatabaseError::Backend)?;
         self.saved = false;
@@ -556,19 +435,7 @@ impl AppDatabase for BasicDatabase {
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
         Ok(self
             .backend
-            .read(
-                |db| -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
-                    let mut results = vec![];
-                    let matcher = search.into_matcher()?;
-                    for (_, book) in db.books.iter() {
-                        if matcher.is_match(&book!(book)) {
-                            results.push(book.clone());
-                        }
-                    }
-
-                    Ok(results)
-                },
-            )
+            .read(|db| db.find_matches(search))
             .map_err(DatabaseError::Backend)??)
     }
 
@@ -578,27 +445,7 @@ impl AppDatabase for BasicDatabase {
         reverse: bool,
     ) -> Result<(), DatabaseError<Self::Error>> {
         self.backend
-            .write(|db| {
-                let col = ColumnIdentifier::from(col);
-
-                // Use some heuristic to sort in parallel when it would offer speedup -
-                // parallel threads are slower for small sorts.
-                if db.books.len() < 2500 {
-                    if reverse {
-                        db.books
-                            .sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
-                    } else {
-                        db.books
-                            .sort_by(|_, a, _, b| book!(a).cmp_column(&book!(b), &col))
-                    }
-                } else if reverse {
-                    db.books
-                        .par_sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
-                } else {
-                    db.books
-                        .par_sort_by(|_, a, _, b| book!(a).cmp_column(&book!(b), &col))
-                }
-            })
+            .write(|db| db.sort_books_by_col(col, reverse))
             .map_err(DatabaseError::Backend)?;
 
         Ok(())
@@ -636,8 +483,7 @@ impl IndexableDatabase for BasicDatabase {
             .backend
             .read(|db| {
                 (start..end)
-                    .filter_map(|i| db.books.get_index(i))
-                    .map(|b| b.1.clone())
+                    .filter_map(|i| db.get_book_indexed(i))
                     .collect()
             })
             .map_err(DatabaseError::Backend)?)
@@ -649,11 +495,8 @@ impl IndexableDatabase for BasicDatabase {
     ) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
         self.backend
             .read(|db| {
-                if let Some(b) = db.books.get_index(index) {
-                    Ok(b.1.clone())
-                } else {
-                    Err(DatabaseError::IndexOutOfBounds(index))
-                }
+                db.get_book_indexed(index)
+                    .ok_or(DatabaseError::IndexOutOfBounds(index))
             })
             .map_err(DatabaseError::Backend)?
     }
@@ -662,12 +505,13 @@ impl IndexableDatabase for BasicDatabase {
         self.len = self
             .backend
             .write(|db| {
-                if index < db.books.len() {
-                    db.books.shift_remove_index(index);
+                if db.remove_book_indexed(index) {
+                    Ok(db.len())
+                } else {
+                    Err(DatabaseError::IndexOutOfBounds(index))
                 }
-                db.books.len()
             })
-            .map_err(DatabaseError::Backend)?;
+            .map_err(DatabaseError::Backend)??;
 
         self.saved = false;
 
@@ -682,8 +526,7 @@ impl IndexableDatabase for BasicDatabase {
     ) -> Result<(), DatabaseError<Self::Error>> {
         self.backend
             .write(|db| {
-                if let Some((_, book)) = db.books.get_index_mut(index) {
-                    book_mut!(book).set_column(&column.as_ref().into(), new_value)?;
+                if db.edit_book_indexed(index, column, new_value)? {
                     Ok(())
                 } else {
                     Err(DatabaseError::IndexOutOfBounds(index))
@@ -692,7 +535,6 @@ impl IndexableDatabase for BasicDatabase {
             .map_err(DatabaseError::Backend)??;
 
         self.saved = false;
-        self.cols.insert(UniCase::new(column.as_ref().to_owned()));
         Ok(())
     }
 }
@@ -700,9 +542,13 @@ impl IndexableDatabase for BasicDatabase {
 #[cfg(test)]
 mod test {
     use super::*;
+
     use std::convert::TryFrom;
     use std::ops::Deref;
+
     use tempfile;
+
+    use bookstore_records::book::ColumnIdentifier;
 
     fn temp_db() -> BasicDatabase {
         let temp_dir = tempfile::tempdir().unwrap();

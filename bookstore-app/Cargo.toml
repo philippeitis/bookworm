@@ -14,7 +14,8 @@ serde = { version = "1.0", features = ["derive"] }
 
 glob = "0.3.0"
 toml = "0.5.7"
-unicase = "2.6.0"
+unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.git", branch = "serde" }
+
 itertools = "0.10.0"
 rayon = "1.5.0"
 jwalk = "0.6.0"

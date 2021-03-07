@@ -85,7 +85,7 @@ pub trait BookView<D: AppDatabase> {
 
     fn refresh_db_size(&mut self);
 
-    fn has_column(&self, col: &UniCase<String>) -> bool;
+    fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>>;
 }
 
 pub trait ScrollableBookView<D: AppDatabase>: BookView<D> {
@@ -289,7 +289,7 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         };
     }
 
-    fn has_column(&self, col: &UniCase<String>) -> bool {
+    fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>> {
         self.db().has_column(col)
     }
 }

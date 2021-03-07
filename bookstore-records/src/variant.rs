@@ -59,15 +59,15 @@ impl BookType {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct BookVariant {
-    pub(super) book_type: BookType,
-    pub(super) path: path::PathBuf,
-    pub(super) local_title: Option<String>,
-    pub(super) identifier: Option<Identifier>,
-    pub(super) language: Option<String>,
-    pub(super) additional_authors: Option<Vec<String>>,
-    pub(super) translators: Option<Vec<String>>,
-    pub(super) description: Option<String>,
-    pub(super) id: Option<u32>,
+    pub book_type: BookType,
+    pub path: path::PathBuf,
+    pub local_title: Option<String>,
+    pub identifier: Option<Identifier>,
+    pub language: Option<String>,
+    pub additional_authors: Option<Vec<String>>,
+    pub translators: Option<Vec<String>>,
+    pub description: Option<String>,
+    pub id: Option<u32>,
 }
 
 impl BookVariant {
