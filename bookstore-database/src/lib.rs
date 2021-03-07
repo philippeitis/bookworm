@@ -1,8 +1,6 @@
 pub mod basic_database;
 mod bookmap;
 pub mod bookview;
-#[cfg(feature = "cloud")]
-pub mod google_cloud_database;
 pub mod paged_cursor;
 pub mod search;
 #[cfg(feature = "sqlite")]

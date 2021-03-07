@@ -120,14 +120,15 @@ impl BookMap {
     pub fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: BookID,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<bool, BookError> {
         match self.books.get_mut(&id) {
             None => Ok(false),
             Some(book) => {
-                book_mut!(book).set_column(&column.as_ref().into(), new_value)?;
-                self.cols.insert(UniCase::new(column.as_ref().to_owned()));
+                for (column, new_value) in edits {
+                    book_mut!(book).set_column(&column.as_ref().into(), new_value)?;
+                    self.cols.insert(UniCase::new(column.as_ref().to_owned()));
+                }
                 Ok(true)
             }
         }
@@ -136,14 +137,15 @@ impl BookMap {
     pub fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         index: usize,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<bool, BookError> {
         match self.books.get_index_mut(index) {
             None => Ok(false),
             Some((_, book)) => {
-                book_mut!(book).set_column(&column.as_ref().into(), new_value)?;
-                self.cols.insert(UniCase::new(column.as_ref().to_owned()));
+                for (column, new_value) in edits {
+                    book_mut!(book).set_column(&column.as_ref().into(), new_value)?;
+                    self.cols.insert(UniCase::new(column.as_ref().to_owned()));
+                }
                 Ok(true)
             }
         }

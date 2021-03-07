@@ -514,8 +514,10 @@ impl<D: IndexableDatabase> EditWidget<D> {
             let column = {
                 self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
             };
-            match app.edit_selected_book(column, &self.edit.value, &mut state_mut!(self).book_view)
-            {
+            match app.edit_selected_book(
+                &[(column, &self.edit.value)],
+                &mut state_mut!(self).book_view,
+            ) {
                 Ok(_) => {}
                 // Catch immutable column error and discard changes.
                 Err(ApplicationError::Book(BookError::ImmutableColumnError)) => {}
@@ -524,13 +526,6 @@ impl<D: IndexableDatabase> EditWidget<D> {
         }
         Ok(())
     }
-
-    // fn edit_command(&mut self) -> Command {
-    //     let column = {
-    //         self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
-    //     };
-    //     Command::EditBook(BookIndex::Selected, column.into_inner(), self.edit.value.clone())
-    // }
 
     /// Used when column has been changed and edit should reflect new column's value.
     fn reset_edit(&mut self) {

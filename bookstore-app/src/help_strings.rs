@@ -37,7 +37,7 @@ pub const EDIT_HELP_STRING: &str = r#"USAGE:
 
 ARGUMENTS:
 <id>: (Optional) The numeric ID of the book to edit. If not specified, edits the selected item.
-<column, new_value>: The column to edit and the value it should be set to.
+(<column, new_value>)+: One or more column-value pairs, where column values will be set to new_value.
 "#;
 
 pub const MERGE_HELP_STRING: &str = r#"USAGE:

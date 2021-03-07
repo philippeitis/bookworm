@@ -24,7 +24,8 @@ pub enum BookIndex {
 pub enum Command {
     DeleteBook(BookIndex),
     DeleteAll,
-    EditBook(BookIndex, String, String),
+    // TODO: Add + syntax for appending to existing text
+    EditBook(BookIndex, Box<[(String, String)]>),
     AddBookFromFile(PathBuf),
     AddBooksFromDir(PathBuf, u8),
     AddColumn(String),
@@ -52,7 +53,7 @@ impl Command {
     pub fn requires_ui(&self) -> bool {
         use Command::*;
         match self {
-            DeleteBook(b) | EditBook(b, _, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
+            DeleteBook(b) | EditBook(b, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
                 b == &BookIndex::Selected
             }
             AddColumn(_) | RemoveColumn(_) | SortColumn(_, _) | FindMatches(_) => true,
@@ -244,17 +245,35 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
         }
         "!e" => match flags.into_iter().next() {
             Some(Flag::StartingArguments(args)) => {
-                let mut args = args.into_iter();
-                let a = args.next().ok_or_else(insuf)?;
-                let b = args.next().ok_or_else(insuf)?;
-
-                if let Some(c) = args.next() {
-                    if let Ok(id) = BookID::from_str(a.as_str()) {
-                        return Ok(Command::EditBook(BookIndex::ID(id), b, c));
-                    }
+                let mut chunks = Vec::with_capacity(args.len() / 2);
+                let (id, mut args) = if args.len() % 2 == 1 {
+                    let mut args = args.into_iter();
+                    (
+                        Some(
+                            BookID::from_str(&args.next().ok_or_else(insuf)?)
+                                .map_err(|_| CommandError::InvalidCommand)?,
+                        ),
+                        args,
+                    )
+                } else {
+                    (None, args.into_iter())
+                };
+                while let Some(field) = args.next() {
+                    let value = args.next().ok_or_else(insuf)?;
+                    chunks.push((field, value));
                 }
 
-                Ok(Command::EditBook(BookIndex::Selected, a, b))
+                if let Some(id) = id {
+                    Ok(Command::EditBook(
+                        BookIndex::ID(id),
+                        chunks.into_boxed_slice(),
+                    ))
+                } else {
+                    Ok(Command::EditBook(
+                        BookIndex::Selected,
+                        chunks.into_boxed_slice(),
+                    ))
+                }
             }
             _ => Err(CommandError::InvalidCommand),
         },

@@ -395,79 +395,78 @@ impl AppDatabase for SQLiteDatabase {
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: BookID,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "UPDATE {} SET {} = {} WHERE book_id = {};"
-        if !self
-            .local_cache
-            .edit_book_with_id(id, &column, &new_value)?
-        {
+        if !self.local_cache.edit_book_with_id(id, &edits)? {
             return Err(DatabaseError::BookNotFound(id));
         }
+
         let idx = u64::from(id) as i64;
-        let new_value = new_value.as_ref();
-        match column.as_ref().into() {
-            ColumnIdentifier::Title => {
-                execute_query!(
-                    self,
-                    "UPDATE books SET title = ? WHERE book_id = ?",
-                    new_value,
-                    idx
-                )?;
-            }
-            ColumnIdentifier::Author => {
-                execute_query!(
+        for (column, new_value) in edits {
+            let new_value = new_value.as_ref();
+            match column.as_ref().into() {
+                ColumnIdentifier::Title => {
+                    execute_query!(
+                        self,
+                        "UPDATE books SET title = ? WHERE book_id = ?",
+                        new_value,
+                        idx
+                    )?;
+                }
+                ColumnIdentifier::Author => {
+                    execute_query!(
                     self,
                     "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES('author', ?, ?);",
                     new_value,
                     idx
                 )?;
-            }
-            ColumnIdentifier::Series => {
-                let series = str_to_series(new_value);
-                let (series, series_index) = match series.as_ref() {
-                    None => (None, None),
-                    Some((series, series_index)) => (Some(series), series_index.clone()),
-                };
+                }
+                ColumnIdentifier::Series => {
+                    let series = str_to_series(new_value);
+                    let (series, series_index) = match series.as_ref() {
+                        None => (None, None),
+                        Some((series, series_index)) => (Some(series), series_index.clone()),
+                    };
 
-                execute_query!(
-                    self,
-                    "UPDATE books SET series_name = ?, series_id = ? WHERE book_id = ?",
-                    series,
-                    series_index,
-                    idx
-                )?;
-            }
-            ColumnIdentifier::ID => {
-                unreachable!(
-                    "id is immutable, and this case is reached when local cache is modified"
-                );
-            }
-            ColumnIdentifier::Variants => {
-                execute_query!(
-                    self,
-                    "UPDATE books SET title = ? WHERE book_id = ?",
-                    new_value,
-                    idx
-                )?;
-            }
-            ColumnIdentifier::Description => {
-                execute_query!(
-                    self,
-                    "UPDATE variants SET description = ? WHERE book_id = ?",
-                    new_value,
-                    idx
-                )?;
-            }
-            ColumnIdentifier::ExtendedTag(t) => {
-                execute_query!(
-                    self,
-                    "INSERT into extended_tags (tag_name, tag_value, book_id) VALUES(?, ?, ?)",
-                    t,
-                    new_value,
-                    idx
-                )?;
+                    execute_query!(
+                        self,
+                        "UPDATE books SET series_name = ?, series_id = ? WHERE book_id = ?",
+                        series,
+                        series_index,
+                        idx
+                    )?;
+                }
+                ColumnIdentifier::ID => {
+                    unreachable!(
+                        "id is immutable, and this case is reached when local cache is modified"
+                    );
+                }
+                ColumnIdentifier::Variants => {
+                    execute_query!(
+                        self,
+                        "UPDATE books SET title = ? WHERE book_id = ?",
+                        new_value,
+                        idx
+                    )?;
+                }
+                ColumnIdentifier::Description => {
+                    execute_query!(
+                        self,
+                        "UPDATE variants SET description = ? WHERE book_id = ?",
+                        new_value,
+                        idx
+                    )?;
+                }
+                ColumnIdentifier::ExtendedTag(t) => {
+                    execute_query!(
+                        self,
+                        "INSERT into extended_tags (tag_name, tag_value, book_id) VALUES(?, ?, ?)",
+                        t,
+                        new_value,
+                        idx
+                    )?;
+                }
             }
         }
         Ok(())
@@ -559,8 +558,7 @@ impl IndexableDatabase for SQLiteDatabase {
     fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         index: usize,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "UPDATE {} SET {} = {} ORDER BY {} {} LIMIT 1 OFFSET {}"
         let book = self
@@ -568,6 +566,6 @@ impl IndexableDatabase for SQLiteDatabase {
             .get_book_indexed(index)
             .ok_or(DatabaseError::IndexOutOfBounds(index))?;
         let book = book!(book);
-        self.edit_book_with_id(book.get_id(), column, new_value)
+        self.edit_book_with_id(book.get_id(), edits)
     }
 }

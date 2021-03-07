@@ -246,8 +246,7 @@ impl<D: IndexableDatabase> App<D> {
 
     pub fn edit_selected_book<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         let id = book_view
@@ -256,16 +255,15 @@ impl<D: IndexableDatabase> App<D> {
             .read()
             .unwrap()
             .get_id();
-        self.edit_book_with_id(id, column, new_value)
+        self.edit_book_with_id(id, edits)
     }
 
     pub fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: BookID,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<(), ApplicationError<D::Error>> {
-        Ok(self.write(|db| db.edit_book_with_id(id, &column, &new_value))?)
+        Ok(self.write(|db| db.edit_book_with_id(id, edits))?)
     }
 
     pub fn remove_selected_book(
@@ -321,10 +319,10 @@ impl<D: IndexableDatabase> App<D> {
                 self.write(|db| db.clear())?;
                 book_view.clear();
             }
-            Command::EditBook(b, field, new_value) => {
+            Command::EditBook(b, edits) => {
                 match b {
-                    BookIndex::Selected => self.edit_selected_book(field, new_value, book_view)?,
-                    BookIndex::ID(id) => self.edit_book_with_id(id, &field, &new_value)?,
+                    BookIndex::Selected => self.edit_selected_book(&edits, book_view)?,
+                    BookIndex::ID(id) => self.edit_book_with_id(id, &edits)?,
                 };
                 self.sort_settings.is_sorted = false;
             }

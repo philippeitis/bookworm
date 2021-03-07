@@ -155,8 +155,7 @@ pub trait AppDatabase {
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: BookID,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 
     /// Merges all books with matching titles and authors, skipping everything else, with no
@@ -250,8 +249,7 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         index: usize,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 }
 
@@ -406,11 +404,10 @@ impl AppDatabase for BasicDatabase {
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: BookID,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         self.backend
-            .write(|db| db.edit_book_with_id(id, column, new_value))
+            .write(|db| db.edit_book_with_id(id, edits))
             .map_err(DatabaseError::Backend)??;
         self.saved = false;
         Ok(())
@@ -521,12 +518,11 @@ impl IndexableDatabase for BasicDatabase {
     fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         index: usize,
-        column: S0,
-        new_value: S1,
+        edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         self.backend
             .write(|db| {
-                if db.edit_book_indexed(index, column, new_value)? {
+                if db.edit_book_indexed(index, edits)? {
                     Ok(())
                 } else {
                     Err(DatabaseError::IndexOutOfBounds(index))
