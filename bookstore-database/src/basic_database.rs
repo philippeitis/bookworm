@@ -550,6 +550,12 @@ mod test {
 
     use bookstore_records::book::ColumnIdentifier;
 
+    macro_rules! book {
+        ($book: ident) => {
+            $book.as_ref().read().unwrap()
+        };
+    }
+
     fn temp_db() -> BasicDatabase {
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("database.db");
@@ -559,14 +565,10 @@ mod test {
     #[test]
     fn test_open() {
         let db = temp_db();
-        let base_cols = ["title", "authors", "id", "series", "description"];
-        assert_eq!(
-            db.cols,
-            base_cols
-                .iter()
-                .map(|&c| UniCase::new(c.to_owned()))
-                .collect()
-        );
+        let base_cols = vec!["title", "authors", "id", "series", "description"];
+        for col in base_cols.into_iter() {
+            assert!(db.has_column(&UniCase::new(String::from(col))).unwrap());
+        }
     }
 
     #[test]
