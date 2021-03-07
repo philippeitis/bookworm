@@ -5,7 +5,6 @@ members = [
     "bookstore-app",
     "bookstore-records",
     "bookstore-database",
-    "quick-epub"
 ]
 
 [profile.release]
