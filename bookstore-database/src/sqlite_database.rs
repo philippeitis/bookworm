@@ -395,6 +395,8 @@ impl AppDatabase for SQLiteDatabase {
 
     fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books"
+        execute_query!(self, "DELETE FROM extended_tags")?;
+        execute_query!(self, "DELETE FROM variants")?;
         execute_query!(self, "DELETE FROM books")?;
         self.local_cache.clear();
         Ok(())
