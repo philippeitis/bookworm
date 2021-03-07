@@ -240,6 +240,10 @@ impl<'a> Iterator for CommandStringIter<'a> {
     type Item = (bool, String);
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.start >= self.command_string.char_buf.len() {
+            return None;
+        }
+
         for (end, &c) in self.command_string.char_buf[self.start..]
             .iter()
             .enumerate()
@@ -263,7 +267,7 @@ impl<'a> Iterator for CommandStringIter<'a> {
                     if self.escaped {
                         let s = {
                             let buf = self.char_buf()[..end.saturating_sub(1)].iter().collect();
-                            self.start += end;
+                            self.start += end + 1;
                             self.escaped = false;
                             buf
                         };
@@ -301,6 +305,24 @@ mod test {
                 vec![(true, "hello world"), (false, "there!")],
             ),
             ("!a -d x", vec![(false, "!a"), (false, "-d"), (false, "x")]),
+            (
+                "!e title \"hello world\"",
+                vec![(false, "!e"), (false, "title"), (true, "hello world")],
+            ),
+            (
+                "!e title \"hello world\" field 12345",
+                vec![
+                    (false, "!e"),
+                    (false, "title"),
+                    (true, "hello world"),
+                    (false, "field"),
+                    (false, "12345"),
+                ],
+            ),
+            (
+                "a \"b\" c 12",
+                vec![(false, "a"), (true, "b"), (false, "c"), (false, "12")],
+            ),
         ];
 
         for (word, expected) in samples {
