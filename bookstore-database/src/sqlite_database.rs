@@ -1,9 +1,8 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::ffi::OsString;
 use std::num::NonZeroU64;
-use std::ops::{Bound, DerefMut, RangeBounds};
+use std::ops::{Bound, RangeBounds};
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 #[cfg(windows)]
@@ -57,17 +56,15 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
 macro_rules! execute_query {
     ($self:ident, $query_str:expr) => ({
         {
-            let mut mut_backend = $self.backend.borrow_mut();
             block_on(async {
-                sqlx::query!($query_str).execute(mut_backend.deref_mut()).await
+                sqlx::query!($query_str).execute(&mut $self.backend).await
             }).map_err(DatabaseError::Backend)
         }
     });
     ($self:ident, $query_str:expr, $($args:tt),*) => ({
         {
-            let mut mut_backend = $self.backend.borrow_mut();
             block_on(async {
-                sqlx::query!($query_str, $($args),*).execute(mut_backend.deref_mut()).await
+                sqlx::query!($query_str, $($args),*).execute(&mut $self.backend).await
             }).map_err(DatabaseError::Backend)
         }
     })
@@ -75,10 +72,9 @@ macro_rules! execute_query {
 
 macro_rules! execute_query_str {
     ($self: ident, $query_str: expr) => {{
-        let mut mut_backend = $self.backend.borrow_mut();
         block_on(async {
             sqlx::query($query_str.as_ref())
-                .execute(mut_backend.deref_mut())
+                .execute(&mut $self.backend)
                 .await
         })
         .map_err(DatabaseError::Backend)
@@ -88,17 +84,15 @@ macro_rules! execute_query_str {
 macro_rules! run_query_as {
     ($self:ident, $out_struct:path, $query_str:expr) => ({
         {
-            let mut mut_backend = $self.backend.borrow_mut();
             block_on(async {
-                sqlx::query_as!($out_struct, $query_str).fetch_all(mut_backend.deref_mut()).await
+                sqlx::query_as!($out_struct, $query_str).fetch_all(&mut $self.backend).await
             }).map_err(DatabaseError::Backend)
         }
     });
     ($self:ident, $out_struct:path, $query_str:expr, $($args:tt),*) => ({
         {
-            let mut mut_backend = $self.backend.borrow_mut();
             block_on(async {
-                sqlx::query!($out_struct, $query_str, $($args),*).fetch_all(mut_backend.deref_mut()).await
+                sqlx::query!($out_struct, $query_str, $($args),*).fetch_all(&mut $self.backend).await
             }).map_err(DatabaseError::Backend)
         }
     })
@@ -188,12 +182,13 @@ impl From<VariantData> for BookVariant {
 }
 
 pub struct SQLiteDatabase {
-    backend: RefCell<SqliteConnection>,
+    backend: SqliteConnection,
     local_cache: BookMap,
 }
 
 impl SQLiteDatabase {
     fn load_books(&mut self) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
+        // TODO: Benchmark this for large databases with complex books.
         let book_data = run_query_as!(self, BookData, "SELECT * FROM books")?;
         let variant_data = run_query_as!(self, VariantData, "SELECT * FROM variants")?;
         let tag_data = run_query_as!(self, TagData, "SELECT * FROM extended_tags")?;
@@ -270,7 +265,7 @@ impl AppDatabase for SQLiteDatabase {
             .map_err(DatabaseError::Backend)?;
 
         let mut db = Self {
-            backend: RefCell::new(database),
+            backend: database,
             local_cache: BookMap::default(),
         };
 
@@ -294,6 +289,7 @@ impl AppDatabase for SQLiteDatabase {
             None => (None, None),
             Some((series, series_index)) => (Some(series), series_index.clone()),
         };
+
         let id = execute_query!(
             self,
             "INSERT into books (title, series_name, series_id) VALUES(?, ?, ?)",
@@ -355,6 +351,8 @@ impl AppDatabase for SQLiteDatabase {
         &mut self,
         books: Vec<RawBook>,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
+        // TODO: Pretty slow for large amounts of books.
+        //  Make this into a transaction
         let ids = Vec::with_capacity(books.len());
         for book in books {
             self.insert_book(book)?;
@@ -499,6 +497,8 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
+        // TODO: This does not correctly update the database.
+        //  b2 ids should be set to b1 ids in db
         let merged = self.local_cache.merge_similar();
         self.remove_books(&merged)?;
         Ok(merged)
