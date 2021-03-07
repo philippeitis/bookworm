@@ -11,8 +11,6 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-#[cfg(windows)]
-use bytevec::{ByteDecodable, ByteEncodable};
 use futures::executor::block_on;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::{Connection, Sqlite, SqliteConnection};
@@ -145,10 +143,11 @@ fn v8_to_v16(a: Vec<u8>) -> Vec<u16> {
 
 #[cfg(windows)]
 fn v16_to_v8(a: Vec<u16>) -> Vec<u8> {
-    a.into_iter()
-        .map(|c| c.to_be_bytes())
-        .flat_map(|v| v.iter().cloned())
-        .collect()
+    let mut v = Vec::with_capacity(a.len() * 2);
+    for val in a.into_iter() {
+        v.extend_from_slice(&val.to_be_bytes());
+    }
+    v
 }
 
 impl From<BookData> for Book {
@@ -172,7 +171,7 @@ impl From<VariantData> for BookVariant {
             #[cfg(unix)]
             path: PathBuf::from(OsString::from_vec(vd.path)),
             #[cfg(windows)]
-            path: PathBuf::from(OsString::from_wide(v8_to_v16(vd.path))),
+            path: PathBuf::from(OsString::from_wide(&v8_to_v16(vd.path))),
             local_title: vd.local_title,
             identifier: vd
                 .identifier
@@ -310,7 +309,7 @@ impl AppDatabase for SQLiteDatabase {
                 #[cfg(unix)]
                 let path = variant.path().as_os_str().as_bytes();
                 #[cfg(windows)]
-                let path = v16_to_v8(variant.path().as_os_str().encode_wide());
+                let path = v16_to_v8(variant.path().as_os_str().encode_wide().collect());
                 let local_title = &variant.local_title;
                 let identifier = variant
                     .identifier
