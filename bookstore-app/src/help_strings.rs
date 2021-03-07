@@ -63,7 +63,7 @@ FLAGS:
 -d: Sort descending.
 
 ARGUMENTS:
-<column>: The column of on which to sort the books.
+(<-d>? <column>)+: Sort by column. If -d specified, sort column descending
 "#;
 
 pub const SEARCH_HELP_STRING: &str = r#"USAGE:

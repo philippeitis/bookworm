@@ -30,7 +30,7 @@ pub enum Command {
     AddBooksFromDir(PathBuf, u8),
     AddColumn(String),
     RemoveColumn(String),
-    SortColumn(String, bool),
+    SortColumns(Box<[(String, bool)]>),
     OpenBookInApp(BookIndex, usize),
     OpenBookInExplorer(BookIndex, usize),
     TryMergeAllBooks,
@@ -56,7 +56,7 @@ impl Command {
             DeleteBook(b) | EditBook(b, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
                 b == &BookIndex::Selected
             }
-            AddColumn(_) | RemoveColumn(_) | SortColumn(_, _) | FindMatches(_) => true,
+            AddColumn(_) | RemoveColumn(_) | SortColumns(_) | FindMatches(_) => true,
             _ => false,
         }
     }
@@ -288,38 +288,29 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             _ => Err(CommandError::InvalidCommand),
         },
         "!s" => {
-            let mut d = false;
-            let mut col_exists = false;
-            let mut col = String::new();
+            let mut sort_cols = Vec::new();
 
             for flag in flags.into_iter() {
                 match flag {
-                    Flag::Flag(f) => {
-                        if f == "d" {
-                            if col_exists {
-                                return Ok(Command::SortColumn(col, true));
-                            }
-                            d = true;
-                        }
-                    }
                     Flag::FlagWithArgument(f, args) => {
-                        d |= f == "d";
-                        if d {
-                            return Ok(Command::SortColumn(
-                                args.into_iter().next().ok_or_else(insuf)?,
-                                d,
-                            ));
+                        if f != "d" {
+                            return Err(CommandError::InvalidCommand);
                         }
+                        let mut args = args.into_iter();
+                        sort_cols.push((args.next().ok_or_else(insuf)?, true));
+                        sort_cols.extend(args.map(|s| (s, false)));
                     }
                     Flag::StartingArguments(args) => {
-                        col_exists = true;
-                        col = args.into_iter().next().ok_or_else(insuf)?;
+                        sort_cols.extend(args.into_iter().map(|s| (s, false)));
+                    }
+                    _ => {
+                        return Err(CommandError::InvalidCommand);
                     }
                 };
             }
 
-            if col_exists {
-                Ok(Command::SortColumn(col, d))
+            if !sort_cols.is_empty() {
+                Ok(Command::SortColumns(sort_cols.into_boxed_slice()))
             } else {
                 Err(CommandError::InsufficientArguments)
             }

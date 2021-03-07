@@ -179,18 +179,15 @@ pub trait AppDatabase {
         search: Search,
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>>;
 
-    /// Sorts books by comparing the specified column.
+    /// Sorts books by comparing the specified columns and reverses.
     ///
     /// # Arguments
-    /// * ` col ` - The column of interest.
-    /// * ` reverse ` - whether to sort in reverse order.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn sort_books_by_col<S: AsRef<str>>(
+    fn sort_books_by_cols<S: AsRef<str>>(
         &mut self,
-        col: S,
-        reverse: bool,
+        columns: &[(S, bool)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 
     /// Returns the number of books stored internally.
@@ -436,13 +433,12 @@ impl AppDatabase for BasicDatabase {
             .map_err(DatabaseError::Backend)??)
     }
 
-    fn sort_books_by_col<S: AsRef<str>>(
+    fn sort_books_by_cols<S: AsRef<str>>(
         &mut self,
-        col: S,
-        reverse: bool,
+        columns: &[(S, bool)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         self.backend
-            .write(|db| db.sort_books_by_col(col, reverse))
+            .write(|db| db.sort_books_by_cols(columns))
             .map_err(DatabaseError::Backend)?;
 
         Ok(())

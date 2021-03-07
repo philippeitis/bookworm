@@ -344,8 +344,8 @@ impl<D: IndexableDatabase> App<D> {
             Command::RemoveColumn(column) => {
                 table.remove_column(&UniCase::new(column));
             }
-            Command::SortColumn(column, rev) => {
-                self.update_selected_column(column, rev, table);
+            Command::SortColumns(sort_cols) => {
+                self.update_selected_columns(sort_cols);
             }
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             Command::OpenBookInApp(b, index) => {
@@ -402,17 +402,20 @@ impl<D: IndexableDatabase> App<D> {
     ///
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
-    fn update_selected_column(&mut self, word: String, reverse: bool, table: &mut TableView) {
-        let word = UniCase::new(match word.to_ascii_lowercase().as_str() {
-            "author" => String::from("authors"),
-            _ => word,
-        });
+    fn update_selected_columns(&mut self, cols: Box<[(String, bool)]>) {
+        // let word = UniCase::new(match word.to_ascii_lowercase().as_str() {
+        //     "author" => String::from("authors"),
+        //     _ => word,
+        // });
 
-        if table.selected_cols().contains(&word) {
-            self.sort_settings.column = word;
-            self.sort_settings.is_sorted = false;
-            self.sort_settings.reverse = reverse;
-        }
+        let cols: Vec<_> = cols
+            .into_vec()
+            .into_iter()
+            .map(|(s, r)| (UniCase::new(s), r))
+            .collect();
+
+        self.sort_settings.columns = cols.into_boxed_slice();
+        self.sort_settings.is_sorted = false;
     }
 
     // used in AppInterface::run
@@ -421,13 +424,11 @@ impl<D: IndexableDatabase> App<D> {
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), DatabaseError<D::Error>> {
         if !self.sort_settings.is_sorted {
-            let col = &self.sort_settings.column;
-            let reverse = self.sort_settings.reverse;
             self.db
                 .as_ref()
                 .borrow_mut()
-                .sort_books_by_col(col, reverse)?;
-            book_view.sort_by_column(col, reverse)?;
+                .sort_books_by_cols(&self.sort_settings.columns)?;
+            book_view.sort_by_columns(&self.sort_settings.columns)?;
             self.sort_settings.is_sorted = true;
             self.register_update();
         }

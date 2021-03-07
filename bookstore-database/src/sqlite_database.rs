@@ -487,12 +487,11 @@ impl AppDatabase for SQLiteDatabase {
         Ok(self.local_cache.find_matches(search)?)
     }
 
-    fn sort_books_by_col<S: AsRef<str>>(
+    fn sort_books_by_cols<S: AsRef<str>>(
         &mut self,
-        col: S,
-        reverse: bool,
+        columns: &[(S, bool)],
     ) -> Result<(), DatabaseError<Self::Error>> {
-        self.local_cache.sort_books_by_col(col, reverse);
+        self.local_cache.sort_books_by_cols(columns);
         Ok(())
     }
 

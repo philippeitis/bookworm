@@ -280,6 +280,20 @@ impl RawBook {
             c => self.get_column(c).cmp(&other.get_column(c)),
         }
     }
+
+    pub fn cmp_columns(&self, other: &Self, columns: &[(&ColumnIdentifier, bool)]) -> Ordering {
+        let mut ordering = Ordering::Equal;
+        for (column, reverse) in columns {
+            ordering = self.cmp_column(other, column);
+            if *reverse {
+                ordering = ordering.reverse();
+            }
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        ordering
+    }
 }
 
 impl RawBook {
@@ -435,6 +449,20 @@ impl Book {
             ColumnIdentifier::ID => self.get_u32_id().cmp(&other.get_u32_id()),
             col => self.raw_book.cmp_column(&other.raw_book, col),
         }
+    }
+
+    pub fn cmp_columns(&self, other: &Self, columns: &[(ColumnIdentifier, bool)]) -> Ordering {
+        let mut ordering = Ordering::Equal;
+        for (column, reverse) in columns {
+            ordering = self.cmp_column(other, column);
+            if *reverse {
+                ordering = ordering.reverse();
+            }
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        ordering
     }
 }
 

@@ -219,6 +219,23 @@ impl BookMap {
         }
     }
 
+    pub fn sort_books_by_cols<S: AsRef<str>>(&mut self, cols: &[(S, bool)]) {
+        let cols: Vec<_> = cols
+            .iter()
+            .map(|(c, r)| (ColumnIdentifier::from(c), *r))
+            .collect();
+
+        // Use some heuristic to sort in parallel when it would offer speedup -
+        // parallel threads are slower for small sorts.
+        if self.books.len() < 2500 {
+            self.books
+                .sort_by(|_, a, _, b| book!(a).cmp_columns(&book!(b), &cols))
+        } else {
+            self.books
+                .par_sort_by(|_, a, _, b| book!(a).cmp_columns(&book!(b), &cols))
+        }
+    }
+
     pub fn init_columns(&mut self) {
         let mut c = HashSet::new();
 

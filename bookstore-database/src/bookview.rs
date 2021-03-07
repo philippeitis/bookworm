@@ -61,6 +61,11 @@ pub trait BookView<D: AppDatabase> {
         reverse: bool,
     ) -> Result<(), DatabaseError<D::Error>>;
 
+    fn sort_by_columns<S: AsRef<str>>(
+        &mut self,
+        cols: &[(S, bool)],
+    ) -> Result<(), DatabaseError<D::Error>>;
+
     fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError<D::Error>>;
 
     fn remove_book(&mut self, id: BookID);
@@ -170,6 +175,21 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
                 scope.sort_by(|_, a, _, b| book!(a).cmp_column(&book!(b), &col))
             });
         }
+
+        Ok(())
+    }
+
+    fn sort_by_columns<S: AsRef<str>>(
+        &mut self,
+        cols: &[(S, bool)],
+    ) -> Result<(), DatabaseError<D::Error>> {
+        let cols: Vec<_> = cols
+            .iter()
+            .map(|(c, r)| (ColumnIdentifier::from(c), *r))
+            .collect();
+        self.scopes.iter_mut().for_each(|(_, scope)| {
+            scope.sort_by(|_, a, _, b| book!(b).cmp_columns(&book!(a), &cols))
+        });
 
         Ok(())
     }

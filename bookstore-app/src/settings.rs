@@ -66,17 +66,15 @@ impl Default for InterfaceStyle {
 //  replicated by IndexMap
 #[derive(Debug)]
 pub struct SortSettings {
-    pub column: UniCase<String>,
+    pub columns: Box<[(UniCase<String>, bool)]>,
     pub is_sorted: bool,
-    pub reverse: bool,
 }
 
 impl Default for SortSettings {
     fn default() -> Self {
         SortSettings {
-            column: UniCase::new(String::new()),
+            columns: vec![].into_boxed_slice(),
             is_sorted: false,
-            reverse: false,
         }
     }
 }
@@ -213,25 +211,25 @@ impl From<TomlColumns> for Vec<String> {
 
 #[derive(Debug, Deserialize)]
 struct TomlSort {
-    column: Option<String>,
-    reverse: Option<bool>,
+    columns: Option<Vec<(String, Option<bool>)>>,
 }
 
 impl Default for TomlSort {
     fn default() -> Self {
-        TomlSort {
-            column: None,
-            reverse: None,
-        }
+        TomlSort { columns: None }
     }
 }
 
 impl From<TomlSort> for SortSettings {
     fn from(t: TomlSort) -> Self {
+        let columns = t.columns.unwrap_or(vec![]);
+        let columns: Vec<_> = columns
+            .into_iter()
+            .map(|(s, r)| (UniCase::new(s), r.unwrap_or(false)))
+            .collect();
         SortSettings {
-            is_sorted: t.column.is_none(),
-            column: UniCase::new(t.column.unwrap_or_default()),
-            reverse: t.reverse.unwrap_or(false),
+            is_sorted: columns.is_empty(),
+            columns: columns.into_boxed_slice(),
         }
     }
 }
