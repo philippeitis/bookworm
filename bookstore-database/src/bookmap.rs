@@ -246,11 +246,9 @@ impl BookMap {
 
         for book in self.books.values() {
             let book = book!(book);
-            if let Some(e) = book.get_extended_columns() {
-                for key in e.keys() {
-                    if !c.contains(key) {
-                        c.insert(key.to_owned());
-                    }
+            for key in book.get_extended_columns().keys() {
+                if !c.contains(key) {
+                    c.insert(key.to_owned());
                 }
             }
         }

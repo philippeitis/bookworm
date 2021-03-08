@@ -122,7 +122,8 @@ impl BookWidget {
             data.extend(Text::raw(html2text::from_read(d.as_bytes(), width)));
         }
 
-        if let Some(columns) = book.get_extended_columns() {
+        let columns = book.get_extended_columns();
+        if !columns.is_empty() {
             data.extend(Text::raw("\nTags provided:"));
             for (key, value) in columns.iter() {
                 data.extend(Text::styled(
@@ -132,10 +133,9 @@ impl BookWidget {
             }
         }
 
-        if let Some(variants) = book.get_variants() {
-            if !variants.is_empty() {
-                data.extend(Text::raw("\nVariant paths:"));
-            }
+        let variants = book.get_variants();
+        if !variants.is_empty() {
+            data.extend(Text::raw("\nVariant paths:"));
             for variant in variants {
                 let s = format!(
                     "{:?}: {}",

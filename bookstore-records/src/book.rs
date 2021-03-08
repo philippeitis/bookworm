@@ -45,8 +45,8 @@ pub struct RawBook {
     pub authors: Option<Vec<String>>,
     pub series: Option<(String, Option<f32>)>,
     pub description: Option<String>,
-    pub variants: Option<Vec<BookVariant>>,
-    pub extended_tags: Option<HashMap<String, String>>,
+    pub variants: Vec<BookVariant>,
+    pub extended_tags: HashMap<String, String>,
 }
 
 impl RawBook {
@@ -76,14 +76,7 @@ impl RawBook {
             return Err(BookError::FileError);
         }
 
-        let mut book = RawBook {
-            title: None,
-            authors: None,
-            series: None,
-            variants: None,
-            extended_tags: None,
-            description: None,
-        };
+        let mut book = RawBook::default();
 
         if let Ok(mut variant) = BookVariant::generate_from_file(path) {
             variant.id = Some(0);
@@ -98,7 +91,7 @@ impl RawBook {
             if book.description.is_none() {
                 book.description = std::mem::take(&mut variant.description);
             }
-            book.variants = Some(vec![variant]);
+            book.variants = vec![variant];
         }
 
         Ok(book)
@@ -118,12 +111,12 @@ impl RawBook {
         self.series.as_ref()
     }
 
-    pub fn get_variants(&self) -> Option<&[BookVariant]> {
-        self.variants.as_deref()
+    pub fn get_variants(&self) -> &[BookVariant] {
+        &self.variants
     }
 
-    pub fn get_extended_columns(&self) -> Option<&HashMap<String, String>> {
-        self.extended_tags.as_ref()
+    pub fn get_extended_columns(&self) -> &HashMap<String, String> {
+        &self.extended_tags
     }
 
     pub fn get_description(&self) -> Option<&String> {
@@ -143,16 +136,13 @@ impl RawBook {
                 }
             }
             ColumnIdentifier::Description => self.description.as_ref()?.to_string(),
-            ColumnIdentifier::ExtendedTag(x) => self.extended_tags.as_ref()?.get(x)?.to_string(),
+            ColumnIdentifier::ExtendedTag(x) => self.extended_tags.get(x)?.to_string(),
             _ => return None,
         })
     }
 
     pub fn push_variant(&mut self, variant: BookVariant) {
-        match self.variants.as_mut() {
-            None => self.variants = Some(vec![variant]),
-            Some(v) => v.push(variant),
-        }
+        self.variants.push(variant);
     }
 }
 
@@ -206,13 +196,8 @@ impl RawBook {
                 self.series = str_to_series(value);
             }
             ColumnIdentifier::ExtendedTag(column) => {
-                if let Some(d) = self.extended_tags.as_mut() {
-                    d.insert(column.to_owned(), value.to_owned());
-                } else {
-                    let mut d = HashMap::new();
-                    d.insert(column.to_owned(), value.to_owned());
-                    self.extended_tags = Some(d);
-                }
+                self.extended_tags
+                    .insert(column.to_owned(), value.to_owned());
             }
         }
         Ok(())
@@ -314,19 +299,8 @@ impl RawBook {
             self.series = other.series.clone();
         }
 
-        if let Some(other_variants) = &other.variants {
-            match self.variants.as_mut() {
-                None => self.variants = Some(other_variants.clone()),
-                Some(variants) => variants.extend_from_slice(other_variants),
-            }
-        }
-
-        if let Some(other_tags) = other.extended_tags.clone() {
-            match self.extended_tags.as_mut() {
-                None => self.extended_tags = Some(other_tags),
-                Some(tags) => tags.extend(other_tags),
-            }
-        }
+        self.variants.extend_from_slice(&other.variants);
+        self.extended_tags.extend(other.extended_tags.clone());
     }
 }
 
@@ -351,11 +325,11 @@ impl Book {
         self.raw_book.get_series()
     }
 
-    pub fn get_variants(&self) -> Option<&[BookVariant]> {
+    pub fn get_variants(&self) -> &[BookVariant] {
         self.raw_book.get_variants()
     }
 
-    pub fn get_extended_columns(&self) -> Option<&HashMap<String, String>> {
+    pub fn get_extended_columns(&self) -> &HashMap<String, String> {
         self.raw_book.get_extended_columns()
     }
 

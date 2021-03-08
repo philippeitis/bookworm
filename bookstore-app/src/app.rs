@@ -107,7 +107,7 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::
 ///
 /// * ` book ` - The book to find a path for.
 fn get_book_path(book: &Book, index: usize) -> Option<&Path> {
-    Some(book.get_variants()?.get(index)?.path())
+    Some(book.get_variants().get(index)?.path())
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]

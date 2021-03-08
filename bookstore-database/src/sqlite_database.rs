@@ -148,11 +148,8 @@ impl From<BookData> for Book {
     fn from(bd: BookData) -> Self {
         let rb = RawBook {
             title: bd.title.clone(),
-            authors: None,
             series: bd.series_name.as_ref().map(|sn| (sn.clone(), bd.series_id)),
-            description: None,
-            variants: None,
-            extended_tags: None,
+            ..Default::default()
         };
         Book::from_raw_book(NonZeroU64::try_from(bd.book_id as u64).unwrap(), rb)
     }
@@ -278,7 +275,8 @@ impl SQLiteDatabase {
                 .await?
                 .last_insert_rowid();
 
-                if let Some(variants) = book.get_variants() {
+                let variants = book.get_variants();
+                if !variants.is_empty() {
                     for variant in variants {
                         let book_type = ron::to_string(variant.book_type()).unwrap();
                         #[cfg(unix)]
@@ -307,18 +305,17 @@ impl SQLiteDatabase {
                     }
                 }
 
-                if let Some(tags) = book.get_extended_columns() {
-                    if !tags.is_empty() {
-                        let mut query = String::from(
-                            "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES",
-                        );
-                        query.extend(tags.iter().map(|(tag_name, tag_value)| {
-                            format!("({}, {}, {}),", tag_name, tag_value, id)
-                        }));
-                        query.pop();
-                        query.push(';');
-                        sqlx::query(&query).execute(&mut tx).await?;
-                    }
+                let tags = book.get_extended_columns();
+                if !tags.is_empty() {
+                    let mut query = String::from(
+                        "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES",
+                    );
+                    query.extend(tags.iter().map(|(tag_name, tag_value)| {
+                        format!("({}, {}, {}),", tag_name, tag_value, id)
+                    }));
+                    query.pop();
+                    query.push(';');
+                    sqlx::query(&query).execute(&mut tx).await?;
                 }
 
                 let id = BookID::try_from(id as u64).unwrap();
