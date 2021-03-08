@@ -1,6 +1,7 @@
 use std::cell::{Ref, RefCell, RefMut};
 use std::ops::DerefMut;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
 
@@ -205,80 +206,65 @@ impl<D: IndexableDatabase> ColumnWidget<D> {
 
     fn refresh_book_widget(&mut self) {
         let book = self.state().book_view.get_selected_book().ok();
-        self.book_widget = book.map(|book| BookWidget::new(Rect::default(), book));
+        let should_change = match (&book, &self.book_widget) {
+            (Some(_), None) => true,
+            (None, Some(_)) => true,
+            (Some(b), Some(bw)) => !Arc::ptr_eq(b, bw.book()),
+            (None, None) => false,
+        };
+        if should_change {
+            self.book_widget = book.map(|book| BookWidget::new(Rect::default(), book));
+        };
     }
 
     fn scroll_up(&mut self) {
-        let changed = {
-            let mut state = self.state_mut();
-            let scroll = state.nav_settings.scroll;
-            if state.nav_settings.inverted {
-                state.modify_bv(|bv| bv.scroll_down(scroll))
-            } else {
-                state.modify_bv(|bv| bv.scroll_up(scroll))
-            }
-        };
-
-        if changed {
-            self.refresh_book_widget();
+        let mut state = self.state_mut();
+        let scroll = state.nav_settings.scroll;
+        if state.nav_settings.inverted {
+            state.modify_bv(|bv| bv.scroll_down(scroll));
+        } else {
+            state.modify_bv(|bv| bv.scroll_up(scroll));
         }
     }
 
     fn scroll_down(&mut self) {
-        let changed = {
-            let mut state = self.state_mut();
-            let scroll = state.nav_settings.scroll;
-            if state.nav_settings.inverted {
-                state.modify_bv(|bv| bv.scroll_up(scroll))
-            } else {
-                state.modify_bv(|bv| bv.scroll_down(scroll))
-            }
-        };
-
-        if changed {
-            self.refresh_book_widget();
+        let mut state = self.state_mut();
+        let scroll = state.nav_settings.scroll;
+        if state.nav_settings.inverted {
+            state.modify_bv(|bv| bv.scroll_up(scroll));
+        } else {
+            state.modify_bv(|bv| bv.scroll_down(scroll));
         }
     }
 
     fn page_down(&mut self) {
-        if self.state_mut().book_view.page_down() {
-            self.refresh_book_widget();
-        }
+        self.state_mut().book_view.page_down();
     }
 
     fn page_up(&mut self) {
-        if self.state_mut().book_view.page_up() {
-            self.refresh_book_widget();
-        }
+        self.state_mut().book_view.page_up();
     }
 
     fn home(&mut self) {
-        if self.state_mut().book_view.home() {
-            self.refresh_book_widget();
-        }
+        self.state_mut().book_view.home();
     }
 
     fn end(&mut self) {
-        if self.state_mut().book_view.end() {
-            self.refresh_book_widget();
-        }
+        self.state_mut().book_view.end();
     }
 
     fn select_up(&mut self) {
-        if self.state_mut().book_view.select_up() {
-            self.refresh_book_widget();
-        }
+        self.state_mut().book_view.select_up();
     }
 
     fn select_down(&mut self) {
-        if self.state_mut().book_view.select_down() {
-            self.refresh_book_widget();
-        }
+        self.state_mut().book_view.select_down();
     }
 }
 
 impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidget<D> {
     fn prepare_render(&mut self, chunk: Rect) {
+        self.refresh_book_widget();
         let chunk = if let Some(book_widget) = &mut self.book_widget {
             let hchunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -463,18 +449,14 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         }
                     }
                     KeyCode::Esc => {
-                        {
-                            let mut state = self.state_mut();
-                            state.modify_bv(|bv| bv.deselect());
-                            state.curr_command.clear();
-                            state.modify_bv(|bv| bv.pop_scope());
-                        }
-                        self.refresh_book_widget();
+                        let mut state = self.state_mut();
+                        state.modify_bv(|bv| bv.deselect());
+                        state.curr_command.clear();
+                        state.modify_bv(|bv| bv.pop_scope());
                     }
                     KeyCode::Delete => {
                         if self.state().curr_command.is_empty() {
                             app.remove_selected_book(&mut self.state_mut().book_view)?;
-                            self.refresh_book_widget();
                         } else {
                             // TODO: Add code to delete forwards
                             //  (requires implementing cursor logic)

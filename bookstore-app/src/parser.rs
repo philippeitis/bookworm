@@ -38,14 +38,10 @@ pub enum Command {
     Write,
     WriteAndQuit,
     FindMatches(Box<[Search]>),
+    JumpTo(Box<[Search]>),
     Help(String),
     GeneralHelp,
-    // TODO: Add Jump (to index, to first item matching criteria)
-    //  eg. :j 123 -> jumps to index 123
-    //      :j id 123 -> jumps to book w/ id 123
-    //      and if no book, no jump
-    //      Add MergeBooks(Box<[(BookID, BookID]>) to merge multiple
-    //      books
+    // TODO:
     //  eg. :m 1 2 -> merge 2 into 1
     //      Add MergeBooks with criteria?
     //  eg. :m -c (Search)*
@@ -336,7 +332,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             Some(Flag::Flag(arg)) => Ok(Command::RemoveColumn(arg)),
             _ => Err(CommandError::InvalidCommand),
         },
-        ":f" => {
+        x @ ":f" | x @ ":j" => {
             let mut matches = vec![];
             for flag in flags.into_iter() {
                 let (mode, args) = match flag {
@@ -344,6 +340,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                     Flag::FlagWithArgument(flag, args) => match flag.as_str() {
                         "r" => Ok((SearchMode::Regex, args)),
                         "e" => Ok((SearchMode::ExactSubstring, args)),
+                        "x" => Ok((SearchMode::ExactString, args)),
                         _ => Err(CommandError::InvalidCommand),
                     },
                     _ => Err(CommandError::InvalidCommand),
@@ -363,10 +360,15 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                     });
                 }
             }
+
             if matches.is_empty() {
                 Err(CommandError::InsufficientArguments)
-            } else {
+            } else if x == ":f" {
                 Ok(Command::FindMatches(matches.into_boxed_slice()))
+            } else if x == ":j" {
+                Ok(Command::JumpTo(matches.into_boxed_slice()))
+            } else {
+                unreachable!("x can only be one of :f, :j (is {})", x);
             }
         }
         ":o" => {

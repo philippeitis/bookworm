@@ -12,7 +12,7 @@ use unicase::UniCase;
 use bookstore_database::bookview::BookViewIndex;
 use bookstore_database::{
     bookview::BookViewError, AppDatabase, BookView, DatabaseError, IndexableDatabase,
-    NestedBookView, SearchableBookView,
+    NestedBookView, ScrollableBookView, SearchableBookView,
 };
 use bookstore_records::book::BookID;
 use bookstore_records::{book::RawBook, Book, BookError};
@@ -361,6 +361,10 @@ impl<D: IndexableDatabase> App<D> {
             }
             Command::FindMatches(searches) => {
                 book_view.push_scope(&searches)?;
+                self.register_update();
+            }
+            Command::JumpTo(searches) => {
+                book_view.jump_to(&searches)?;
                 self.register_update();
             }
             Command::Write => self.write(|d| d.save())?,

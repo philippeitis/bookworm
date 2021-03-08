@@ -209,6 +209,17 @@ impl BookMap {
         Ok(results)
     }
 
+    pub fn find_book_index(&self, searches: &[Search]) -> Result<Option<usize>, Error> {
+        let mut results: Vec<_> = self.books.values().cloned().collect();
+        for search in searches {
+            let matcher = search.clone().into_matcher()?;
+            results.retain(|book| matcher.is_match(&book!(book)));
+        }
+        Ok(results
+            .first()
+            .map(|b| self.books.get_index_of(&book!(b).get_id()).unwrap()))
+    }
+
     pub fn sort_books_by_cols<S: AsRef<str>>(&mut self, cols: &[(S, bool)]) {
         let cols: Vec<_> = cols
             .iter()

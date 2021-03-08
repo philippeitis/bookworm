@@ -58,7 +58,7 @@ impl PageCursor {
             .replace_and_equal(self.top_index.saturating_sub(inc))
     }
 
-    /// Selects the value at index. If index is greater than the window size or data len,
+    /// Selects the value at the index inside the window. If index is greater than the window size or data len,
     /// selects the largest index that is still visible.
     pub(crate) fn select(&mut self, index: Option<usize>) -> bool {
         if let Some(ind) = index {
@@ -76,6 +76,22 @@ impl PageCursor {
         } else {
             !self.selected.replace_and_equal(index)
         }
+    }
+
+    /// Selects the value at index, and adjusts the window so that the value is visible.
+    pub(crate) fn select_index(&mut self, index: usize) -> bool {
+        assert!(index < self.height);
+        let (top_index, select_index) = if index < self.window_size {
+            (0, index)
+        } else if index + self.window_size > self.height {
+            let top_index = self.height - self.window_size;
+            let relative_index = index - top_index;
+            (top_index, relative_index)
+        } else {
+            (index, 0)
+        };
+        self.top_index.replace_and_equal(top_index)
+            | self.selected.replace_and_equal(Some(select_index))
     }
 
     /// Returns the selected value.

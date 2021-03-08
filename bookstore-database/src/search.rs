@@ -9,6 +9,7 @@ pub enum SearchMode {
     Regex,
     ExactSubstring,
     Default,
+    ExactString,
 }
 
 #[derive(Debug)]
@@ -35,6 +36,7 @@ impl Search {
             SearchMode::ExactSubstring => {
                 Box::new(ExactSubstringMatcher::new(self.column, self.search)?)
             }
+            SearchMode::ExactString => Box::new(ExactStringMatcher::new(self.column, self.search)?),
             SearchMode::Default => Box::new(DefaultMatcher::new(self.column, self.search)?),
         })
     }
@@ -85,6 +87,25 @@ impl Matcher for ExactSubstringMatcher {
     fn is_match(&self, book: &Book) -> bool {
         self.regex
             .is_match(&book.get_column(&self.column).unwrap_or_else(String::new))
+    }
+}
+
+pub struct ExactStringMatcher {
+    column: ColumnIdentifier,
+    string: String,
+}
+
+impl Matcher for ExactStringMatcher {
+    fn new(column: ColumnIdentifier, search: String) -> Result<Self, Error> {
+        Ok(ExactStringMatcher {
+            column,
+            string: search,
+        })
+    }
+
+    #[inline(always)]
+    fn is_match(&self, book: &Book) -> bool {
+        self.string == book.get_column(&self.column).unwrap_or_else(String::new)
     }
 }
 

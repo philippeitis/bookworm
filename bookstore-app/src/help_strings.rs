@@ -67,11 +67,27 @@ ARGUMENTS:
 "#;
 
 pub const SEARCH_HELP_STRING: &str = r#"USAGE:
-:f: Finds all books with the specified value.
+:f: Finds all books matching the given predicates.
 
 FLAGS:
 -r: Uses <match> as a regular expression.
 -e: Uses <match> as an exact substring.
+-x: Uses <match> as an exact string.
+
+ARGUMENTS:
+(FLAG? <column> <match>):
+FLAG: A flag describing how to use <match>. If none is provided, uses fuzzy search.
+<column>: The column to match
+<match>: The value to match on
+"#;
+
+pub const JUMP_HELP_STRING: &str = r#"USAGE:
+:j: Jumps to the first book matching the given predicate.
+
+FLAGS:
+-r: Uses <match> as a regular expression.
+-e: Uses <match> as an exact substring.
+-x: Uses <match> as an exact string.
 
 ARGUMENTS:
 (FLAG? <column> <match>):
@@ -141,6 +157,7 @@ pub fn help_strings(command: &str) -> Option<&'static str> {
         ":s" => Some(SORT_HELP_STRING),
         ":c" => Some(COLUMN_HELP_STRING),
         ":f" => Some(SEARCH_HELP_STRING),
+        ":j" => Some(JUMP_HELP_STRING),
         ":o" => Some(OPEN_HELP_STRING),
         ":h" => Some(HELP_HELP_STRING),
         _ => None,

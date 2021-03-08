@@ -167,16 +167,26 @@ pub trait AppDatabase {
     /// Finds books, using the match to compare the specified column to the search string.
     ///
     /// # Arguments
-    /// * ` matching ` - The matching method
-    /// * ` column ` - The column to search over.
-    /// * ` search ` - The search query.
+    /// * ` searches ` - Some number of search queries.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
     fn find_matches(
         &self,
-        search: &[Search],
+        searches: &[Search],
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>>;
+
+    /// Finds the first book to match all criteria specified by searches.
+    ///
+    /// # Arguments
+    /// * ` searches ` - Some number of search queries.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
+    fn find_book_index(
+        &self,
+        searches: &[Search],
+    ) -> Result<Option<usize>, DatabaseError<Self::Error>>;
 
     /// Sorts books by comparing the specified columns and reverses.
     ///

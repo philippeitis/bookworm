@@ -74,6 +74,10 @@ impl BookWidget {
         book_widget
     }
 
+    pub fn book(&self) -> &Arc<RwLock<Book>> {
+        &self.book
+    }
+
     pub fn set_chunk(&mut self, chunk: Rect) {
         self.chunk = chunk;
         let height = chunk.height as usize;

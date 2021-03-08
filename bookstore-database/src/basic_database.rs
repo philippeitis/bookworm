@@ -196,6 +196,16 @@ impl AppDatabase for BasicDatabase {
             .map_err(DatabaseError::Backend)??)
     }
 
+    fn find_book_index(
+        &self,
+        searches: &[Search],
+    ) -> Result<Option<usize>, DatabaseError<Self::Error>> {
+        Ok(self
+            .backend
+            .read(|db| db.find_book_index(searches))
+            .map_err(DatabaseError::Backend)??)
+    }
+
     fn sort_books_by_cols<S: AsRef<str>>(
         &mut self,
         columns: &[(S, bool)],

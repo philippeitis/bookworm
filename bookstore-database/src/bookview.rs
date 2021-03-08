@@ -93,6 +93,8 @@ pub trait BookView<D: AppDatabase> {
 }
 
 pub trait ScrollableBookView<D: AppDatabase>: BookView<D> {
+    fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>>;
+
     fn scroll_up(&mut self, scroll: usize) -> bool;
 
     fn scroll_down(&mut self, scroll: usize) -> bool;
@@ -354,6 +356,29 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
 }
 
 impl<D: IndexableDatabase> ScrollableBookView<D> for SearchableBookView<D> {
+    fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
+        let target_book = match self.scopes.last() {
+            None => self.db().find_book_index(searches)?,
+            Some((_, books)) => {
+                let mut results: Vec<_> = books.values().cloned().collect();
+                for search in searches {
+                    let matcher = search.clone().into_matcher()?;
+                    results.retain(|book| matcher.is_match(&book!(book)));
+                }
+                results
+                    .first()
+                    .cloned()
+                    .map(|b| books.get_index_of(&book!(b).get_id()).unwrap())
+            }
+        };
+
+        Ok(if let Some(index) = target_book {
+            self.active_cursor_mut().select_index(index)
+        } else {
+            false
+        })
+    }
+
     fn scroll_up(&mut self, scroll: usize) -> bool {
         self.active_cursor_mut().scroll_up(scroll)
     }

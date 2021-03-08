@@ -578,6 +578,13 @@ impl AppDatabase for SQLiteDatabase {
         Ok(self.local_cache.find_matches(searches)?)
     }
 
+    fn find_book_index(
+        &self,
+        searches: &[Search],
+    ) -> Result<Option<usize>, DatabaseError<Self::Error>> {
+        Ok(self.local_cache.find_book_index(searches)?)
+    }
+
     fn sort_books_by_cols<S: AsRef<str>>(
         &mut self,
         columns: &[(S, bool)],
