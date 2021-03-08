@@ -294,29 +294,31 @@ impl SQLiteDatabase {
                         let description = &variant.description;
                         let sub_id = &variant.id;
                         sqlx::query!(
-                        "INSERT into variants (book_type, path, local_title, identifier, language, description, id, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                        book_type,
-                        path,
-                        local_title,
-                        identifier,
-                        language,
-                        description,
-                        sub_id,
-                        id
-                    ).execute(&mut tx).await?;
+                            "INSERT into variants (book_type, path, local_title, identifier, language, description, id, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                            book_type,
+                            path,
+                            local_title,
+                            identifier,
+                            language,
+                            description,
+                            sub_id,
+                            id
+                        ).execute(&mut tx).await?;
                     }
                 }
 
                 if let Some(tags) = book.get_extended_columns() {
-                    let mut query = String::from(
-                        "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES",
-                    );
-                    query.extend(tags.iter().map(|(tag_name, tag_value)| {
-                        format!("({}, {}, {}),", tag_name, tag_value, id)
-                    }));
-                    query.pop();
-                    query.push(';');
-                    sqlx::query(&query).execute(&mut tx).await?;
+                    if !tags.is_empty() {
+                        let mut query = String::from(
+                            "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES",
+                        );
+                        query.extend(tags.iter().map(|(tag_name, tag_value)| {
+                            format!("({}, {}, {}),", tag_name, tag_value, id)
+                        }));
+                        query.pop();
+                        query.push(';');
+                        sqlx::query(&query).execute(&mut tx).await?;
+                    }
                 }
 
                 let id = BookID::try_from(id as u64).unwrap();
