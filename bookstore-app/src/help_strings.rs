@@ -67,7 +67,8 @@ ARGUMENTS:
 "#;
 
 pub const SEARCH_HELP_STRING: &str = r#"USAGE:
-:f: Finds all books matching the given predicates.
+:f: Finds all books matching the given predicates. Will enter a nested screen with all results -
+to leave a particular search result page, press ESC.
 
 FLAGS:
 -r: Uses <match> as a regular expression.
