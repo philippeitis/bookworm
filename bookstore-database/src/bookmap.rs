@@ -151,7 +151,11 @@ impl BookMap {
         }
     }
 
-    pub fn merge_similar(&mut self) -> HashSet<BookID> {
+    /// Merges all books with matching titles and authors (case insensitive), in no
+    /// particular order. Books that are merged will not necessarily free IDs no longer in use.
+    /// Returns a Vec containing BookID pairs, where the first BookID is merged into, and exists,
+    /// and the second BookID was merged from, and deleted.
+    pub fn merge_similar_merge_ids(&mut self) -> Vec<(BookID, BookID)> {
         let mut ref_map: HashMap<(String, String), BookID> = HashMap::new();
         let mut merges = vec![];
         for book in self.books.values() {
@@ -183,7 +187,17 @@ impl BookMap {
             }
         }
         self.books.retain(|_, book| !book!(book).is_dummy());
-        merges.into_iter().map(|(_, m)| m).collect()
+        merges
+    }
+
+    /// Merges all books with matching titles and authors (case insensitive), in no
+    /// particular order. Books that are merged will not necessarily free IDs no longer in use.
+    /// Returns a HashSet containing the IDs of all books that have been merged.
+    pub fn merge_similar(&mut self) -> HashSet<BookID> {
+        self.merge_similar_merge_ids()
+            .into_iter()
+            .map(|(_, m)| m)
+            .collect()
     }
 
     pub fn find_matches(&self, searches: &[Search]) -> Result<Vec<Arc<RwLock<Book>>>, Error> {
@@ -193,28 +207,6 @@ impl BookMap {
             results.retain(|book| matcher.is_match(&book!(book)));
         }
         Ok(results)
-    }
-
-    pub fn sort_books_by_col<S: AsRef<str>>(&mut self, col: S, reverse: bool) {
-        let col = ColumnIdentifier::from(col);
-
-        // Use some heuristic to sort in parallel when it would offer speedup -
-        // parallel threads are slower for small sorts.
-        if self.books.len() < 2500 {
-            if reverse {
-                self.books
-                    .sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
-            } else {
-                self.books
-                    .sort_by(|_, a, _, b| book!(a).cmp_column(&book!(b), &col))
-            }
-        } else if reverse {
-            self.books
-                .par_sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
-        } else {
-            self.books
-                .par_sort_by(|_, a, _, b| book!(a).cmp_column(&book!(b), &col))
-        }
     }
 
     pub fn sort_books_by_cols<S: AsRef<str>>(&mut self, cols: &[(S, bool)]) {

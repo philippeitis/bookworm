@@ -342,6 +342,30 @@ impl SQLiteDatabase {
         tx.commit().await?;
         Ok(())
     }
+
+    async fn merge_by_ids(&mut self, merges: &[(BookID, BookID)]) -> Result<(), sqlx::Error> {
+        let mut tx = self.backend.begin().await?;
+        for (merged_into, merged_from) in merges.iter().cloned() {
+            let merged_into = u64::from(merged_into) as i64;
+            let merged_from = u64::from(merged_from) as i64;
+
+            sqlx::query!(
+                "UPDATE extended_tags SET book_id = ? WHERE book_id = ?",
+                merged_into,
+                merged_from
+            )
+            .execute(&mut tx)
+            .await?;
+            sqlx::query!(
+                "UPDATE variants SET book_id = ? WHERE book_id = ?",
+                merged_into,
+                merged_from
+            )
+            .execute(&mut tx)
+            .await?;
+        }
+        tx.commit().await
+    }
 }
 
 // TODO: Should we use a separate process to mirror changes to SQL database?
@@ -538,11 +562,11 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
-        // TODO: This does not correctly update the database.
-        //  b2 ids should be set to b1 ids in db
-        let merged = self.local_cache.merge_similar();
-        self.remove_books(&merged)?;
-        Ok(merged)
+        let merged = self.local_cache.merge_similar_merge_ids();
+        block_on(self.merge_by_ids(&merged)).map_err(DatabaseError::Backend)?;
+        let to_remove = merged.into_iter().map(|(_, m)| m).collect();
+        self.remove_books(&to_remove)?;
+        Ok(to_remove)
     }
 
     fn find_matches(
