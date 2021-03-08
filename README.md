@@ -3,18 +3,18 @@ bookstore is a fast (hopefully) terminal based library management system (like C
 # Current Features
 - Adding single books and books from directories
 - Command based interaction (`[id]?` - if no id is provided, the selected item is used.)
-  - Edit: `!e [id]? ([column] [new_value])+`
-  - Delete (a specific book, or all books): `!d [id]?`, `!d -a`
-  - Sort ascending/descending: `!s ([column] -d?)*`
-  - Add/Remove column: `!c -?[column]`
-  - Add book(s): `!a path\to\book.ext` | `!a -d path\to\books`
-  - Quit: `!q` | CTRL + Q
-  - Write: `!w` | CTRL + S
-  - Write and quit: `!wq`
-  - Merging all books with matching metadata: `!m -a`
-  - Opening books in native file viewer (Windows, MacOS, Linux) or File Explorer (Windows only): `!o [id]?` | `!o -f [id]?`
-  - Finding books with regex or exact substring string or default: `!f ((-r|-e)? [column] [search_str])+`
-  - View help strings: `!h (command)?`
+  - Edit: `:e [id]? ([column] [new_value])+`
+  - Delete (a specific book, or all books): `:d [id]?`, `:d -a`
+  - Sort ascending/descending: `:s ([column] -d?)*`
+  - Add/Remove column: `:c -?[column]`
+  - Add book(s): `:a path\to\book.ext` | `:a -d path\to\books`
+  - Quit: `:q` | CTRL + Q
+  - Write: `:w` | CTRL + S
+  - Write and quit: `:wq`
+  - Merging all books with matching metadata: `:m -a`
+  - Opening books in native file viewer (Windows, MacOS, Linux) or File Explorer (Windows only): `:o [id]?` | `:o -f [id]?`
+  - Finding books with regex or exact substring string or default: `:f ((-r|-e)? [column] [search_str])+`
+  - View help strings: `:h (command)?`
   - Supplying one or more commands from CLI: `bookstore [args] (-- [command])*`
 - Hotkey navigation and interaction
   - Scrolling up and down using:
