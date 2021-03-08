@@ -9,8 +9,8 @@ bookstore-records = { version = "0.1.0", path = "../bookstore-records" }
 
 unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.git", branch = "serde", features = ["serde"] }
 
-sublime_fuzzy = "0.6.0"
-indexmap = { version = "1.6.1", default-features = false, features = ['serde-1', 'rayon'] }
+sublime_fuzzy = "0.7.0"
+indexmap = { version = "1.6.2", default-features = false, features = ['serde-1', 'rayon'] }
 regex = "1.4.2"
 serde = { version = "1.0", features = ["derive", "rc"] }
 
@@ -19,16 +19,13 @@ rustbreak = { version = "2", features = ["ron_enc"], optional = true }
 
 # SQLx dependencies
 sqlx = { version = "0.5.1", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
-tokio = { version = "1.2.0", features = ["macros", "rt-multi-thread"], optional = true }
-async-trait = { version = "0.1.42", optional = true }
-crossbeam = { version = "0.8.0", optional = true }
 futures = { version = "0.3.13", features = ["executor"], optional = true }
 ron = { version = "0.6.4", optional = true }
 
 [features]
-sqlite = ["sqlx", "tokio", "async-trait", "crossbeam", "futures", "ron"]
+sqlite = ["sqlx", "futures", "ron"]
 default = ["rustbreak"]
 
 [dev-dependencies]
 tempfile = "3.1.0"
-rand = "0.7.3"
+rand = "0.8.3"
