@@ -26,7 +26,7 @@ bookstore is a fast (hopefully) terminal based library management system (like C
   - Specifying settings (selection colours, default columns, default sort settings) via TOML file
   - Copying and pasting supported fields, on supported platforms via CTRL+C, CTRL+V
 - SQLite database backend (optional)
-  - Modifications are syncronized to the SQLite backend at the path specified via --database
+  - Modifications are synchronized to the SQLite backend at the path specified via --database
 # Planned Features
 - Cloud synchronization (eg. back up database and all books to Google Drive)
 - Support for supplementary files (eg. more than one cover for a book)
