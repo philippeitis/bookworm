@@ -61,9 +61,9 @@ Note that not all terminals are fully supported - Windows Command Prompt and Ubu
 - Better error reporting in UI
 - Automatic duplicate detection and merging
 
-# SQLite:
-`bash
+# Installing with SQLite Backend:
+```bash
 git clone https://github.com/philippeitis/bookstore.git
 cd bookstore
-cargo install --path bookstore-tui --features copypaste --features sqlite
-`
+cargo install --path bookstore-tui --features sqlite --no-default-features
+```
