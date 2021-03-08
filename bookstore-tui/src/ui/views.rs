@@ -95,6 +95,9 @@ fn copy_from_clipboard() -> Option<String> {
     None
 }
 
+// TODO: Add Find widget that does live searching as user types (but doesn't update if match isn't being changed).
+// TODO: Add text cursor and all related functionality.
+
 impl TuiStyle for InterfaceStyle {
     fn edit_style(&self) -> Style {
         Style::default()
@@ -109,8 +112,6 @@ impl TuiStyle for InterfaceStyle {
     }
 }
 
-// TODO: when https://github.com/crossterm-rs/crossterm/issues/507 is resolved,
-//  use code to allow a Resizable trait for EditWidget and ColumnWidget.
 pub(crate) trait ResizableWidget<D: IndexableDatabase, B: Backend> {
     // Prepares to render the app
     fn prepare_render(&mut self, chunk: Rect);
