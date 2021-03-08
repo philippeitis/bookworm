@@ -9,9 +9,8 @@ use unicase::UniCase;
 use bookstore_records::book::BookID;
 use bookstore_records::{book::ColumnIdentifier, Book, BookError};
 
-use crate::basic_database::IndexableDatabase;
 use crate::search::{Error as SearchError, Search};
-use crate::{AppDatabase, DatabaseError, PageCursor};
+use crate::{AppDatabase, DatabaseError, IndexableDatabase, PageCursor};
 
 macro_rules! book {
     ($book: ident) => {
