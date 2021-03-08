@@ -151,18 +151,19 @@ pub trait AppDatabase {
     /// * ` new_value ` - The value to set the field to.
     ///
     /// # Errors
-    /// This function will return an error if the database fails.
+    /// This function will return an error if updating the database fails.
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: BookID,
         edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 
-    /// Merges all books with matching titles and authors, skipping everything else, with no
-    /// particular order. Books that are merged will not free IDs no longer in use.
+    /// Merges all books with matching titles and authors (case insensitive), in no
+    /// particular order. Books that are merged will not necessarily free IDs no longer in use.
+    /// Returns a HashSet containing the IDs of all books that have been merged.
     ///
     /// # Errors
-    /// This function will return an error if the database fails.
+    /// This function will return an error if updating the database fails.
     fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>>;
 
     /// Finds books, using the match to compare the specified column to the search string.
