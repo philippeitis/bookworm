@@ -126,6 +126,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             active_view: Box::new(ColumnWidget {
                 state: state.clone(),
                 book_widget: None,
+                command_widget_selected: false,
             }),
             ui_updated: false,
             ui_state: state,
@@ -169,6 +170,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                                 self.active_view = Box::new(ColumnWidget {
                                     state: self.ui_state.clone(),
                                     book_widget: None,
+                                    command_widget_selected: false,
                                 })
                             }
                             AppView::Edit => {

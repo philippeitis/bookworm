@@ -194,6 +194,7 @@ fn split_chunk_into_columns(chunk: Rect, num_cols: u16) -> Vec<Rect> {
 pub(crate) struct ColumnWidget<D: IndexableDatabase> {
     pub(crate) state: Rc<RefCell<UIState<D>>>,
     pub(crate) book_widget: Option<BookWidget>,
+    pub(crate) command_widget_selected: bool,
 }
 
 impl<D: IndexableDatabase> ColumnWidget<D> {
@@ -254,12 +255,28 @@ impl<D: IndexableDatabase> ColumnWidget<D> {
         self.state_mut().book_view.end();
     }
 
-    fn select_up(&mut self) {
-        self.state_mut().book_view.select_up();
+    fn select_up(&mut self, modifiers: KeyModifiers) {
+        if self.command_widget_selected {
+            if modifiers.intersects(KeyModifiers::SHIFT) {
+                self.state_mut().curr_command.key_shift_up();
+            } else {
+                self.state_mut().curr_command.key_up();
+            }
+        } else {
+            self.state_mut().book_view.select_up();
+        }
     }
 
-    fn select_down(&mut self) {
-        self.state_mut().book_view.select_down();
+    fn select_down(&mut self, modifiers: KeyModifiers) {
+        if self.command_widget_selected {
+            if modifiers.intersects(KeyModifiers::SHIFT) {
+                self.state_mut().curr_command.key_shift_down();
+            } else {
+                self.state_mut().curr_command.key_down();
+            }
+        } else {
+            self.state_mut().book_view.select_down();
+        }
     }
 }
 
@@ -389,7 +406,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         }
                     }
                     KeyCode::Backspace => {
-                        self.state_mut().curr_command.pop();
+                        self.state_mut().curr_command.backspace();
                     }
                     KeyCode::Char(x) => {
                         let mut state = self.state_mut();
@@ -400,6 +417,10 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                         state.curr_command.push(c);
                                     }
                                 }
+                            } else if x == 'c' {
+                                if let Some(text) = state.curr_command.selected() {
+                                    paste_into_clipboard(&text.into_iter().collect::<String>());
+                                }
                             } else {
                                 state.curr_command.push(x);
                             }
@@ -408,6 +429,10 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         }
                     }
                     KeyCode::Enter => {
+                        if self.state().curr_command.is_empty() {
+                            self.command_widget_selected = true;
+                            return Ok(ApplicationTask::UpdateUI);
+                        }
                         let mut state = self.state_mut();
 
                         let args: Vec<_> = state
@@ -456,20 +481,39 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         state.modify_bv(|bv| bv.pop_scope());
                     }
                     KeyCode::Delete => {
-                        if self.state().curr_command.is_empty() {
+                        let no_command = { self.state().curr_command.is_empty() };
+                        if no_command {
                             app.remove_selected_book(&mut self.state_mut().book_view)?;
                         } else {
+                            self.state_mut().curr_command.del();
                             // TODO: Add code to delete forwards
                             //  (requires implementing cursor logic)
                         }
                     }
                     // Scrolling
-                    KeyCode::Up => self.select_up(),
-                    KeyCode::Down => self.select_down(),
+                    KeyCode::Up => self.select_up(event.modifiers),
+                    KeyCode::Down => self.select_down(event.modifiers),
                     KeyCode::PageDown => self.page_down(),
                     KeyCode::PageUp => self.page_up(),
                     KeyCode::Home => self.home(),
                     KeyCode::End => self.end(),
+                    KeyCode::Right => {
+                        self.command_widget_selected = true;
+                        if event.modifiers.intersects(KeyModifiers::SHIFT) {
+                            self.state_mut().curr_command.key_shift_right();
+                        } else {
+                            self.state_mut().curr_command.key_right();
+                        }
+                    }
+                    KeyCode::Left => {
+                        self.command_widget_selected = true;
+                        if event.modifiers.intersects(KeyModifiers::SHIFT) {
+                            self.state_mut().curr_command.key_shift_left();
+                        } else {
+                            self.state_mut().curr_command.key_left();
+                        }
+                    }
+
                     _ => return Ok(ApplicationTask::DoNothing),
                 }
             }

@@ -1,4 +1,7 @@
+use std::convert::TryFrom;
 use std::fmt;
+use std::num::NonZeroUsize;
+use std::ops::Add;
 use std::path::PathBuf;
 
 use itertools::Itertools;
@@ -56,7 +59,7 @@ impl EditState {
 
 #[derive(Default)]
 pub struct CommandString {
-    char_buf: Vec<char>,
+    cursored_text: CursoredText,
     auto_fill: Option<AutoCompleter<PathBuf>>,
     autofilled: Option<String>,
     open_end: bool,
@@ -95,7 +98,7 @@ impl CommandString {
     /// Creates an empty CommandString.
     pub fn new() -> Self {
         CommandString {
-            char_buf: vec![],
+            cursored_text: CursoredText::default(),
             auto_fill: None,
             autofilled: None,
             open_end: true,
@@ -108,7 +111,7 @@ impl CommandString {
     pub fn push(&mut self, c: char) {
         self.write_back();
         self.auto_fill = None;
-        self.char_buf.push(c)
+        self.cursored_text.push(c)
     }
 
     /// Pops the last character. If an unwritten autofill exists, the autofill is also persisted,
@@ -116,15 +119,65 @@ impl CommandString {
     pub fn pop(&mut self) {
         self.write_back();
         self.auto_fill = None;
-        self.char_buf.pop();
+        self.cursored_text.text.pop();
         self.open_end = true;
+    }
+
+    /// Performs backspace
+    pub fn backspace(&mut self) {
+        self.write_back();
+        self.auto_fill = None;
+        self.open_end = true;
+        self.cursored_text.backspace();
+    }
+
+    /// Performs backspace
+    pub fn del(&mut self) {
+        self.write_back();
+        self.auto_fill = None;
+        self.open_end = true;
+        self.cursored_text.del();
+    }
+
+    pub fn key_up(&mut self) {
+        self.cursored_text.key_up()
+    }
+
+    pub fn key_shift_up(&mut self) {
+        self.cursored_text.key_shift_up()
+    }
+
+    pub fn key_down(&mut self) {
+        self.cursored_text.key_down()
+    }
+
+    pub fn key_shift_down(&mut self) {
+        self.cursored_text.key_shift_down()
+    }
+
+    pub fn key_left(&mut self) {
+        self.cursored_text.key_left()
+    }
+
+    pub fn key_shift_left(&mut self) {
+        self.cursored_text.key_shift_left()
+    }
+
+    pub fn key_right(&mut self) {
+        self.cursored_text.key_right()
+    }
+
+    pub fn key_shift_right(&mut self) {
+        self.cursored_text.key_shift_right()
     }
 
     /// Writes the current autofill to self.
     fn write_back(&mut self) {
         if self.autofilled.is_some() {
             let v = self.get_values_autofilled();
-            self.char_buf = CommandString::vals_to_string(v).chars().collect();
+            self.cursored_text.text = CommandString::vals_to_string(v).chars().collect();
+            self.cursored_text.cursor = self.cursored_text.text.len();
+            self.cursored_text.selection = None;
             self.autofilled = None;
         }
     }
@@ -133,12 +186,12 @@ impl CommandString {
     pub fn clear(&mut self) {
         self.auto_fill = None;
         self.autofilled = None;
-        self.char_buf.clear();
+        self.cursored_text.clear();
     }
 
     /// Checks if any characters are currently written or can be written.
     pub fn is_empty(&self) -> bool {
-        self.char_buf.is_empty() && self.autofilled.is_none()
+        self.cursored_text.text.is_empty() && self.autofilled.is_none()
     }
 
     pub fn refresh_autofill(&mut self) -> Result<(), CommandStringError> {
@@ -147,7 +200,7 @@ impl CommandString {
         }
 
         let val = if let Some((escaped, word)) = self.get_values().last() {
-            if !escaped && word.starts_with('-') && self.char_buf.last().eq(&Some(&' ')) {
+            if !escaped && word.starts_with('-') && self.cursored_text.text.last().eq(&Some(&' ')) {
                 self.keep_last = true;
                 String::new()
             } else {
@@ -170,6 +223,10 @@ impl CommandString {
     /// # Arguments
     /// * ` dir ` - true if filling in a directory, false otherwise.
     pub fn auto_fill(&mut self, dir: bool) {
+        if !self.cursored_text.can_autocomplete() {
+            return;
+        }
+
         self.open_end = false;
 
         if let Some(af) = self.auto_fill.as_mut() {
@@ -185,6 +242,38 @@ impl CommandString {
         }
     }
 
+    pub fn char_chunks(&self) -> CharChunks {
+        let ct = &self.cursored_text;
+        match ct.selection {
+            Some((x, Direction::Left)) => {
+                let (a, b) = ct.text.split_at(ct.cursor);
+                let (b, c) = b.split_at(usize::from(x));
+                CharChunks::Selected(a, b, c, Direction::Left)
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = ct.cursor - usize::from(x);
+                let (a, b) = ct.text.split_at(midcursor);
+                let (b, c) = b.split_at(usize::from(x));
+                CharChunks::Selected(a, b, c, Direction::Right)
+            }
+            None => {
+                if self.autofilled.is_some() {
+                    let v = self.get_values_autofilled();
+                    CharChunks::Unselected(CommandString::vals_to_string(v), String::new())
+                } else {
+                    let (a, b) = ct.text.split_at(ct.cursor);
+                    CharChunks::Unselected(a.iter().collect(), b.iter().collect())
+                }
+            }
+        }
+    }
+
+    pub fn selected(&self) -> Option<&[char]> {
+        match self.char_chunks() {
+            CharChunks::Selected(_, inside, ..) => Some(inside),
+            CharChunks::Unselected(..) => None,
+        }
+    }
     pub fn get_values(&self) -> CommandStringIter {
         CommandStringIter {
             command_string: &self,
@@ -221,7 +310,7 @@ impl fmt::Display for CommandString {
             }
             write!(f, "{}", vals)
         } else {
-            write!(f, "{}", self.char_buf.iter().collect::<String>())
+            write!(f, "{}", self.cursored_text.text.iter().collect::<String>())
         }
     }
 }
@@ -260,11 +349,11 @@ impl<'a> Iterator for CommandStringIter<'a> {
     type Item = (bool, String);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.start >= self.command_string.char_buf.len() {
+        if self.start >= self.command_string.cursored_text.text.len() {
             return None;
         }
 
-        for (end, &c) in self.command_string.char_buf[self.start..]
+        for (end, &c) in self.command_string.cursored_text.text[self.start..]
             .iter()
             .enumerate()
         {
@@ -324,6 +413,235 @@ impl<'a> Iterator for CommandStringIter<'a> {
     }
 }
 
+pub enum CharChunks<'a> {
+    Selected(&'a [char], &'a [char], &'a [char], Direction),
+    Unselected(String, String),
+}
+
+pub enum Direction {
+    Left,
+    Right,
+}
+
+#[derive(Default)]
+struct CursoredText {
+    pub cursor: usize,
+    pub selection: Option<(NonZeroUsize, Direction)>,
+    pub text: Vec<char>,
+}
+
+impl CursoredText {
+    fn key_up(&mut self) {
+        self.cursor = 0;
+        self.selection = None;
+    }
+
+    fn key_shift_up(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        self.selection = match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                let size = NonZeroUsize::try_from(midcursor).ok();
+                size.map(|x| (x, Direction::Left))
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor - usize::from(x);
+                let size = NonZeroUsize::try_from(midcursor).ok();
+                size.map(|x| (x, Direction::Left))
+            }
+            None => {
+                let size = NonZeroUsize::try_from(self.cursor).ok();
+                size.map(|x| (x, Direction::Left))
+            }
+        };
+
+        self.cursor = 0;
+    }
+
+    fn key_down(&mut self) {
+        self.cursor = self.text.len();
+        self.selection = None;
+    }
+
+    fn key_shift_down(&mut self) {
+        if self.cursor == self.text.len() {
+            return;
+        }
+
+        self.selection = match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                let size = NonZeroUsize::try_from(self.text.len() - midcursor).ok();
+                size.map(|x| (x, Direction::Right))
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor - usize::from(x);
+                let size = NonZeroUsize::try_from(self.text.len() - midcursor).ok();
+                size.map(|x| (x, Direction::Right))
+            }
+            None => {
+                let size = NonZeroUsize::try_from(self.text.len() - self.cursor).ok();
+                size.map(|x| (x, Direction::Right))
+            }
+        };
+
+        self.cursor = self.text.len();
+    }
+
+    fn key_left(&mut self) {
+        match self.selection {
+            Some((_, Direction::Left)) => {}
+            Some((x, Direction::Right)) => {
+                self.cursor -= usize::from(x);
+            }
+            None => {
+                self.cursor = self.cursor.saturating_sub(1);
+            }
+        }
+
+        self.selection = None;
+    }
+
+    fn key_shift_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        self.cursor -= 1;
+
+        self.selection = match self.selection {
+            Some((x, Direction::Left)) => {
+                let size = NonZeroUsize::try_from(1 + usize::from(x)).unwrap();
+                Some((size, Direction::Left))
+            }
+            Some((x, Direction::Right)) => {
+                let size = NonZeroUsize::try_from(usize::from(x) - 1).ok();
+                size.map(|x| (x, Direction::Right))
+            }
+            None => {
+                let size = NonZeroUsize::try_from(1).unwrap();
+                Some((size, Direction::Left))
+            }
+        };
+    }
+
+    fn key_right(&mut self) {
+        match self.selection {
+            Some((x, Direction::Left)) => {
+                self.cursor += usize::from(x);
+            }
+            Some((_, Direction::Right)) => {}
+            None => {
+                self.cursor = self.cursor.add(1).min(self.text.len());
+            }
+        }
+
+        self.selection = None;
+    }
+
+    fn key_shift_right(&mut self) {
+        if self.cursor == self.text.len() {
+            return;
+        }
+
+        self.cursor += 1;
+
+        self.selection = match self.selection {
+            Some((x, Direction::Left)) => {
+                let size = NonZeroUsize::try_from(usize::from(x) - 1).ok();
+                size.map(|x| (x, Direction::Left))
+            }
+            Some((x, Direction::Right)) => {
+                let size = NonZeroUsize::try_from(1 + usize::from(x)).unwrap();
+                Some((size, Direction::Right))
+            }
+            None => {
+                let size = NonZeroUsize::try_from(1).unwrap();
+                Some((size, Direction::Right))
+            }
+        };
+    }
+
+    fn del(&mut self) {
+        match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                self.text.drain(self.cursor..midcursor);
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor - usize::from(x);
+                self.text.drain(midcursor..self.cursor);
+                self.cursor = midcursor;
+            }
+            None => {
+                if self.cursor != self.text.len() {
+                    self.text.remove(self.cursor);
+                }
+            }
+        };
+
+        self.selection = None;
+    }
+
+    fn backspace(&mut self) {
+        match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                self.text.drain(self.cursor..midcursor);
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor - usize::from(x);
+                self.text.drain(midcursor..self.cursor);
+                self.cursor = midcursor;
+            }
+            None => {
+                if self.cursor != 0 {
+                    self.cursor -= 1;
+                    self.text.remove(self.cursor);
+                }
+            }
+        };
+
+        self.selection = None;
+    }
+
+    fn push(&mut self, c: char) {
+        match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                self.text.drain(self.cursor..midcursor);
+                self.text.insert(self.cursor, c);
+                self.cursor += 1;
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor - usize::from(x);
+                self.text.drain(midcursor..self.cursor);
+                self.text.insert(midcursor, c);
+                self.cursor = midcursor + 1;
+            }
+            None => {
+                self.text.insert(self.cursor, c);
+                self.cursor += 1;
+            }
+        };
+
+        self.selection = None;
+    }
+
+    fn can_autocomplete(&mut self) -> bool {
+        self.selection.is_none()
+    }
+
+    fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+        self.selection = None;
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -368,7 +686,7 @@ mod test {
 
         for (word, expected) in samples {
             let mut cs = CommandString::new();
-            cs.char_buf = word.chars().collect();
+            cs.cursored_text.text = word.chars().collect();
             let results: Vec<_> = cs.get_values().collect();
             let expected: Vec<_> = expected
                 .into_iter()

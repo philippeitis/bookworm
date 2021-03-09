@@ -2,12 +2,12 @@ use std::sync::{Arc, RwLock};
 
 use tui::backend::Backend;
 use tui::layout::Rect;
-use tui::style::{Modifier, Style};
-use tui::text::Text;
+use tui::style::{Color, Modifier, Style};
+use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, Borders, Paragraph};
 use tui::Frame;
 
-use bookstore_app::user_input::CommandString;
+use bookstore_app::user_input::{CharChunks, CommandString, Direction};
 use bookstore_records::Book;
 
 use crate::ui::scrollable_text::BlindOffset;
@@ -46,12 +46,72 @@ impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
                 Style::default().add_modifier(Modifier::BOLD),
             ))
         } else {
-            // TODO: Slow blink looks wrong
-            let text = Text::styled(
-                self.command_string.to_string(),
-                Style::default().add_modifier(Modifier::BOLD),
-            );
-            Paragraph::new(text)
+            let cursor_style = Style::default()
+                .bg(Color::White)
+                .fg(Color::Black)
+                .add_modifier(Modifier::RAPID_BLINK);
+            let default_style = Style::default().add_modifier(Modifier::BOLD);
+            let selection_style = Style::default()
+                .bg(Color::Blue)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD);
+            let mut text = vec![];
+            match self.command_string.char_chunks() {
+                CharChunks::Selected(before, inside, after, direction) => {
+                    text.push(Span::styled(
+                        before.iter().collect::<String>(),
+                        default_style,
+                    ));
+                    match direction {
+                        Direction::Left => match inside.split_first() {
+                            None => unreachable!(),
+                            Some((&cursor, rest)) => {
+                                text.push(Span::styled(String::from(cursor), cursor_style));
+                                text.push(Span::styled(
+                                    rest.iter().collect::<String>(),
+                                    selection_style,
+                                ));
+                                text.push(Span::styled(
+                                    after.iter().collect::<String>(),
+                                    default_style,
+                                ));
+                            }
+                        },
+                        Direction::Right => {
+                            text.push(Span::styled(
+                                inside.iter().collect::<String>(),
+                                selection_style,
+                            ));
+                            match after.split_first() {
+                                None => {
+                                    text.push(Span::styled(String::from(" "), cursor_style));
+                                }
+                                Some((&cursor, rest)) => {
+                                    text.push(Span::styled(String::from(cursor), cursor_style));
+                                    text.push(Span::styled(
+                                        rest.iter().collect::<String>(),
+                                        default_style,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                CharChunks::Unselected(before, after) => {
+                    text.push(Span::styled(
+                        before,
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ));
+                    if after.is_empty() {
+                        text.push(Span::styled(String::from(" "), cursor_style));
+                    } else {
+                        let (cursor, rest) = after.split_at(1);
+                        text.push(Span::styled(cursor.to_string(), cursor_style));
+                        text.push(Span::styled(rest.to_string(), default_style));
+                    }
+                }
+            }
+            Paragraph::new(Spans::from(text))
         };
         f.render_widget(command_widget, chunk);
     }
