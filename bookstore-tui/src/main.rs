@@ -49,7 +49,7 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
     };
 
     let settings = Settings::open(opts.settings).unwrap_or_default();
-    let db = Database::open(opts.database)?;
+    let db = Database::open(&opts.database)?;
 
     let mut app = App::new(db);
     let mut placeholder_table_view = TableView::default();
@@ -75,7 +75,11 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
     }
 
     let stdout = stdout();
-    let mut app = AppInterface::new("Really Cool Library", settings, app);
+    let mut app = AppInterface::new(
+        format!("Database at {}", opts.database.display()),
+        settings,
+        app,
+    );
 
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;
