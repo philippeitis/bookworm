@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -10,10 +11,11 @@ use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::Terminal;
 
-use bookstore_app::settings::{InterfaceStyle, NavigationSettings, Settings};
+use bookstore_app::settings::{DatabaseSettings, InterfaceStyle, NavigationSettings, Settings};
 use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, EditState};
 use bookstore_app::{App, ApplicationError};
+use bookstore_database::bookview::BookViewError;
 use bookstore_database::{BookView, DatabaseError, IndexableDatabase, SearchableBookView};
 
 use crate::ui::scrollable_text::ScrollableText;
@@ -21,7 +23,6 @@ use crate::ui::views::{
     AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
 };
 use crate::ui::widgets::{BorderWidget, Widget};
-use bookstore_database::bookview::BookViewError;
 
 #[derive(Debug)]
 pub(crate) enum TuiError<DBError> {
@@ -99,6 +100,7 @@ pub(crate) struct AppInterface<'a, D: 'a + IndexableDatabase, B: Backend> {
     active_view: Box<dyn ViewHandler<D, B> + 'a>,
     ui_state: Rc<RefCell<UIState<D>>>,
     ui_updated: bool,
+    settings_path: Option<PathBuf>,
 }
 
 impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
@@ -112,7 +114,12 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     ///
     /// # Errors
     /// None.
-    pub(crate) fn new<S: AsRef<str>>(name: S, settings: Settings, app: App<D>) -> Self {
+    pub(crate) fn new<S: AsRef<str>>(
+        name: S,
+        settings: Settings,
+        settings_path: Option<PathBuf>,
+        app: App<D>,
+    ) -> Self {
         let state = Rc::new(RefCell::new(UIState {
             style: settings.interface_style,
             nav_settings: settings.navigation_settings,
@@ -122,7 +129,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             book_view: app.new_book_view(),
         }));
         AppInterface {
-            border_widget: BorderWidget::new(name.as_ref().to_string()),
+            border_widget: BorderWidget::new(name.as_ref().to_string(), app.db_path()),
             active_view: Box::new(ColumnWidget {
                 state: state.clone(),
                 book_widget: None,
@@ -131,6 +138,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             ui_updated: false,
             ui_state: state,
             app,
+            settings_path,
         }
     }
 
@@ -242,7 +250,30 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             }
 
             match self.get_input() {
-                Ok(true) => return Ok(terminal.clear()?),
+                Ok(true) => {
+                    if let Some(path) = &self.settings_path {
+                        let state = self.ui_state.deref().borrow();
+                        let s = Settings {
+                            interface_style: state.style.clone(),
+                            columns: state
+                                .table_view
+                                .selected_cols()
+                                .iter()
+                                .map(|s| s.clone().into_inner())
+                                .collect(),
+                            sort_settings: self.app.sort_settings().clone(),
+                            navigation_settings: state.nav_settings.clone(),
+                            database_settings: DatabaseSettings {
+                                path: self.app.db_path(),
+                            },
+                        };
+                        if let Some(p) = path.parent() {
+                            std::fs::create_dir_all(p)?;
+                        }
+                        s.write(path)?;
+                    }
+                    return Ok(terminal.clear()?);
+                }
                 Ok(false) => {}
                 Err(_e) => {} // TODO: Handle errors
             }

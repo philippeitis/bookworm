@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::ops::{Bound, RangeBounds};
 use std::path;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use rustbreak::{deser::Ron, FileDatabase, RustbreakError};
+use rustbreak::{deser::Ron, PathDatabase, RustbreakError};
 use unicase::UniCase;
 
 use bookstore_records::book::BookID;
@@ -19,10 +20,11 @@ use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 /// A database which fully implements the functionality of the `AppDatabase` trait,
 /// but does not guarantee that data is successfully written to disk.
 pub struct BasicDatabase {
-    backend: FileDatabase<BookMap, Ron>,
+    backend: PathDatabase<BookMap, Ron>,
     /// All available columns. Case-insensitive.
     len: usize,
     saved: bool,
+    path: PathBuf,
 }
 
 impl AppDatabase for BasicDatabase {
@@ -32,7 +34,8 @@ impl AppDatabase for BasicDatabase {
     where
         P: AsRef<path::Path>,
     {
-        let backend = FileDatabase::<BookMap, Ron>::load_from_path_or_default(file_path)
+        let path = file_path.as_ref().to_path_buf();
+        let backend = PathDatabase::<BookMap, Ron>::load_from_path_or_default(path.clone())
             .map_err(DatabaseError::Backend)?;
         let len = backend
             .write(|db| {
@@ -45,7 +48,12 @@ impl AppDatabase for BasicDatabase {
             backend,
             len,
             saved: true,
+            path,
         })
+    }
+
+    fn path(&self) -> &path::Path {
+        self.path.as_path()
     }
 
     fn save(&mut self) -> Result<(), DatabaseError<Self::Error>> {

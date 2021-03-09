@@ -1,6 +1,6 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use unicase::UniCase;
 
@@ -30,6 +30,7 @@ pub struct Settings {
     pub columns: Vec<String>,
     pub sort_settings: SortSettings,
     pub navigation_settings: NavigationSettings,
+    pub database_settings: DatabaseSettings,
 }
 
 impl Default for Settings {
@@ -39,6 +40,7 @@ impl Default for Settings {
             columns: vec![String::from("Title"), String::from("Authors")],
             sort_settings: SortSettings::default(),
             navigation_settings: NavigationSettings::default(),
+            database_settings: Default::default(),
         }
     }
 }
@@ -64,7 +66,7 @@ impl Default for InterfaceStyle {
 
 // TODO: Consider removing sort settings from settings? Functionality is somewhat
 //  replicated by IndexMap
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SortSettings {
     pub columns: Box<[(UniCase<String>, bool)]>,
     pub is_sorted: bool,
@@ -94,6 +96,25 @@ impl Default for NavigationSettings {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct DatabaseSettings {
+    pub path: PathBuf,
+}
+
+impl Default for DatabaseSettings {
+    fn default() -> Self {
+        DatabaseSettings {
+            path: dirs::data_local_dir().map_or_else(
+                || PathBuf::from("."),
+                |mut p| {
+                    p.push("bookstore/bookstore.db");
+                    p
+                },
+            ),
+        }
+    }
+}
+
 fn str_to_color_or<S: AsRef<str>>(s: S, default: Color) -> Color {
     match s.as_ref().to_ascii_lowercase().as_str() {
         "black" => Color::Black,
@@ -116,15 +137,38 @@ fn str_to_color_or<S: AsRef<str>>(s: S, default: Color) -> Color {
     }
 }
 
-#[derive(Debug, Deserialize)]
+fn color_to_string(c: Color) -> String {
+    match c {
+        Color::Black => "Black",
+        Color::Red => "Red",
+        Color::Green => "Green",
+        Color::Yellow => "Yellow",
+        Color::Blue => "Blue",
+        Color::Magenta => "Magenta",
+        Color::Cyan => "Cyan",
+        Color::Gray => "Gray",
+        Color::DarkGray => "DarkGray",
+        Color::LightRed => "LightRed",
+        Color::LightGreen => "LightGreen",
+        Color::LightYellow => "LightYellow",
+        Color::LightBlue => "LightBlue",
+        Color::LightMagenta => "LightMagenta",
+        Color::LightCyan => "LightCyan",
+        Color::White => "White",
+    }
+    .to_string()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct TomlSettings {
     colors: Option<TomlColors>,
     layout: Option<TomlColumns>,
     sorting: Option<TomlSort>,
     navigation: Option<TomlNavigation>,
+    database: Option<TomlDatabase>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TomlColors {
     selected_fg: Option<String>,
     selected_bg: Option<String>,
@@ -150,6 +194,17 @@ impl From<TomlColors> for InterfaceStyle {
             selected_bg: t.selected_bg(),
             edit_fg: t.edit_fg(),
             edit_bg: t.edit_bg(),
+        }
+    }
+}
+
+impl From<InterfaceStyle> for TomlColors {
+    fn from(is: InterfaceStyle) -> Self {
+        TomlColors {
+            selected_fg: Some(color_to_string(is.selected_fg)),
+            selected_bg: Some(color_to_string(is.selected_bg)),
+            edit_fg: Some(color_to_string(is.edit_fg)),
+            edit_bg: Some(color_to_string(is.edit_bg)),
         }
     }
 }
@@ -188,7 +243,7 @@ impl TomlColors {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TomlColumns {
     columns: Option<Vec<String>>,
 }
@@ -209,7 +264,13 @@ impl From<TomlColumns> for Vec<String> {
     }
 }
 
-#[derive(Debug, Deserialize)]
+impl From<Vec<String>> for TomlColumns {
+    fn from(vs: Vec<String>) -> Self {
+        TomlColumns { columns: Some(vs) }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct TomlSort {
     columns: Option<Vec<(String, Option<bool>)>>,
 }
@@ -234,7 +295,21 @@ impl From<TomlSort> for SortSettings {
     }
 }
 
-#[derive(Debug, Deserialize)]
+impl From<SortSettings> for TomlSort {
+    fn from(s: SortSettings) -> Self {
+        TomlSort {
+            columns: Some(
+                s.columns
+                    .into_vec()
+                    .into_iter()
+                    .map(|(c, r)| (c.into_inner(), Some(r)))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct TomlNavigation {
     scroll: Option<usize>,
     inverted: Option<bool>,
@@ -258,6 +333,40 @@ impl From<TomlNavigation> for NavigationSettings {
     }
 }
 
+impl From<NavigationSettings> for TomlNavigation {
+    fn from(n: NavigationSettings) -> Self {
+        TomlNavigation {
+            scroll: Some(n.scroll),
+            inverted: Some(n.inverted),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TomlDatabase {
+    file: Option<PathBuf>,
+}
+
+impl Default for TomlDatabase {
+    fn default() -> Self {
+        TomlDatabase { file: None }
+    }
+}
+
+impl From<TomlDatabase> for DatabaseSettings {
+    fn from(t: TomlDatabase) -> Self {
+        DatabaseSettings {
+            path: t.file.unwrap_or_else(|| Self::default().path),
+        }
+    }
+}
+
+impl From<DatabaseSettings> for TomlDatabase {
+    fn from(n: DatabaseSettings) -> Self {
+        TomlDatabase { file: Some(n.path) }
+    }
+}
+
 impl Settings {
     /// Opens the settings at the provided location, and fills in missing settings from default
     /// values.
@@ -276,6 +385,18 @@ impl Settings {
             columns: value.layout.unwrap_or_default().into(),
             sort_settings: value.sorting.unwrap_or_default().into(),
             navigation_settings: value.navigation.unwrap_or_default().into(),
+            database_settings: value.database.unwrap_or_default().into(),
         })
+    }
+
+    pub fn write<P: AsRef<Path>>(&self, file: P) -> Result<(), std::io::Error> {
+        let value = TomlSettings {
+            colors: Some(self.interface_style.clone().into()),
+            layout: Some(self.columns.clone().into()),
+            sorting: Some(self.sort_settings.clone().into()),
+            navigation: Some(self.navigation_settings.clone().into()),
+            database: Some(self.database_settings.clone().into()),
+        };
+        std::fs::write(file, toml::to_string(&value).unwrap().as_bytes())
     }
 }

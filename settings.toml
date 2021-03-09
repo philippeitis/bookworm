@@ -9,9 +9,6 @@ columns = ["Title", "Authors", "ID"]
 column = "ID"
 reverse = true
 
-[database]
-file = "books.db"
-
 [navigation]
 scroll = 5
 inverted = false

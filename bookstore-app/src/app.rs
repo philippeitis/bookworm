@@ -224,6 +224,14 @@ impl<D: IndexableDatabase> App<D> {
         }
     }
 
+    pub fn db_path(&self) -> std::path::PathBuf {
+        self.db.as_ref().borrow().path().to_path_buf()
+    }
+
+    pub fn sort_settings(&self) -> &SortSettings {
+        &self.sort_settings
+    }
+
     pub fn new_book_view(&self) -> SearchableBookView<D> {
         SearchableBookView::new(self.db.clone())
     }

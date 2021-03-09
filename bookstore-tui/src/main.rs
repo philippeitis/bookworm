@@ -26,10 +26,10 @@ use crate::ui::{AppInterface, TuiError};
 #[derive(Clap)]
 #[clap(version = "0.1", author = "?")]
 struct Opts {
-    #[clap(short, long, default_value = "settings.toml")]
-    settings: PathBuf,
-    #[clap(short, long, default_value = "books.db")]
-    database: PathBuf,
+    #[clap(short, long)]
+    settings: Option<PathBuf>,
+    #[clap(short, long)]
+    database: Option<PathBuf>,
 }
 
 fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
@@ -48,8 +48,25 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
         }
     };
 
-    let settings = Settings::open(opts.settings).unwrap_or_default();
-    let db = Database::open(&opts.database)?;
+    let (settings, settings_path) = if let Some(path) = opts.settings {
+        (Settings::open(&path).unwrap_or_default(), Some(path))
+    } else {
+        if let Some(mut path) = dirs::config_dir() {
+            path.push("bookstore/settings.toml");
+            (Settings::open(&path).unwrap_or_default(), Some(path))
+        } else {
+            (Settings::default(), None)
+        }
+    };
+
+    if let Some(p) = settings.database_settings.path.parent() {
+        std::fs::create_dir_all(p)?;
+    }
+    let db = Database::open(
+        opts.database
+            .as_ref()
+            .unwrap_or(&settings.database_settings.path),
+    )?;
 
     let mut app = App::new(db);
     let mut placeholder_table_view = TableView::default();
@@ -75,11 +92,7 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
     }
 
     let stdout = stdout();
-    let mut app = AppInterface::new(
-        format!("Database at {}", opts.database.display()),
-        settings,
-        app,
-    );
+    let mut app = AppInterface::new("Really Cool Library", settings, settings_path, app);
 
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;

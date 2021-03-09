@@ -54,6 +54,7 @@ pub trait AppDatabase {
         P: AsRef<path::Path>,
         Self: Sized;
 
+    fn path(&self) -> &path::Path;
     /// Saves the database to its original location.
     ///
     /// # Errors

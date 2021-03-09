@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use tui::backend::Backend;
@@ -233,12 +234,17 @@ impl<B: Backend> Widget<B> for BookWidget {
 
 pub(crate) struct BorderWidget {
     name: String,
+    path: PathBuf,
     pub(crate) saved: bool,
 }
 
 impl BorderWidget {
-    pub(crate) fn new(name: String) -> Self {
-        BorderWidget { name, saved: true }
+    pub(crate) fn new(name: String, path: PathBuf) -> Self {
+        BorderWidget {
+            name,
+            path,
+            saved: true,
+        }
     }
 }
 
@@ -246,8 +252,9 @@ impl<B: Backend> Widget<B> for BorderWidget {
     fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
         let block = Block::default()
             .title(format!(
-                " bookshop || {}{}",
+                " bookstore || {} || {}{}",
                 self.name,
+                self.path.display(),
                 if self.saved { " " } else { " * " }
             ))
             .borders(Borders::ALL);

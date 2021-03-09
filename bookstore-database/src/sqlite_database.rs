@@ -182,6 +182,7 @@ impl From<VariantData> for BookVariant {
 pub struct SQLiteDatabase {
     backend: SqliteConnection,
     local_cache: BookMap,
+    path: PathBuf,
 }
 
 impl SQLiteDatabase {
@@ -384,7 +385,7 @@ impl AppDatabase for SQLiteDatabase {
         let db_exists = file_path.as_ref().exists();
         let database = block_on(async {
             SqliteConnectOptions::new()
-                .filename(file_path)
+                .filename(&file_path)
                 .create_if_missing(true)
                 .connect()
                 .await
@@ -394,6 +395,7 @@ impl AppDatabase for SQLiteDatabase {
         let mut db = Self {
             backend: database,
             local_cache: BookMap::default(),
+            path: file_path.as_ref().to_path_buf(),
         };
 
         execute_query_str!(db, CREATE_BOOKS)?;
@@ -403,6 +405,10 @@ impl AppDatabase for SQLiteDatabase {
             db.load_books()?;
         }
         Ok(db)
+    }
+
+    fn path(&self) -> &Path {
+        self.path.as_path()
     }
 
     fn save(&mut self) -> Result<(), DatabaseError<Self::Error>> {

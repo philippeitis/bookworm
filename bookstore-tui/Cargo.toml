@@ -12,6 +12,7 @@ bookstore-app = { version = "0.1.0", path = "../bookstore-app/" }
 bookstore-database = { version = "0.1.0", path = "../bookstore-database" }
 bookstore-records = { version = "0.1.0", path = "../bookstore-records" }
 
+dirs = "3.0.1"
 clap = "3.0.0-beta.2"
 tui = { version = "0.14", default-features = false, features = ['crossterm'] }
 unicode-truncate = "0.2.0"
