@@ -11,8 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use futures::executor::block_on;
-use sqlx::migrate::MigrateDatabase;
-use sqlx::{Connection, Sqlite, SqliteConnection};
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, Connection, SqliteConnection};
+
 use unicase::UniCase;
 
 use bookstore_records::book::{str_to_series, BookID, ColumnIdentifier, RawBook};
@@ -22,7 +23,7 @@ use crate::bookmap::BookMap;
 use crate::search::Search;
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
-const CREATE_BOOKS: &str = r#"CREATE TABLE `books` (
+const CREATE_BOOKS: &str = r#"CREATE TABLE IF NOT EXISTS `books` (
 `book_id` INTEGER NOT NULL PRIMARY KEY,
 `title` TEXT DEFAULT NULL,
 `series_name` TEXT DEFAULT NULL,
@@ -30,7 +31,7 @@ const CREATE_BOOKS: &str = r#"CREATE TABLE `books` (
 );"#;
 
 // Authors are stored here as well.
-const CREATE_EXTENDED_TAGS: &str = r#"CREATE TABLE `extended_tags` (
+const CREATE_EXTENDED_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `extended_tags` (
 `tag_name` TEXT NOT NULL,
 `tag_value` TEXT NOT NULL,
 `book_id` INTEGER NOT NULL,
@@ -39,7 +40,7 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON DELETE CASCADE
 );"#;
 
-const CREATE_VARIANTS: &str = r#"CREATE TABLE `variants` (
+const CREATE_VARIANTS: &str = r#"CREATE TABLE IF NOT EXISTS `variants` (
 `book_type` TEXT NOT NULL,
 `path` BLOB NOT NULL,
 `local_title` TEXT DEFAULT NULL,
@@ -380,27 +381,25 @@ impl AppDatabase for SQLiteDatabase {
         P: AsRef<Path>,
         Self: Sized,
     {
-        let path = file_path.as_ref().display().to_string();
-
-        let db_exists = block_on(async { Sqlite::database_exists(path.as_str()).await })
-            .map_err(DatabaseError::Backend)?;
-        if !db_exists {
-            block_on(async { Sqlite::create_database(path.as_str()).await })
-                .map_err(DatabaseError::Backend)?;
-        }
-        let database = block_on(async { SqliteConnection::connect(path.as_str()).await })
-            .map_err(DatabaseError::Backend)?;
+        let db_exists = file_path.as_ref().exists();
+        let database = block_on(async {
+            SqliteConnectOptions::new()
+                .filename(file_path)
+                .create_if_missing(true)
+                .connect()
+                .await
+        })
+        .map_err(DatabaseError::Backend)?;
 
         let mut db = Self {
             backend: database,
             local_cache: BookMap::default(),
         };
 
-        if !db_exists {
-            execute_query_str!(db, CREATE_BOOKS)?;
-            execute_query_str!(db, CREATE_EXTENDED_TAGS)?;
-            execute_query_str!(db, CREATE_VARIANTS)?;
-        } else {
+        execute_query_str!(db, CREATE_BOOKS)?;
+        execute_query_str!(db, CREATE_EXTENDED_TAGS)?;
+        execute_query_str!(db, CREATE_VARIANTS)?;
+        if db_exists {
             db.load_books()?;
         }
         Ok(db)
