@@ -51,15 +51,19 @@ pub struct InterfaceStyle {
     pub selected_bg: Color,
     pub edit_fg: Color,
     pub edit_bg: Color,
+    pub cursor_fg: Color,
+    pub cursor_bg: Color,
 }
 
 impl Default for InterfaceStyle {
     fn default() -> Self {
         InterfaceStyle {
             selected_fg: Color::White,
-            selected_bg: Color::LightBlue,
+            selected_bg: Color::Blue,
             edit_fg: Color::White,
-            edit_bg: Color::Blue,
+            edit_bg: Color::LightBlue,
+            cursor_fg: Color::Black,
+            cursor_bg: Color::White,
         }
     }
 }
@@ -194,6 +198,8 @@ impl From<TomlColors> for InterfaceStyle {
             selected_bg: t.selected_bg(),
             edit_fg: t.edit_fg(),
             edit_bg: t.edit_bg(),
+            // TODO: Add cursor styling to TOML
+            ..Default::default()
         }
     }
 }
