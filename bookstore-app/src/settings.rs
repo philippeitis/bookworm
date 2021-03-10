@@ -289,7 +289,7 @@ impl Default for TomlSort {
 
 impl From<TomlSort> for SortSettings {
     fn from(t: TomlSort) -> Self {
-        let columns = t.columns.unwrap_or(vec![]);
+        let columns = t.columns.unwrap_or_default();
         let columns: Vec<_> = columns
             .into_iter()
             .map(|(s, r)| (UniCase::new(s), r.unwrap_or(false)))

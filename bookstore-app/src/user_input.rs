@@ -381,7 +381,7 @@ impl CommandString {
     pub fn get_values(&self) -> CommandStringIter {
         CommandStringIter {
             command_string: &self,
-            quoted: Quoted::NotQuoted,
+            quoted: Quoted::None,
             start: 0,
             complete: false,
             escaped: false,
@@ -422,18 +422,18 @@ impl fmt::Display for CommandString {
 #[derive(Debug, Eq, PartialEq)]
 enum Quoted {
     // "
-    DQuoted,
+    Double,
     // '
-    SQuoted,
-    NotQuoted,
+    Single,
+    None,
 }
 
 impl From<char> for Quoted {
     fn from(c: char) -> Self {
         match c {
-            '"' => Self::DQuoted,
-            '\'' => Self::SQuoted,
-            _ => Self::NotQuoted,
+            '"' => Self::Double,
+            '\'' => Self::Single,
+            _ => Self::None,
         }
     }
 }
@@ -469,7 +469,7 @@ impl<'a> Iterator for CommandStringIter<'a> {
             }
             match c {
                 ' ' => {
-                    if self.quoted == Quoted::NotQuoted {
+                    if self.quoted == Quoted::None {
                         if end == 0 {
                             self.start += 1;
                         } else {
@@ -488,7 +488,7 @@ impl<'a> Iterator for CommandStringIter<'a> {
                     if self.quoted == quote {
                         let s = {
                             self.start += end + 1;
-                            self.quoted = Quoted::NotQuoted;
+                            self.quoted = Quoted::None;
                             std::mem::take(&mut self.sub_string)
                         };
 
@@ -510,7 +510,7 @@ impl<'a> Iterator for CommandStringIter<'a> {
         } else {
             self.complete = true;
             Some((
-                self.was_escaped || self.quoted != Quoted::NotQuoted,
+                self.was_escaped || self.quoted != Quoted::None,
                 std::mem::take(&mut self.sub_string),
             ))
         }

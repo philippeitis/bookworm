@@ -256,7 +256,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                         let state = self.ui_state.deref().borrow();
                         // TODO: Write multiple settings files to allow multiple databases.
                         let s = Settings {
-                            interface_style: state.style.clone(),
+                            interface_style: state.style,
                             columns: state
                                 .table_view
                                 .selected_cols()
@@ -264,7 +264,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                                 .map(|s| s.clone().into_inner())
                                 .collect(),
                             sort_settings: self.app.sort_settings().clone(),
-                            navigation_settings: state.nav_settings.clone(),
+                            navigation_settings: state.nav_settings,
                             database_settings: DatabaseSettings {
                                 path: self.app.db_path(),
                             },

@@ -339,7 +339,7 @@ impl Book {
 
     pub fn get_column(&self, column: &ColumnIdentifier) -> Option<String> {
         match column {
-            ColumnIdentifier::ID => Some(self.get_u32_id().to_string()),
+            ColumnIdentifier::ID => Some(self.id?.to_string()),
             x => self.raw_book.get_column(x),
         }
     }
@@ -380,8 +380,9 @@ impl Book {
         }
     }
 
-    pub fn get_u32_id(&self) -> u64 {
-        self.id.map(|id| u64::from(id)).unwrap_or(0)
+    /// Provides a u64 version of the internal ID for comparison.
+    pub fn get_u64_id(&self) -> u64 {
+        self.id.map(u64::from).unwrap_or(0)
     }
 
     pub fn get_id(&self) -> BookID {
@@ -420,7 +421,7 @@ impl Book {
     /// * ` column ` - the column of interest.
     pub fn cmp_column(&self, other: &Self, column: &ColumnIdentifier) -> Ordering {
         match column {
-            ColumnIdentifier::ID => self.get_u32_id().cmp(&other.get_u32_id()),
+            ColumnIdentifier::ID => self.get_u64_id().cmp(&other.get_u64_id()),
             col => self.raw_book.cmp_column(&other.raw_book, col),
         }
     }

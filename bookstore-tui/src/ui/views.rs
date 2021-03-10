@@ -434,7 +434,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                 'c' => {
                                     let state = self.state();
                                     if let Some(text) = state.curr_command.selected() {
-                                        paste_into_clipboard(&text.into_iter().collect::<String>());
+                                        paste_into_clipboard(&text.iter().collect::<String>());
                                     } else {
                                         let string = state.curr_command.to_string();
                                         if !string.is_empty() {
@@ -445,7 +445,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                 'x' => {
                                     let mut state = self.state_mut();
                                     if let Some(text) = state.curr_command.selected() {
-                                        paste_into_clipboard(&text.into_iter().collect::<String>());
+                                        paste_into_clipboard(&text.iter().collect::<String>());
                                         state.curr_command.del();
                                     } else {
                                         let string = state.curr_command.to_string();
@@ -637,7 +637,9 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
 
         let edit_style = state.style.edit_style();
         let select_style = state.style.select_style();
-        let selected = state.selected().expect("EditWidget should only exist when items are selected");
+        let selected = state
+            .selected()
+            .expect("EditWidget should only exist when items are selected");
 
         let style_rules = StyleRules {
             cursor: state.style.cursor_style(),
@@ -716,7 +718,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                                 }
                                 'c' => {
                                     if let Some(text) = self.edit.selected() {
-                                        paste_into_clipboard(&text.into_iter().collect::<String>());
+                                        paste_into_clipboard(&text.iter().collect::<String>());
                                     } else {
                                         let string = self.edit.value_to_string();
                                         if !string.is_empty() {
@@ -726,7 +728,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                                 }
                                 'x' => {
                                     if let Some(text) = self.edit.selected() {
-                                        paste_into_clipboard(&text.into_iter().collect::<String>());
+                                        paste_into_clipboard(&text.iter().collect::<String>());
                                         self.edit.del();
                                     } else {
                                         let string = self.edit.value_to_string();
