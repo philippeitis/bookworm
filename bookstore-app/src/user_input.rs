@@ -242,6 +242,14 @@ impl CommandString {
         }
     }
 
+    pub fn select_all(&mut self) {
+        self.cursored_text.select_all()
+    }
+
+    pub fn deselect(&mut self) {
+        self.cursored_text.deselect();
+    }
+
     pub fn char_chunks(&self) -> CharChunks {
         let ct = &self.cursored_text;
         match ct.selection {
@@ -431,6 +439,18 @@ struct CursoredText {
 }
 
 impl CursoredText {
+    fn select_all(&mut self) {
+        self.cursor = self.text.len();
+        self.selection = NonZeroUsize::try_from(self.text.len())
+            .map(|x| (x, Direction::Right))
+            .ok();
+    }
+
+    fn deselect(&mut self) {
+        self.cursor = self.text.len();
+        self.selection = None;
+    }
+
     fn key_up(&mut self) {
         self.cursor = 0;
         self.selection = None;

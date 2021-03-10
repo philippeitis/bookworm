@@ -409,23 +409,41 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         self.state_mut().curr_command.backspace();
                     }
                     KeyCode::Char(x) => {
-                        let mut state = self.state_mut();
                         if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
-                            if x == 'v' {
-                                if let Some(s) = copy_from_clipboard() {
-                                    for c in s.chars() {
-                                        state.curr_command.push(c);
+                            match x {
+                                'v' => {
+                                    let mut state = self.state_mut();
+                                    if let Some(s) = copy_from_clipboard() {
+                                        for c in s.chars() {
+                                            state.curr_command.push(c);
+                                        }
                                     }
                                 }
-                            } else if x == 'c' {
-                                if let Some(text) = state.curr_command.selected() {
-                                    paste_into_clipboard(&text.into_iter().collect::<String>());
+                                'c' => {
+                                    if let Some(text) = self.state_mut().curr_command.selected() {
+                                        paste_into_clipboard(&text.into_iter().collect::<String>());
+                                    }
                                 }
-                            } else {
-                                state.curr_command.push(x);
+                                'x' => {
+                                    let mut state = self.state_mut();
+                                    if let Some(text) = state.curr_command.selected() {
+                                        paste_into_clipboard(&text.into_iter().collect::<String>());
+                                        state.curr_command.del();
+                                    }
+                                }
+                                'd' => {
+                                    self.command_widget_selected = false;
+                                    let mut state = self.state_mut();
+                                    state.curr_command.deselect();
+                                    state.book_view.deselect();
+                                }
+                                'a' => {
+                                    self.state_mut().curr_command.select_all();
+                                }
+                                _ => self.state_mut().curr_command.push(x),
                             }
                         } else {
-                            state.curr_command.push(x);
+                            self.state_mut().curr_command.push(x);
                         }
                     }
                     KeyCode::Enter => {
@@ -475,6 +493,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         }
                     }
                     KeyCode::Esc => {
+                        self.command_widget_selected = false;
                         let mut state = self.state_mut();
                         state.modify_bv(|bv| bv.deselect());
                         state.curr_command.clear();
@@ -644,17 +663,37 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                     }
                     KeyCode::Char(c) => {
                         if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
-                            if c == 'v' {
-                                if let Some(s) = copy_from_clipboard() {
-                                    self.edit.extend(&s);
+                            match c {
+                                'v' => {
+                                    if let Some(s) = copy_from_clipboard() {
+                                        self.edit.extend(&s);
+                                    }
                                 }
-                            } else if c == 'c' {
-                                paste_into_clipboard(&self.edit.value)
-                            } else {
-                                self.edit.push(c);
+                                'c' => {
+                                    paste_into_clipboard(&self.edit.value);
+                                }
+                                'x' => {
+                                    paste_into_clipboard(&self.edit.value);
+                                    self.edit.value.clear();
+                                }
+                                'd' => {
+                                    return Ok(ApplicationTask::SwitchView(AppView::Columns));
+                                }
+                                'a' => {}
+                                _ => {
+                                    self.edit.push(c);
+                                }
                             }
                         } else {
                             self.edit.push(c);
+                        }
+                    }
+                    KeyCode::Tab => {
+                        self.dump_edit(app)?;
+                        if self.state().selected_column + 1 < self.state().num_cols() {
+                            self.state_mut().selected_column += 1;
+                            // Only reset edit if changing columns
+                            self.reset_edit();
                         }
                     }
                     KeyCode::Enter => {
