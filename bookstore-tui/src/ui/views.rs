@@ -7,6 +7,7 @@ use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
 
 use tui::backend::Backend;
 use tui::layout::{Constraint, Direction, Layout, Rect};
+use tui::style::Color as TColor;
 use tui::style::{Modifier, Style};
 use tui::text::{Span, Text};
 use tui::widgets::{Block, List, ListItem, ListState, Paragraph};
@@ -25,7 +26,9 @@ use bookstore_records::BookError;
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::terminal_ui::UIState;
-use crate::ui::widgets::{BookWidget, CommandWidget, Widget};
+use crate::ui::widgets::{
+    char_chunks_to_styled_text, BookWidget, CommandWidget, StyleRules, Widget,
+};
 
 macro_rules! state_mut {
     ($self: ident) => {
@@ -51,10 +54,11 @@ trait TuiStyle {
     fn edit_style(&self) -> Style;
 
     fn select_style(&self) -> Style;
+
+    fn cursor_style(&self) -> Style;
 }
 
 fn to_tui(c: bookstore_app::settings::Color) -> tui::style::Color {
-    use tui::style::Color as TColor;
     match c {
         Color::Black => TColor::Black,
         Color::Red => TColor::Red,
@@ -109,6 +113,13 @@ impl TuiStyle for InterfaceStyle {
         Style::default()
             .fg(to_tui(self.selected_fg))
             .bg(to_tui(self.selected_bg))
+    }
+
+    fn cursor_style(&self) -> Style {
+        Style::default()
+            .fg(to_tui(self.cursor_fg))
+            .bg(to_tui(self.cursor_bg))
+            .add_modifier(Modifier::SLOW_BLINK)
     }
 }
 
@@ -420,8 +431,14 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                     }
                                 }
                                 'c' => {
-                                    if let Some(text) = self.state_mut().curr_command.selected() {
+                                    let state = self.state();
+                                    if let Some(text) = state.curr_command.selected() {
                                         paste_into_clipboard(&text.into_iter().collect::<String>());
+                                    } else {
+                                        let string = state.curr_command.to_string();
+                                        if !string.is_empty() {
+                                            paste_into_clipboard(&string);
+                                        }
                                     }
                                 }
                                 'x' => {
@@ -429,6 +446,12 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                     if let Some(text) = state.curr_command.selected() {
                                         paste_into_clipboard(&text.into_iter().collect::<String>());
                                         state.curr_command.del();
+                                    } else {
+                                        let string = state.curr_command.to_string();
+                                        if !string.is_empty() {
+                                            paste_into_clipboard(&string);
+                                        }
+                                        state.curr_command.clear();
                                     }
                                 }
                                 'd' => {
@@ -448,9 +471,14 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                     }
                     KeyCode::Enter => {
                         if self.state().curr_command.is_empty() {
-                            self.command_widget_selected = true;
-                            return Ok(ApplicationTask::UpdateUI);
+                            if self.state().book_view.selected().is_some() {
+                                return Ok(ApplicationTask::SwitchView(AppView::Edit));
+                            } else {
+                                self.command_widget_selected = true;
+                                return Ok(ApplicationTask::UpdateUI);
+                            }
                         }
+
                         let mut state = self.state_mut();
 
                         let args: Vec<_> = state
@@ -505,8 +533,6 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                             app.remove_selected_book(&mut self.state_mut().book_view)?;
                         } else {
                             self.state_mut().curr_command.del();
-                            // TODO: Add code to delete forwards
-                            //  (requires implementing cursor logic)
                         }
                     }
                     // Scrolling
@@ -543,6 +569,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
 
 pub(crate) struct EditWidget<D: IndexableDatabase> {
     pub(crate) edit: EditState,
+    pub(crate) focused: bool,
     pub(crate) state: Rc<RefCell<UIState<D>>>,
 }
 
@@ -557,11 +584,12 @@ impl<D: IndexableDatabase> EditWidget<D> {
     /// Used to save the edit to the book being modified.
     fn dump_edit(&mut self, app: &mut App<D>) -> Result<(), ApplicationError<D::Error>> {
         if self.edit.started_edit {
+            self.focused = false;
             let column = {
                 self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
             };
             match app.edit_selected_book(
-                &[(column, &self.edit.value)],
+                &[(column, &self.edit.value_to_string())],
                 &mut state_mut!(self).book_view,
             ) {
                 Ok(_) => {}
@@ -606,6 +634,12 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
         let select_style = state.style.select_style();
         let selected = state.selected().unwrap();
 
+        let style_rules = StyleRules {
+            cursor: state.style.cursor_style(),
+            selected: select_style,
+            default: edit_style,
+        };
+
         for (col, ((title, data), &chunk)) in self
             .state()
             .table_view
@@ -619,20 +653,26 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
                 .enumerate()
                 .map(|(row, word)| {
                     if selected == (col, row) {
-                        ListItem::new(Span::from(self.edit.value.unicode_truncate_start(width).0))
+                        // TODO: Force text around cursor to be visible.
+                        let styled =
+                            char_chunks_to_styled_text(self.edit.char_chunks(), style_rules);
+                        //Span::from(self.edit.value_to_string().unicode_truncate_start(width).0.to_string())
+                        ListItem::new(styled)
                     } else {
                         ListItem::new(Span::from(word.unicode_truncate(width).0))
                     }
                 })
                 .collect::<Vec<_>>();
 
-            let list = List::new(items)
-                .block(Block::default().title(Span::from(title.to_string())))
-                .highlight_style(if col == selected.0 {
+            let mut list =
+                List::new(items).block(Block::default().title(Span::from(title.to_string())));
+            if !self.focused {
+                list = list.highlight_style(if col == selected.0 {
                     edit_style
                 } else {
                     select_style
                 });
+            }
 
             let mut selected_row = ListState::default();
             selected_row.select(Some(selected.1));
@@ -658,8 +698,8 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
             // tab writes and goes to next box.
             Event::Key(event) => {
                 match event.code {
-                    KeyCode::Backspace => {
-                        self.edit.del();
+                    KeyCode::F(2) => {
+                        self.focused = true;
                     }
                     KeyCode::Char(c) => {
                         if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
@@ -670,16 +710,38 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                                     }
                                 }
                                 'c' => {
-                                    paste_into_clipboard(&self.edit.value);
+                                    if let Some(text) = self.edit.selected() {
+                                        paste_into_clipboard(&text.into_iter().collect::<String>());
+                                    } else {
+                                        let string = self.edit.value_to_string();
+                                        if !string.is_empty() {
+                                            paste_into_clipboard(&string);
+                                        }
+                                    }
                                 }
                                 'x' => {
-                                    paste_into_clipboard(&self.edit.value);
-                                    self.edit.value.clear();
+                                    if let Some(text) = self.edit.selected() {
+                                        paste_into_clipboard(&text.into_iter().collect::<String>());
+                                        self.edit.del();
+                                    } else {
+                                        let string = self.edit.value_to_string();
+                                        if !string.is_empty() {
+                                            paste_into_clipboard(&string);
+                                        }
+                                        self.edit.clear();
+                                    }
                                 }
                                 'd' => {
-                                    return Ok(ApplicationTask::SwitchView(AppView::Columns));
+                                    if self.focused {
+                                        self.edit.deselect();
+                                        self.focused = false;
+                                    } else {
+                                        return Ok(ApplicationTask::SwitchView(AppView::Columns));
+                                    }
                                 }
-                                'a' => {}
+                                'a' => {
+                                    self.edit.select_all();
+                                }
                                 _ => {
                                     self.edit.push(c);
                                 }
@@ -697,31 +759,82 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                         }
                     }
                     KeyCode::Enter => {
-                        self.dump_edit(app)?;
-                        return Ok(ApplicationTask::SwitchView(AppView::Columns));
+                        if !self.focused {
+                            self.focused = true;
+                        } else {
+                            self.dump_edit(app)?;
+                            return Ok(ApplicationTask::SwitchView(AppView::Columns));
+                        }
                     }
                     KeyCode::Esc => {
                         return Ok(ApplicationTask::SwitchView(AppView::Columns));
                     }
+                    KeyCode::Backspace => {
+                        self.edit.backspace();
+                    }
                     KeyCode::Delete => {
-                        // TODO: Add code to delete forwards
-                        //  (requires implementing cursor logic)
+                        self.edit.del();
                     }
                     KeyCode::Down => {
-                        self.dump_edit(app)?;
-                        if self.state().selected_column + 1 < self.state().num_cols() {
-                            self.state_mut().selected_column += 1;
-                            // Only reset edit if changing columns
-                            self.reset_edit();
+                        if self.focused {
+                            if event.modifiers.intersects(KeyModifiers::SHIFT) {
+                                self.edit.key_shift_down();
+                            } else {
+                                self.edit.key_down();
+                            }
+                        } else {
+                            self.dump_edit(app)?;
+                            if self.state_mut().book_view.select_down() {
+                                self.reset_edit();
+                            }
                         }
                     }
                     KeyCode::Up => {
-                        self.dump_edit(app)?;
-                        if self.state().selected_column > 0 {
-                            self.state_mut().selected_column -= 1;
-                            self.reset_edit();
+                        if self.focused {
+                            if event.modifiers.intersects(KeyModifiers::SHIFT) {
+                                self.edit.key_shift_up();
+                            } else {
+                                self.edit.key_up();
+                            }
+                        } else {
+                            self.dump_edit(app)?;
+                            if self.state_mut().book_view.select_up() {
+                                self.reset_edit();
+                            }
                         }
                     }
+                    KeyCode::Left => {
+                        if self.focused {
+                            if event.modifiers.intersects(KeyModifiers::SHIFT) {
+                                self.edit.key_shift_left();
+                            } else {
+                                self.edit.key_left();
+                            }
+                        } else {
+                            self.dump_edit(app)?;
+                            if self.state().selected_column > 0 {
+                                self.state_mut().selected_column -= 1;
+                                self.reset_edit();
+                            }
+                        }
+                    }
+                    KeyCode::Right => {
+                        if self.focused {
+                            if event.modifiers.intersects(KeyModifiers::SHIFT) {
+                                self.edit.key_shift_right();
+                            } else {
+                                self.edit.key_right();
+                            }
+                        } else {
+                            self.dump_edit(app)?;
+                            if self.state().selected_column + 1 < self.state().num_cols() {
+                                self.state_mut().selected_column += 1;
+                                // Only reset edit if changing columns
+                                self.reset_edit();
+                            }
+                        }
+                    }
+
                     _ => return Ok(ApplicationTask::DoNothing),
                 }
             }

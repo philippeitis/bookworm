@@ -11,29 +11,38 @@ use crate::AutoCompleter;
 
 pub struct EditState {
     pub started_edit: bool,
-    pub value: String,
+    value: CursoredText,
 }
 
 impl Default for EditState {
     fn default() -> Self {
         EditState {
             started_edit: false,
-            value: String::new(),
+            value: CursoredText::default(),
         }
     }
 }
 
 impl EditState {
     pub fn new<S: AsRef<str>>(value: S) -> Self {
+        let text: Vec<_> = value.as_ref().chars().collect();
         EditState {
             started_edit: false,
-            value: value.as_ref().to_owned(),
+            value: CursoredText {
+                cursor: text.len(),
+                selection: None,
+                text,
+            },
         }
+    }
+
+    pub fn value_to_string(&self) -> String {
+        self.value.text.iter().collect()
     }
 
     pub fn del(&mut self) {
         if self.started_edit {
-            self.value.pop();
+            self.value.del();
         } else {
             self.value.clear();
         }
@@ -53,7 +62,102 @@ impl EditState {
             self.value.clear();
         }
         self.started_edit = true;
-        self.value.push_str(s);
+        for c in s.chars() {
+            self.value.push(c);
+        }
+    }
+
+    /// Performs backspace
+    pub fn backspace(&mut self) {
+        if self.started_edit {
+            self.value.backspace();
+        } else {
+            self.value.clear();
+        }
+        self.started_edit = true;
+    }
+
+    pub fn key_up(&mut self) {
+        self.started_edit = true;
+        self.value.key_up()
+    }
+
+    pub fn key_shift_up(&mut self) {
+        self.started_edit = true;
+        self.value.key_shift_up()
+    }
+
+    pub fn key_down(&mut self) {
+        self.started_edit = true;
+        self.value.key_down()
+    }
+
+    pub fn key_shift_down(&mut self) {
+        self.started_edit = true;
+        self.value.key_shift_down()
+    }
+
+    pub fn key_left(&mut self) {
+        self.started_edit = true;
+        self.value.key_left()
+    }
+
+    pub fn key_shift_left(&mut self) {
+        self.started_edit = true;
+        self.value.key_shift_left()
+    }
+
+    pub fn key_right(&mut self) {
+        self.started_edit = true;
+        self.value.key_right()
+    }
+
+    pub fn key_shift_right(&mut self) {
+        self.started_edit = true;
+        self.value.key_shift_right()
+    }
+
+    pub fn clear(&mut self) {
+        self.started_edit = true;
+        self.value.clear();
+    }
+
+    pub fn select_all(&mut self) {
+        self.started_edit = true;
+        self.value.select_all()
+    }
+
+    pub fn deselect(&mut self) {
+        self.started_edit = true;
+        self.value.deselect();
+    }
+
+    pub fn char_chunks(&self) -> CharChunks {
+        let ct = &self.value;
+        match ct.selection {
+            Some((x, Direction::Left)) => {
+                let (a, b) = ct.text.split_at(ct.cursor);
+                let (b, c) = b.split_at(usize::from(x));
+                CharChunks::Selected(a, b, c, Direction::Left)
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = ct.cursor - usize::from(x);
+                let (a, b) = ct.text.split_at(midcursor);
+                let (b, c) = b.split_at(usize::from(x));
+                CharChunks::Selected(a, b, c, Direction::Right)
+            }
+            None => {
+                let (a, b) = ct.text.split_at(ct.cursor);
+                CharChunks::Unselected(a.iter().collect(), b.iter().collect())
+            }
+        }
+    }
+
+    pub fn selected(&self) -> Option<&[char]> {
+        match self.char_chunks() {
+            CharChunks::Selected(_, inside, ..) => Some(inside),
+            CharChunks::Unselected(..) => None,
+        }
     }
 }
 
@@ -112,15 +216,6 @@ impl CommandString {
         self.write_back();
         self.auto_fill = None;
         self.cursored_text.push(c)
-    }
-
-    /// Pops the last character. If an unwritten autofill exists, the autofill is also persisted,
-    /// and the last character is popped. The autofill source is reset.
-    pub fn pop(&mut self) {
-        self.write_back();
-        self.auto_fill = None;
-        self.cursored_text.text.pop();
-        self.open_end = true;
     }
 
     /// Performs backspace
@@ -282,6 +377,7 @@ impl CommandString {
             CharChunks::Unselected(..) => None,
         }
     }
+
     pub fn get_values(&self) -> CommandStringIter {
         CommandStringIter {
             command_string: &self,

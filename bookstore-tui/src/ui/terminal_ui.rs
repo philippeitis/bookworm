@@ -186,6 +186,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                                 if let Some(selected_str) = state.get_selected_table_value() {
                                     self.active_view = Box::new(EditWidget {
                                         edit: EditState::new(selected_str),
+                                        focused: false,
                                         state: self.ui_state.clone(),
                                     });
                                 }
