@@ -13,7 +13,7 @@ use bookstore_records::Book;
 
 use crate::ui::scrollable_text::BlindOffset;
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct StyleRules {
     pub default: Style,
     pub selected: Style,
@@ -102,7 +102,7 @@ impl<'a> CommandWidget<'a> {
 }
 
 /// Takes the CharChunk and styles it with the provided styling rules.
-fn char_chunks_to_styled_text(c: CharChunks, styles: StyleRules) -> Spans {
+pub fn char_chunks_to_styled_text(c: CharChunks, styles: StyleRules) -> Spans {
     let mut text = vec![];
     match c {
         CharChunks::Selected(before, inside, after, direction) => {
@@ -146,10 +146,7 @@ fn char_chunks_to_styled_text(c: CharChunks, styles: StyleRules) -> Spans {
             }
         }
         CharChunks::Unselected(before, after) => {
-            text.push(Span::styled(
-                before,
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
+            text.push(Span::styled(before, styles.default));
             if after.is_empty() {
                 text.push(Span::styled(String::from(" "), styles.cursor));
             } else {
