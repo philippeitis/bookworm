@@ -78,21 +78,21 @@ impl RawBook {
 
         let mut book = RawBook::default();
 
-        if let Ok(mut variant) = BookVariant::generate_from_file(path) {
-            variant.id = Some(0);
-            if book.title.is_none() {
-                book.title = std::mem::take(&mut variant.local_title);
-            }
+        let mut variant = BookVariant::generate_from_file(path)?;
 
-            if book.authors.is_none() {
-                book.authors = std::mem::take(&mut variant.additional_authors);
-            }
-
-            if book.description.is_none() {
-                book.description = std::mem::take(&mut variant.description);
-            }
-            book.variants = vec![variant];
+        variant.id = Some(0);
+        if book.title.is_none() {
+            book.title = std::mem::take(&mut variant.local_title);
         }
+
+        if book.authors.is_none() {
+            book.authors = std::mem::take(&mut variant.additional_authors);
+        }
+
+        if book.description.is_none() {
+            book.description = std::mem::take(&mut variant.description);
+        }
+        book.variants = vec![variant];
 
         Ok(book)
     }

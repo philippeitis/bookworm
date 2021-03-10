@@ -7,7 +7,6 @@ use mobi::MobiMetadata;
 use quick_epub::{IdentifierScheme, Metadata as EpubMetadata};
 use serde::{Deserialize, Serialize};
 
-use crate::variant::Identifier::Unknown;
 use crate::BookError;
 
 fn unravel_author(author: &str) -> String {
@@ -80,7 +79,7 @@ impl BookVariant {
     /// # Errors
     /// Will return an error if the provided path does not lead to a file.
     /// Will panic if the title can not be set.
-    pub(crate) fn generate_from_file<P>(file_path: P) -> Result<Self, BookError>
+    pub fn generate_from_file<P>(file_path: P) -> Result<Self, BookError>
     where
         P: AsRef<path::Path>,
     {
@@ -102,7 +101,10 @@ impl BookVariant {
         } else {
             return Err(BookError::FileError);
         };
-        let book_type = BookType::new(ext);
+        let book_type = match BookType::new(ext) {
+            x @ BookType::Unsupported(_) => return Err(BookError::UnsupportedExtension(x)),
+            supported => supported,
+        };
         let mut book = BookVariant {
             book_type,
             path: path.to_owned(),
@@ -160,9 +162,9 @@ impl BookVariant {
                                 self.identifier = Isbn::from_str(&value).ok().map(Identifier::ISBN)
                             }
                             IdentifierScheme::Unknown(id) => {
-                                self.identifier = Some(Unknown(id, value));
+                                self.identifier = Some(Identifier::Unknown(id, value));
                             }
-                            x => self.identifier = Some(Unknown(x.to_string(), value)),
+                            x => self.identifier = Some(Identifier::Unknown(x.to_string(), value)),
                         },
                         None => {}
                     }
