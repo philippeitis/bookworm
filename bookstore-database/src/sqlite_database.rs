@@ -207,7 +207,11 @@ impl SQLiteDatabase {
             if let Some(book) = books.get_mut(&id) {
                 book.inner_mut().push_variant(variant);
             } else {
-                panic!();
+                // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
+                panic!(
+                    "SQLite database may be corrupted. Found orphan variant for {}.",
+                    id
+                );
             }
         }
 
@@ -220,7 +224,13 @@ impl SQLiteDatabase {
         for tag in tag_data.into_iter() {
             let id = NonZeroU64::try_from(tag.book_id as u64).unwrap();
             match books.get_mut(&id) {
-                None => panic!(),
+                None => {
+                    // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
+                    panic!(
+                        "SQLite database may be corrupted. Found orphan tag for {}.",
+                        id
+                    );
+                }
                 Some(book) => {
                     if !prime_cols.contains(&tag.tag_name) {
                         prime_cols.insert(tag.tag_name.clone());

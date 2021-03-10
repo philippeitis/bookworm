@@ -9,7 +9,8 @@ use crate::{BookError, BookVariant};
 
 pub type BookID = std::num::NonZeroU64;
 
-/// Identifies the columns a Book provides.
+/// Identifies the columns a Book provides. Intended to provide a way to access arbitrary columns,
+/// for the sake of bulk operations which access specific columns.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ColumnIdentifier {
     Title,
@@ -59,7 +60,8 @@ impl RawBook {
     /// * ` path ` - The path to the file of interest.
     ///
     /// # Errors
-    /// Will return an error if `path` is not a file.
+    /// Will return an error if `path` is not a file, or if it is of an unsupported
+    /// filetype - eg. .txt, .jpg.
     pub fn generate_from_file<P>(path: P) -> Result<RawBook, BookError>
     where
         P: AsRef<path::Path>,
@@ -165,8 +167,8 @@ impl RawBook {
     /// Sets specified columns, to the specified value. Titles will be stored directly,
     /// authors will be stored as a list containing a single author.
     /// ID and Variants can not be modified through `set_column`.
-    /// Series will be parsed to extract an index - strings in the form "series ... [num]"
-    /// will be parsed as ("series ...", num).
+    /// Series will be parsed to extract an index - strings in the form "series [num]"
+    /// will be parsed as ("series", num).
     ///
     /// All remaining arguments will be stored literally.
     ///
@@ -305,7 +307,7 @@ impl RawBook {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-/// A `RawBook`, and associated ID.
+/// Stores an underlying `RawBook`, alongside an associated ID.
 pub struct Book {
     id: Option<BookID>,
     raw_book: RawBook,
@@ -356,11 +358,9 @@ impl Book {
 }
 
 impl Book {
-    /// Generates a book with the given ID - intended to be used as a placeholder
-    /// to allow reducing the run-time of specific operations.
-    ///
-    /// # Arguments
-    /// * ` id ` - the id to assign this book.
+    /// Generates a placeholder book, which should not be used except as a way to reduce
+    /// the run-time of specific operations. Placeholders do not have an ID, and calling
+    /// get_id() on a placeholder will result in a panic.
     pub fn placeholder() -> Book {
         Book {
             id: None,
@@ -368,6 +368,7 @@ impl Book {
         }
     }
 
+    /// Returns true if `self` is a placeholder
     pub fn is_placeholder(&self) -> bool {
         self.id.is_none()
     }
@@ -385,6 +386,10 @@ impl Book {
         self.id.map(u64::from).unwrap_or(0)
     }
 
+    /// Returns the ID, which can be used as an index.
+    ///
+    /// # Errors
+    /// Will panic if `self` was created by placeholder.
     pub fn get_id(&self) -> BookID {
         self.id.expect("Called get_id on placeholder book.")
     }

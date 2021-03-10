@@ -47,21 +47,23 @@ pub trait AppDatabase {
     /// * ` file_path ` - A path to a database.
     ///
     /// # Errors
-    /// This function will return an error if the file can not be found, or the database
-    /// is itself invalid.
+    /// This function will return an error if the file points to an invalid database.
     fn open<P>(file_path: P) -> Result<Self, DatabaseError<Self::Error>>
     where
         P: AsRef<path::Path>,
         Self: Sized;
 
     fn path(&self) -> &path::Path;
+
     /// Saves the database to its original location.
     ///
     /// # Errors
     /// This function will return an error if the database can not be saved correctly.
     fn save(&mut self) -> Result<(), DatabaseError<Self::Error>>;
 
-    /// Inserts the given book into the database, setting the ID automatically.
+    /// Inserts the given book into the database, setting the ID automatically. The ID set
+    /// will be returned, and calling other `AppDatabase` methods which take `BookID` with the
+    /// given ID will perform functions on, or return the same book.
     ///
     /// # Arguments
     /// * ` book ` - A book to be stored.
@@ -73,10 +75,10 @@ pub trait AppDatabase {
     /// Stores each book into the database, and returns a Vec of corresponding IDs.
     ///
     /// # Arguments
-    /// * ` books ` - One or more books to be stored.
+    /// * ` books ` - Some number of books to be stored.
     ///
     /// # Errors
-    /// This function will return an error if the database fails
+    /// This function will return an error if the books can not be inserted into the database.
     fn insert_books(
         &mut self,
         books: Vec<RawBook>,
@@ -91,11 +93,11 @@ pub trait AppDatabase {
     /// This function will return an error if the database fails.
     fn remove_book(&mut self, id: BookID) -> Result<(), DatabaseError<Self::Error>>;
 
-    /// Removes all books with the given IDs. If a book with a given ID does not exist, no change
-    /// for that particular ID.
+    /// Removes all books with the given IDs. If a book with a given ID does not exist, or an ID
+    /// is repeated, no changes will occur for that particular ID.
     ///
     /// # Arguments
-    /// * ` ids ` - An iterator yielding the IDs of the book to be removed.
+    /// * ` ids ` - A HashSet containing the IDs of the book to be removed.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
@@ -118,7 +120,7 @@ pub trait AppDatabase {
     /// None is returned for that particular ID.
     ///
     /// # Arguments
-    /// * ` ids ` - The IDs of the book to be removed.
+    /// * ` ids ` - An iterator yielding the IDs of the books to be returned.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
@@ -127,7 +129,7 @@ pub trait AppDatabase {
         ids: I,
     ) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError<Self::Error>>;
 
-    /// Returns a copy of every book in the database. If a database error occurs while reading,
+    /// Returns a reference to every book in the database. If a database error occurs while reading,
     /// the error is returned.
     ///
     /// # Errors
@@ -140,17 +142,17 @@ pub trait AppDatabase {
     /// * ` col ` - The column to check.
     fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>>;
 
-    /// Finds the book with the given ID, then sets the given value for the book to `new_value`.
-    /// If all steps are successful, returns a copy of the book to use, otherwise returning
-    /// the appropriate error.
+    /// Finds the book with the given ID, then, for each pair of strings (field, new_value)
+    /// in `edits`, set the corresponding field to new_value. If a given field is immutable,
+    /// or some other failure occurs, an error will be returned.
     ///
     /// # Arguments
     /// * ` id ` - The ID of the book to be edited.
-    /// * ` column ` - The field in the book to modify.
-    /// * ` new_value ` - The value to set the field to.
+    /// * ` edits ` - A set of <field, value> pairs to set in the book.
     ///
     /// # Errors
-    /// This function will return an error if updating the database fails.
+    /// This function will return an error if updating the database fails, or a field can not
+    /// be set.
     fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
         &mut self,
         id: BookID,
@@ -165,13 +167,15 @@ pub trait AppDatabase {
     /// This function will return an error if updating the database fails.
     fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>>;
 
-    /// Finds books, using the match to compare the specified column to the search string.
+    /// Finds all books, which satisfy all provided `Search` items in `searches`, and returns them
+    /// in a Vec<>.
     ///
     /// # Arguments
     /// * ` searches ` - Some number of search queries.
     ///
     /// # Errors
-    /// This function will return an error if the database fails.
+    /// This function will return an error if the database fails, or if a member of `searches`
+    /// is malformed.
     fn find_matches(
         &self,
         searches: &[Search],
@@ -189,10 +193,11 @@ pub trait AppDatabase {
         searches: &[Search],
     ) -> Result<Option<usize>, DatabaseError<Self::Error>>;
 
-    /// Sorts books by comparing the specified columns and reverses.
+    /// Sorts books by comparing the specified column, and sorting in order of `reverse`.
     ///
     /// # Arguments
-    ///
+    /// * ` columns ` - A collection of (Column, bool) pairs, specifying a column to sort on, and
+    /// whether the column should be reversed or not.
     /// # Errors
     /// This function will return an error if the database fails.
     fn sort_books_by_cols<S: AsRef<str>>(
@@ -203,8 +208,9 @@ pub trait AppDatabase {
     /// Returns the number of books stored internally.
     fn size(&self) -> usize;
 
-    /// Returns true if the internal database is persisted to file.
-    /// Note that at the moment, any write action will unset the saved state.
+    /// Returns true if the internal database is persisted to file, but does not necessarily indicate
+    /// that it has been changed - eg. if a change is immediately undone, the database may still
+    /// be marked as unsaved.
     fn saved(&self) -> bool;
 }
 
@@ -244,12 +250,13 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     /// This function will return an error if updating the database fails.
     fn remove_book_indexed(&mut self, index: usize) -> Result<(), DatabaseError<Self::Error>>;
 
-    /// Edit the book at the current index, respecting the current ordering.
+    /// Finds the book at the given index, then, for each pair of strings (field, new_value)
+    /// in `edits`, set the corresponding field to new_value. If a given field is immutable,
+    /// or some other failure occurs, an error will be returned.
     ///
     /// # Arguments
-    /// * ` index ` - the index of the book to remove
-    /// * ` column ` - the column to modify
-    /// * ` new_value ` - the value to set the column to.
+    /// * ` id ` - The ID of the book to be edited.
+    /// * ` edits ` - A set of <field, value> pairs to set in the book.
     ///
     /// # Errors
     /// This function will return an error if updating the database fails.
