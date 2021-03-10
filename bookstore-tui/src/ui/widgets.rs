@@ -13,6 +13,74 @@ use bookstore_records::Book;
 
 use crate::ui::scrollable_text::BlindOffset;
 
+#[derive(Default)]
+pub struct StyleRules {
+    pub default: Style,
+    pub selected: Style,
+    pub cursor: Style,
+}
+
+impl StyleRules {
+    pub fn add_modifier(self, modifier: Modifier) -> Self {
+        self.add_default_modifier(modifier)
+            .add_cursor_modifier(modifier)
+            .add_selected_modifier(modifier)
+    }
+
+    pub fn add_cursor_modifier(mut self, modifier: Modifier) -> Self {
+        self.cursor = self.cursor.add_modifier(modifier);
+        self
+    }
+
+    pub fn add_selected_modifier(mut self, modifier: Modifier) -> Self {
+        self.selected = self.selected.add_modifier(modifier);
+        self
+    }
+
+    pub fn add_default_modifier(mut self, modifier: Modifier) -> Self {
+        self.default = self.default.add_modifier(modifier);
+        self
+    }
+
+    pub fn bg(self, color: Color) -> Self {
+        self.cursor_bg(color).default_bg(color).selected_bg(color)
+    }
+
+    pub fn fg(self, color: Color) -> Self {
+        self.cursor_fg(color).default_fg(color).selected_fg(color)
+    }
+
+    pub fn cursor_bg(mut self, color: Color) -> Self {
+        self.cursor = self.cursor.bg(color);
+        self
+    }
+
+    pub fn cursor_fg(mut self, color: Color) -> Self {
+        self.cursor = self.cursor.fg(color);
+        self
+    }
+
+    pub fn default_bg(mut self, color: Color) -> Self {
+        self.default = self.default.bg(color);
+        self
+    }
+
+    pub fn default_fg(mut self, color: Color) -> Self {
+        self.default = self.default.fg(color);
+        self
+    }
+
+    pub fn selected_bg(mut self, color: Color) -> Self {
+        self.selected = self.selected.bg(color);
+        self
+    }
+
+    pub fn selected_fg(mut self, color: Color) -> Self {
+        self.selected = self.selected.fg(color);
+        self
+    }
+}
+
 pub(crate) trait Widget<B: Backend> {
     /// Renders the widget into the frame, using the provided space.
     ///
@@ -33,6 +101,67 @@ impl<'a> CommandWidget<'a> {
     }
 }
 
+/// Takes the CharChunk and styles it with the provided styling rules.
+fn char_chunks_to_styled_text(c: CharChunks, styles: StyleRules) -> Spans {
+    let mut text = vec![];
+    match c {
+        CharChunks::Selected(before, inside, after, direction) => {
+            text.push(Span::styled(
+                before.iter().collect::<String>(),
+                styles.default,
+            ));
+            match direction {
+                Direction::Left => match inside.split_first() {
+                    None => unreachable!(),
+                    Some((&cursor, rest)) => {
+                        text.push(Span::styled(String::from(cursor), styles.cursor));
+                        text.push(Span::styled(
+                            rest.iter().collect::<String>(),
+                            styles.selected,
+                        ));
+                        text.push(Span::styled(
+                            after.iter().collect::<String>(),
+                            styles.default,
+                        ));
+                    }
+                },
+                Direction::Right => {
+                    text.push(Span::styled(
+                        inside.iter().collect::<String>(),
+                        styles.selected,
+                    ));
+                    match after.split_first() {
+                        None => {
+                            text.push(Span::styled(String::from(" "), styles.cursor));
+                        }
+                        Some((&cursor, rest)) => {
+                            text.push(Span::styled(String::from(cursor), styles.cursor));
+                            text.push(Span::styled(
+                                rest.iter().collect::<String>(),
+                                styles.default,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        CharChunks::Unselected(before, after) => {
+            text.push(Span::styled(
+                before,
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+            if after.is_empty() {
+                text.push(Span::styled(String::from(" "), styles.cursor));
+            } else {
+                let (cursor, rest) = after.split_at(1);
+                text.push(Span::styled(cursor.to_string(), styles.cursor));
+                text.push(Span::styled(rest.to_string(), styles.default));
+            }
+        }
+    }
+    Spans::from(text)
+}
+
 impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
     /// Renders the command string into the frame, sized according to the chunk.
     ///
@@ -47,72 +176,18 @@ impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
                 Style::default().add_modifier(Modifier::BOLD),
             ))
         } else {
-            let cursor_style = Style::default()
-                .bg(Color::White)
-                .fg(Color::Black)
-                .add_modifier(Modifier::RAPID_BLINK);
-            let default_style = Style::default().add_modifier(Modifier::BOLD);
-            let selection_style = Style::default()
-                .bg(Color::Blue)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD);
-            let mut text = vec![];
-            match self.command_string.char_chunks() {
-                CharChunks::Selected(before, inside, after, direction) => {
-                    text.push(Span::styled(
-                        before.iter().collect::<String>(),
-                        default_style,
-                    ));
-                    match direction {
-                        Direction::Left => match inside.split_first() {
-                            None => unreachable!(),
-                            Some((&cursor, rest)) => {
-                                text.push(Span::styled(String::from(cursor), cursor_style));
-                                text.push(Span::styled(
-                                    rest.iter().collect::<String>(),
-                                    selection_style,
-                                ));
-                                text.push(Span::styled(
-                                    after.iter().collect::<String>(),
-                                    default_style,
-                                ));
-                            }
-                        },
-                        Direction::Right => {
-                            text.push(Span::styled(
-                                inside.iter().collect::<String>(),
-                                selection_style,
-                            ));
-                            match after.split_first() {
-                                None => {
-                                    text.push(Span::styled(String::from(" "), cursor_style));
-                                }
-                                Some((&cursor, rest)) => {
-                                    text.push(Span::styled(String::from(cursor), cursor_style));
-                                    text.push(Span::styled(
-                                        rest.iter().collect::<String>(),
-                                        default_style,
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
-                CharChunks::Unselected(before, after) => {
-                    text.push(Span::styled(
-                        before,
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ));
-                    if after.is_empty() {
-                        text.push(Span::styled(String::from(" "), cursor_style));
-                    } else {
-                        let (cursor, rest) = after.split_at(1);
-                        text.push(Span::styled(cursor.to_string(), cursor_style));
-                        text.push(Span::styled(rest.to_string(), default_style));
-                    }
-                }
-            }
-            Paragraph::new(Spans::from(text))
+            let styles = StyleRules::default()
+                .add_modifier(Modifier::BOLD)
+                .cursor_fg(Color::Black)
+                .cursor_bg(Color::White)
+                .add_cursor_modifier(Modifier::SLOW_BLINK)
+                .selected_fg(Color::White)
+                .selected_bg(Color::Blue);
+
+            Paragraph::new(char_chunks_to_styled_text(
+                self.command_string.char_chunks(),
+                styles,
+            ))
         };
         f.render_widget(command_widget, chunk);
     }
