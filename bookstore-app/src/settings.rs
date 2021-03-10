@@ -403,6 +403,11 @@ impl Settings {
             navigation: Some(self.navigation_settings.clone().into()),
             database: Some(self.database_settings.clone().into()),
         };
-        std::fs::write(file, toml::to_string(&value).unwrap().as_bytes())
+        std::fs::write(
+            file,
+            toml::to_string(&value)
+                .expect("Unknown error when serializing settings.")
+                .as_bytes(),
+        )
     }
 }

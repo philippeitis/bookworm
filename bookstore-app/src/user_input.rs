@@ -529,9 +529,9 @@ pub enum Direction {
 
 #[derive(Default)]
 struct CursoredText {
-    pub cursor: usize,
-    pub selection: Option<(NonZeroUsize, Direction)>,
-    pub text: Vec<char>,
+    cursor: usize,
+    selection: Option<(NonZeroUsize, Direction)>,
+    text: Vec<char>,
 }
 
 impl CursoredText {
@@ -630,7 +630,8 @@ impl CursoredText {
 
         self.selection = match self.selection {
             Some((x, Direction::Left)) => {
-                let size = NonZeroUsize::try_from(1 + usize::from(x)).unwrap();
+                let size =
+                    NonZeroUsize::try_from(1 + usize::from(x)).expect("Overflowed selection");
                 Some((size, Direction::Left))
             }
             Some((x, Direction::Right)) => {
@@ -638,7 +639,8 @@ impl CursoredText {
                 size.map(|x| (x, Direction::Right))
             }
             None => {
-                let size = NonZeroUsize::try_from(1).unwrap();
+                let size = NonZeroUsize::try_from(1)
+                    .expect("Cosmic rays or other such events have caused this error.");
                 Some((size, Direction::Left))
             }
         };
@@ -671,11 +673,13 @@ impl CursoredText {
                 size.map(|x| (x, Direction::Left))
             }
             Some((x, Direction::Right)) => {
-                let size = NonZeroUsize::try_from(1 + usize::from(x)).unwrap();
+                let size = NonZeroUsize::try_from(1 + usize::from(x))
+                    .expect("User should never select >= 2^32 characters");
                 Some((size, Direction::Right))
             }
             None => {
-                let size = NonZeroUsize::try_from(1).unwrap();
+                let size = NonZeroUsize::try_from(1)
+                    .expect("Cosmic rays or other such events have caused this error.");
                 Some((size, Direction::Right))
             }
         };

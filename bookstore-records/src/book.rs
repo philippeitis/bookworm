@@ -361,14 +361,14 @@ impl Book {
     ///
     /// # Arguments
     /// * ` id ` - the id to assign this book.
-    pub fn dummy() -> Book {
+    pub fn placeholder() -> Book {
         Book {
             id: None,
             raw_book: RawBook::default(),
         }
     }
 
-    pub fn is_dummy(&self) -> bool {
+    pub fn is_placeholder(&self) -> bool {
         self.id.is_none()
     }
 
@@ -385,7 +385,7 @@ impl Book {
     }
 
     pub fn get_id(&self) -> BookID {
-        self.id.unwrap()
+        self.id.expect("Called get_id on placeholder book.")
     }
 }
 

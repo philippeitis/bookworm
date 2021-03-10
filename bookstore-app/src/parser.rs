@@ -490,7 +490,7 @@ mod test {
 
         for (args, command) in args {
             let args: Vec<_> = args.into_iter().map(|s| s.to_owned()).collect();
-            let res = parse_args(args.clone()).unwrap();
+            let res = parse_args(args.clone()).expect("Parsing provided args should not fail");
             assert_eq!(res, command, "from {:?} expected {:?}", args, command);
         }
     }

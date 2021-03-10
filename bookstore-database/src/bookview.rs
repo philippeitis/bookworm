@@ -365,10 +365,11 @@ impl<D: IndexableDatabase> ScrollableBookView<D> for SearchableBookView<D> {
                     let matcher = search.clone().into_matcher()?;
                     results.retain(|book| matcher.is_match(&book!(book)));
                 }
-                results
-                    .first()
-                    .cloned()
-                    .map(|b| books.get_index_of(&book!(b).get_id()).unwrap())
+                results.first().cloned().map(|b| {
+                    books
+                        .get_index_of(&book!(b).get_id())
+                        .expect("Reference to existing book was invalidated during search.")
+                })
             }
         };
 

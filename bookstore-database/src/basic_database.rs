@@ -403,12 +403,9 @@ mod test {
         for i in 1..1000 {
             let i = BookID::try_from(i).unwrap();
             let get_book = db.get_book(i);
-            assert!(get_book.is_err());
-            match get_book.unwrap_err() {
-                DatabaseError::BookNotFound(id) => {
-                    assert_eq!(i, id);
-                }
-                _ => panic!("Expected BookNotFoundError"),
+            match get_book.expect_err("Expected BookNotFoundError") {
+                DatabaseError::BookNotFound(id) => assert_eq!(i, id),
+                e => panic!("Unexpected error type. {:?}", e),
             }
         }
     }

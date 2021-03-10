@@ -6,7 +6,10 @@ use bookstore_records::book::ColumnIdentifier;
 
 macro_rules! book {
     ($book: ident) => {
-        $book.as_ref().read().unwrap()
+        $book
+            .as_ref()
+            .read()
+            .expect("Failed to acquire read-only lock on book.")
     };
 }
 

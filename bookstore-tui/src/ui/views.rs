@@ -79,9 +79,10 @@ fn to_tui(c: bookstore_app::settings::Color) -> tui::style::Color {
     }
 }
 
+// TODO: Gracefully handle these errors.
 #[cfg(feature = "copypaste")]
 fn paste_into_clipboard(a: &str) {
-    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+    let mut ctx: ClipboardContext = ClipboardProvider::new().expect("Failed to acquire clipboard.");
     let _ = ctx.set_contents(a.to_owned());
 }
 
@@ -90,7 +91,7 @@ fn paste_into_clipboard(_a: &str) {}
 
 #[cfg(feature = "copypaste")]
 fn copy_from_clipboard() -> Option<String> {
-    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+    let mut ctx: ClipboardContext = ClipboardProvider::new().expect("Failed to acquire clipboard.");
     ctx.get_contents().ok()
 }
 
@@ -603,7 +604,11 @@ impl<D: IndexableDatabase> EditWidget<D> {
 
     /// Used when column has been changed and edit should reflect new column's value.
     fn reset_edit(&mut self) {
-        let value = self.state().get_selected_table_value().unwrap().to_owned();
+        let value = self
+            .state()
+            .get_selected_table_value()
+            .expect("Selected value should exist when in edit mode.")
+            .to_owned();
         self.edit = EditState::new(value);
     }
 }
@@ -632,7 +637,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
 
         let edit_style = state.style.edit_style();
         let select_style = state.style.select_style();
-        let selected = state.selected().unwrap();
+        let selected = state.selected().expect("EditWidget should only exist when items are selected");
 
         let style_rules = StyleRules {
             cursor: state.style.cursor_style(),

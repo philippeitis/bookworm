@@ -227,8 +227,11 @@ impl BookWidget {
         let width = self.chunk.width as usize;
         let field_exists = Style::default().add_modifier(Modifier::BOLD);
         let field_not_provided = Style::default();
-
-        let book = self.book.as_ref().read().unwrap();
+        let book = self
+            .book
+            .as_ref()
+            .read()
+            .expect("Failed to acquire read-only lock on book.");
         // Can the current directory change? Who knows. Definitely not me.
         let prefix = match std::env::current_dir() {
             Ok(d) => d.canonicalize().ok(),

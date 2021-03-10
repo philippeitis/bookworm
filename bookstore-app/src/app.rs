@@ -35,7 +35,10 @@ subprocess.Popen(f'{path} /select,"{sys.argv[1]}"')
 
 macro_rules! book {
     ($book: ident) => {
-        $book.as_ref().read().unwrap()
+        $book
+            .as_ref()
+            .read()
+            .expect("Failed to acquire read-only lock on book.")
     };
 }
 
@@ -257,12 +260,8 @@ impl<D: IndexableDatabase> App<D> {
         edits: &[(S0, S1)],
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
-        let id = book_view
-            .get_selected_book()?
-            .as_ref()
-            .read()
-            .unwrap()
-            .get_id();
+        let book = book_view.get_selected_book()?;
+        let id = book!(book).get_id();
         self.edit_book_with_id(id, edits)
     }
 

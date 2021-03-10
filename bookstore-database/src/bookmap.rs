@@ -12,13 +12,19 @@ use unicase::UniCase;
 
 macro_rules! book {
     ($book: ident) => {
-        $book.as_ref().read().unwrap()
+        $book
+            .as_ref()
+            .read()
+            .expect("Failed to acquire read-only lock on book.")
     };
 }
 
 macro_rules! book_mut {
     ($book: ident) => {
-        $book.as_ref().write().unwrap()
+        $book
+            .as_ref()
+            .write()
+            .expect("Failed to acquire read-write lock on book.")
     };
 }
 
@@ -51,14 +57,11 @@ impl BookMap {
     /// Will panic if the ID can no longer be correctly increased.
     fn new_id(&mut self) -> BookID {
         let id = self.max_id;
-        if self.max_id == u64::MAX {
-            panic!(
-                "Current ID is at maximum value of {} and can not be increased.",
-                u32::MAX
-            );
-        }
-        self.max_id += 1;
-        BookID::try_from(id).unwrap()
+        self.max_id = self
+            .max_id
+            .checked_add(1)
+            .expect("Current ID is at maximum value and can not be increased.");
+        BookID::try_from(id).expect("Attempted to return an invalid ID.")
     }
 }
 
@@ -174,11 +177,11 @@ impl BookMap {
             }
         }
 
-        let dummy = Arc::new(RwLock::new(Book::dummy()));
+        let placeholder = Arc::new(RwLock::new(Book::placeholder()));
         for (b1, b2_id) in merges.iter() {
             // Dummy allows for O(n) time book removal while maintaining sort
             // and getting owned copy of book.
-            let b2 = self.books.insert(*b2_id, dummy.clone());
+            let b2 = self.books.insert(*b2_id, placeholder.clone());
             // b1, b2 always exist: ref_map only stores b1, and any given b2 can only merge into
             // a b1, and never a b2, and a b1 never merges into b2, since b1 comes first.
             if let Some(b1) = self.books.get_mut(b1) {
@@ -187,7 +190,7 @@ impl BookMap {
                 }
             }
         }
-        self.books.retain(|_, book| !book!(book).is_dummy());
+        self.books.retain(|_, book| !book!(book).is_placeholder());
         merges
     }
 
@@ -216,9 +219,13 @@ impl BookMap {
             let matcher = search.clone().into_matcher()?;
             results.retain(|book| matcher.is_match(&book!(book)));
         }
-        Ok(results
-            .first()
-            .map(|b| self.books.get_index_of(&book!(b).get_id()).unwrap()))
+
+        // get_index_of should not fail - book ID is immutable, and books should not be changed.
+        Ok(results.first().map(|b| {
+            self.books
+                .get_index_of(&book!(b).get_id())
+                .expect("Reference to existing book was invalidated during search.")
+        }))
     }
 
     pub fn sort_books_by_cols<S: AsRef<str>>(&mut self, cols: &[(S, bool)]) {

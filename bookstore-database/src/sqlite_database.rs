@@ -152,7 +152,11 @@ impl From<BookData> for Book {
             series: bd.series_name.as_ref().map(|sn| (sn.clone(), bd.series_id)),
             ..Default::default()
         };
-        Book::from_raw_book(NonZeroU64::try_from(bd.book_id as u64).unwrap(), rb)
+        Book::from_raw_book(
+            NonZeroU64::try_from(bd.book_id as u64)
+                .expect("SQLite database returned NULL primary ID."),
+            rb,
+        )
     }
 }
 
@@ -280,16 +284,16 @@ impl SQLiteDatabase {
                 let variants = book.get_variants();
                 if !variants.is_empty() {
                     for variant in variants {
-                        let book_type = ron::to_string(variant.book_type()).unwrap();
+                        let book_type = ron::to_string(variant.book_type())
+                            .expect("Serialization of value should never fail.");
                         #[cfg(unix)]
                         let path = variant.path().as_os_str().as_bytes();
                         #[cfg(windows)]
                         let path = v16_to_v8(variant.path().as_os_str().encode_wide().collect());
                         let local_title = &variant.local_title;
-                        let identifier = variant
-                            .identifier
-                            .as_ref()
-                            .map(|i| ron::to_string(i).unwrap());
+                        let identifier = variant.identifier.as_ref().map(|i| {
+                            ron::to_string(i).expect("Serialization of value should never fail.")
+                        });
                         let language = &variant.language;
                         let description = &variant.description;
                         let sub_id = &variant.id;
@@ -320,7 +324,8 @@ impl SQLiteDatabase {
                     sqlx::query(&query).execute(&mut tx).await?;
                 }
 
-                let id = BookID::try_from(id as u64).unwrap();
+                let id = BookID::try_from(id as u64)
+                    .expect("SQLite database should never return NULL ID from primary key.");
                 self.local_cache
                     .insert_book_with_id(Book::from_raw_book(id, book));
 
