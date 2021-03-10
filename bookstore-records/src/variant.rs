@@ -67,6 +67,8 @@ pub struct BookVariant {
     pub translators: Option<Vec<String>>,
     pub description: Option<String>,
     pub id: Option<u32>,
+    #[cfg(feature = "hash")]
+    pub hash: Option<[u8; 32]>,
 }
 
 impl BookVariant {
@@ -115,6 +117,8 @@ impl BookVariant {
             translators: None,
             description: None,
             id: None,
+            #[cfg(feature = "hash")]
+            hash: None,
         };
 
         let _ = book.fill_in_metadata();
@@ -133,8 +137,33 @@ impl BookVariant {
 
     /// Fills in the metadata for book from the internal book type.
     fn fill_in_metadata(&mut self) -> Result<(), BookError> {
+        #[cfg(feature = "hash")]
+        let mut reader = {
+            use sha2::{Digest, Sha256};
+            use std::io::Read;
+
+            let file = std::fs::File::open(&self.path)?;
+            let len = file.metadata()?.len();
+            let bytes_to_read = (len as usize).min(4096);
+
+            let mut reader = std::io::BufReader::with_capacity(bytes_to_read, file);
+            let mut buf = [0; 4096];
+
+            reader.read_exact(&mut buf[..bytes_to_read])?;
+            reader.seek_relative(-(bytes_to_read as i64))?;
+
+            let mut hasher = Sha256::new();
+            hasher.update(&buf[..bytes_to_read]);
+            let res = hasher.finalize();
+            self.hash = Some(res.into());
+
+            reader
+        };
         match &self.book_type {
             BookType::EPUB => {
+                #[cfg(feature = "hash")]
+                let metadata = EpubMetadata::from_read(&mut reader)?;
+                #[cfg(not(feature = "hash"))]
                 let metadata = EpubMetadata::open(&self.path)?;
 
                 if self.local_title.is_none() {
@@ -173,6 +202,9 @@ impl BookVariant {
                 Ok(())
             }
             BookType::MOBI => {
+                #[cfg(feature = "hash")]
+                let doc = MobiMetadata::from_read(&mut reader)?;
+                #[cfg(not(feature = "hash"))]
                 let doc = MobiMetadata::from_path(&self.path)?;
                 if self.additional_authors.is_none() {
                     if let Some(author) = doc.author() {

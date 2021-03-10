@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "sha2", feature(bufreader_seek_relative))]
 pub mod book;
 pub mod error;
 pub mod variant;
