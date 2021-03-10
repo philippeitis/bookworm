@@ -102,6 +102,7 @@ impl BookMap {
     }
 
     pub fn clear(&mut self) {
+        self.max_id = 1;
         self.books.clear();
     }
 
