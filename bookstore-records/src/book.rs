@@ -78,6 +78,13 @@ impl RawBook {
             return Err(BookError::FileError);
         }
 
+        Self::generate_from_file_trusted(path)
+    }
+
+    pub fn generate_from_file_trusted<P>(path: P) -> Result<RawBook, BookError>
+    where
+        P: AsRef<path::Path>,
+    {
         let mut book = RawBook::default();
 
         let mut variant = BookVariant::generate_from_file(path)?;
