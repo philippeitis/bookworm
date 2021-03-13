@@ -373,6 +373,17 @@ impl From<DatabaseSettings> for TomlDatabase {
     }
 }
 
+pub struct InterfaceSettings {
+    pub interface_style: InterfaceStyle,
+    pub columns: Vec<String>,
+    pub navigation_settings: NavigationSettings,
+}
+
+pub struct AppSettings {
+    pub sort_settings: SortSettings,
+    pub database_settings: DatabaseSettings,
+}
+
 impl Settings {
     /// Opens the settings at the provided location, and fills in missing settings from default
     /// values.
@@ -389,8 +400,8 @@ impl Settings {
         Ok(Settings {
             interface_style: value.colors.unwrap_or_default().into(),
             columns: value.layout.unwrap_or_default().into(),
-            sort_settings: value.sorting.unwrap_or_default().into(),
             navigation_settings: value.navigation.unwrap_or_default().into(),
+            sort_settings: value.sorting.unwrap_or_default().into(),
             database_settings: value.database.unwrap_or_default().into(),
         })
     }
@@ -409,5 +420,19 @@ impl Settings {
                 .expect("Unknown error when serializing settings.")
                 .as_bytes(),
         )
+    }
+
+    pub fn split(self) -> (InterfaceSettings, AppSettings) {
+        let interface_settings = InterfaceSettings {
+            interface_style: self.interface_style,
+            columns: self.columns,
+            navigation_settings: self.navigation_settings,
+        };
+        let app_settings = AppSettings {
+            sort_settings: self.sort_settings,
+            database_settings: self.database_settings,
+        };
+
+        (interface_settings, app_settings)
     }
 }

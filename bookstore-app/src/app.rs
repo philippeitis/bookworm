@@ -218,10 +218,10 @@ pub struct App<D: AppDatabase> {
 }
 
 impl<D: IndexableDatabase> App<D> {
-    pub fn new(db: D) -> Self {
+    pub fn new(db: D, sort_settings: SortSettings) -> Self {
         App {
             db: Rc::new(RefCell::new(db)),
-            sort_settings: SortSettings::default(),
+            sort_settings,
             updated: true,
             active_help_string: None,
         }

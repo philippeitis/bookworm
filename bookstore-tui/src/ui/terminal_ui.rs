@@ -11,7 +11,9 @@ use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::Terminal;
 
-use bookstore_app::settings::{DatabaseSettings, InterfaceStyle, NavigationSettings, Settings};
+use bookstore_app::settings::{
+    DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings,
+};
 use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, EditState};
 use bookstore_app::{App, ApplicationError};
@@ -116,7 +118,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     /// None.
     pub(crate) fn new<S: AsRef<str>>(
         name: S,
-        settings: Settings,
+        settings: InterfaceSettings,
         settings_path: Option<PathBuf>,
         app: App<D>,
     ) -> Self {

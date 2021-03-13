@@ -48,27 +48,35 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
         }
     };
 
-    let (settings, settings_path) = if let Some(path) = opts.settings {
-        (Settings::open(&path).unwrap_or_default(), Some(path))
+    let Opts { settings, database } = opts;
+    let ((interface_settings, mut app_settings), settings_path) = if let Some(path) = settings {
+        (
+            Settings::open(&path).unwrap_or_default().split(),
+            Some(path),
+        )
     } else {
         if let Some(mut path) = dirs::config_dir() {
             path.push("bookstore/settings.toml");
-            (Settings::open(&path).unwrap_or_default(), Some(path))
+            (
+                Settings::open(&path).unwrap_or_default().split(),
+                Some(path),
+            )
         } else {
-            (Settings::default(), None)
+            (Settings::default().split(), None)
         }
     };
 
-    if let Some(p) = settings.database_settings.path.parent() {
+    if let Some(path) = database {
+        app_settings.database_settings.path = path;
+    }
+
+    if let Some(p) = app_settings.database_settings.path.parent() {
         std::fs::create_dir_all(p)?;
     }
-    let db = Database::open(
-        opts.database
-            .as_ref()
-            .unwrap_or(&settings.database_settings.path),
-    )?;
 
-    let mut app = App::new(db);
+    let db = Database::open(&app_settings.database_settings.path)?;
+
+    let mut app = App::new(db, app_settings.sort_settings);
     let mut placeholder_table_view = TableView::default();
     let mut book_view = app.new_book_view();
     if !command.is_empty() {
@@ -91,8 +99,15 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
         }
     }
 
+    // Goes before due to lifetime issues.
     let stdout = stdout();
-    let mut app = AppInterface::new("Really Cool Library", settings, settings_path, app);
+
+    let mut app = AppInterface::new(
+        "Really Cool Library",
+        interface_settings,
+        settings_path,
+        app,
+    );
 
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;
