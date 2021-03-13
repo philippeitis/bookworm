@@ -191,24 +191,6 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-// fn books_in_dir<P: AsRef<Path>>(dir: P) -> Result<Vec<RawBook>, std::io::Error> {
-//     use futures::future::join_all;
-//     use futures::executor::block_on;
-//
-//     let start = std::time::Instant::now();
-//     let books = block_on(join_all(fs::read_dir(dir)?
-//         .filter_map(|res| res.map(|e| e.path()).ok())
-//         .map(|p| async move { RawBook::generate_from_file(p) })))
-//         .into_iter()
-//         .filter_map(|x| x.ok())
-//         .collect();
-//
-//     let elapsed = start.elapsed().as_secs_f32();
-//     println!("{}", elapsed);
-//
-//     Ok(books)
-// }
-
 pub struct App<D: AppDatabase> {
     db: Rc<RefCell<D>>,
     active_help_string: Option<&'static str>,
