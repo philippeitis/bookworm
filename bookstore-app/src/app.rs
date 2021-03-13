@@ -158,7 +158,6 @@ fn open_book(book: &Book, index: usize) -> Result<(), std::io::Error> {
 /// This function may error if the book's variants do not exist,
 /// or if the command itself fails.
 fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
-    // TODO: This doesn't work when run with install due to relative paths.
     #[cfg(target_os = "windows")]
     if let Some(path) = get_book_path(book, index) {
         use std::io::Write;
@@ -193,8 +192,6 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
 }
 
 // fn books_in_dir<P: AsRef<Path>>(dir: P) -> Result<Vec<RawBook>, std::io::Error> {
-//     // TODO: Look at libraries with parallel directory reading.
-//     //  Handle errored reads somehow.
 //     use futures::future::join_all;
 //     use futures::executor::block_on;
 //

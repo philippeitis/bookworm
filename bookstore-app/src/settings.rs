@@ -68,8 +68,6 @@ impl Default for InterfaceStyle {
     }
 }
 
-// TODO: Consider removing sort settings from settings? Functionality is somewhat
-//  replicated by IndexMap
 #[derive(Debug, Clone)]
 pub struct SortSettings {
     pub columns: Box<[(UniCase<String>, bool)]>,

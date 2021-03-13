@@ -22,7 +22,6 @@ use bookstore_database::SQLiteDatabase as Database;
 
 use crate::ui::{AppInterface, TuiError};
 
-// TODO: PathBuf + SQLite DB? How should that situation be handled?
 #[derive(Clap)]
 #[clap(version = "0.1", author = "?")]
 struct Opts {
@@ -126,7 +125,7 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
 }
 
 // TODO:
-//  Live search & search by tags - sqllite? meillisearch?
+//  Live search & search by tags? meillisearch?
 //  Cloud sync support (eg. upload database to Google Drive / read from Google Drive)
 //  File conversion (mainly using calibre?)
 //  Help menu
@@ -136,7 +135,7 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
 //  Duplicate detection - use blake3 to hash first 4kb or something?
 //  Add automatic date column?
 //  Convert format to media, convert book to something else
-//  Infinite undo redo (!u, !r)
+//  Infinite undo redo (:u, :r)
 //  Pop-up notifications
 //  Documentation
 //  Testing

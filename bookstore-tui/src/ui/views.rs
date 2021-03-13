@@ -101,8 +101,6 @@ fn copy_from_clipboard() -> Option<String> {
 }
 
 // TODO: Add Find widget that does live searching as user types (but doesn't update if match isn't being changed).
-// TODO: Add text cursor and all related functionality.
-
 impl TuiStyle for InterfaceStyle {
     fn edit_style(&self) -> Style {
         Style::default()
@@ -697,12 +695,6 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
     ) -> Result<ApplicationTask, ApplicationError<D::Error>> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
-            // TODO: Should this behave more like Excel / Google Sheets:
-            // Up / down write and go up and down
-            // Enter writes and goes down
-            // Left Right write and go left and right
-            // F2 makes arrow keys stick in box
-            // tab writes and goes to next box.
             Event::Key(event) => {
                 match event.code {
                     KeyCode::F(2) => {
