@@ -399,7 +399,7 @@ impl AppDatabase for SQLiteDatabase {
     {
         let db_exists = file_path.as_ref().exists();
         if !db_exists {
-            if let Some(path) = file_path.parent() {
+            if let Some(path) = file_path.as_ref().parent() {
                 std::fs::create_dir_all(path)?;
             }
         }
