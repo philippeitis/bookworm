@@ -79,11 +79,18 @@ fn to_tui(c: bookstore_app::settings::Color) -> tui::style::Color {
     }
 }
 
-// TODO: Gracefully handle these errors.
+#[cfg(feature = "copypaste")]
+fn get_clipboard_provider() -> Option<ClipboardContext> {
+    ClipboardProvider::new().ok()
+}
+
 #[cfg(feature = "copypaste")]
 fn paste_into_clipboard(a: &str) {
-    let mut ctx: ClipboardContext = ClipboardProvider::new().expect("Failed to acquire clipboard.");
-    let _ = ctx.set_contents(a.to_owned());
+    if let Some(mut ctx) = get_clipboard_provider() {
+        let _ = ctx.set_contents(a.to_owned());
+    } else {
+        // How should we handle this case?
+    }
 }
 
 #[cfg(not(feature = "copypaste"))]
@@ -91,8 +98,12 @@ fn paste_into_clipboard(_a: &str) {}
 
 #[cfg(feature = "copypaste")]
 fn copy_from_clipboard() -> Option<String> {
-    let mut ctx: ClipboardContext = ClipboardProvider::new().expect("Failed to acquire clipboard.");
-    ctx.get_contents().ok()
+    if let Some(mut ctx) = get_clipboard_provider() {
+        ctx.get_contents().ok()
+    } else {
+        // How should we handle this case?
+        None
+    }
 }
 
 #[cfg(not(feature = "copypaste"))]
