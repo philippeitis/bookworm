@@ -107,7 +107,6 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
 
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
     crossterm::terminal::enable_raw_mode()?;
     execute!(
         &stdout,
