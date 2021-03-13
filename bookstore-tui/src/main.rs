@@ -70,10 +70,6 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
         app_settings.database_settings.path = path;
     }
 
-    if let Some(p) = app_settings.database_settings.path.parent() {
-        std::fs::create_dir_all(p)?;
-    }
-
     let db = Database::open(&app_settings.database_settings.path)?;
 
     let mut app = App::new(db, app_settings.sort_settings);

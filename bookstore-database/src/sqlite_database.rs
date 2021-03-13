@@ -398,6 +398,11 @@ impl AppDatabase for SQLiteDatabase {
         Self: Sized,
     {
         let db_exists = file_path.as_ref().exists();
+        if !db_exists {
+            if let Some(path) = file_path.parent() {
+                std::fs::create_dir_all(path)?;
+            }
+        }
         let database = block_on(async {
             SqliteConnectOptions::new()
                 .filename(&file_path)

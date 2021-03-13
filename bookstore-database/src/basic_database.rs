@@ -35,6 +35,10 @@ impl AppDatabase for BasicDatabase {
         P: AsRef<path::Path>,
     {
         let path = file_path.as_ref().to_path_buf();
+        if let Some(path) = path.parent() {
+            std::fs::create_dir_all(path)?;
+        }
+
         let backend = PathDatabase::<BookMap, Ron>::load_from_path_or_default(path.clone())
             .map_err(DatabaseError::Backend)?;
         let len = backend
