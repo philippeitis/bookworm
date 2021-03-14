@@ -768,6 +768,15 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                             self.reset_edit();
                         }
                     }
+                    KeyCode::BackTab => {
+                        self.dump_edit(app)?;
+                        if self.state().selected_column > 0 {
+                            self.state_mut().selected_column -= 1;
+                            // Only reset edit if changing columns
+                            self.reset_edit();
+                        }
+                    }
+
                     KeyCode::Enter => {
                         if !self.focused {
                             self.focused = true;
