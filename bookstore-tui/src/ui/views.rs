@@ -430,9 +430,9 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         self.state_mut().curr_command.backspace();
                     }
                     KeyCode::Char(x) => {
-                        if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
-                            match x {
-                                'v' => {
+                        if event.modifiers == KeyModifiers::CONTROL {
+                            match (x, cfg!(feature = "copypaste")) {
+                                ('v', true) => {
                                     let mut state = self.state_mut();
                                     if let Some(s) = copy_from_clipboard() {
                                         for c in s.chars() {
@@ -440,7 +440,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                         }
                                     }
                                 }
-                                'c' => {
+                                ('c', true) => {
                                     let state = self.state();
                                     if let Some(text) = state.curr_command.selected() {
                                         paste_into_clipboard(&text.iter().collect::<String>());
@@ -451,7 +451,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                         }
                                     }
                                 }
-                                'x' => {
+                                ('x', true) => {
                                     let mut state = self.state_mut();
                                     if let Some(text) = state.curr_command.selected() {
                                         paste_into_clipboard(&text.iter().collect::<String>());
@@ -464,13 +464,13 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                         state.curr_command.clear();
                                     }
                                 }
-                                'd' => {
+                                ('d', _) => {
                                     self.command_widget_selected = false;
                                     let mut state = self.state_mut();
                                     state.curr_command.deselect();
                                     state.book_view.deselect();
                                 }
-                                'a' => {
+                                ('a', _) => {
                                     self.state_mut().curr_command.select_all();
                                 }
                                 _ => self.state_mut().curr_command.push(x),
@@ -712,14 +712,14 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                         self.focused = true;
                     }
                     KeyCode::Char(c) => {
-                        if cfg!(feature = "copypaste") && event.modifiers == KeyModifiers::CONTROL {
-                            match c {
-                                'v' => {
+                        if event.modifiers == KeyModifiers::CONTROL {
+                            match (c, cfg!(feature = "copypaste")) {
+                                ('v', true) => {
                                     if let Some(s) = copy_from_clipboard() {
                                         self.edit.extend(&s);
                                     }
                                 }
-                                'c' => {
+                                ('c', true) => {
                                     if let Some(text) = self.edit.selected() {
                                         paste_into_clipboard(&text.iter().collect::<String>());
                                     } else {
@@ -729,7 +729,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                                         }
                                     }
                                 }
-                                'x' => {
+                                ('x', true) => {
                                     if let Some(text) = self.edit.selected() {
                                         paste_into_clipboard(&text.iter().collect::<String>());
                                         self.edit.del();
@@ -741,7 +741,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                                         self.edit.clear();
                                     }
                                 }
-                                'd' => {
+                                ('d', _) => {
                                     if self.focused {
                                         self.edit.deselect();
                                         self.focused = false;
@@ -749,7 +749,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                                         return Ok(ApplicationTask::SwitchView(AppView::Columns));
                                     }
                                 }
-                                'a' => {
+                                ('a', _) => {
                                     self.edit.select_all();
                                 }
                                 _ => {
