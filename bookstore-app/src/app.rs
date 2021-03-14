@@ -91,14 +91,12 @@ impl<DBError> From<CommandStringError> for ApplicationError<DBError> {
 
 // 0.75
 fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::io::Error> {
-    // TODO: Handle errored reads somehow.
-    //  Investigate whether path.is_file() is appropriate.
+    // TODO: Handle reads erroring out due to filesystem issues somehow.
     Ok(jwalk::WalkDir::new(std::fs::canonicalize(dir)?)
         .min_depth(0)
         .max_depth(depth as usize)
         .into_iter()
         .filter_map(|res| res.map(|e| e.path()).ok())
-        .filter(|path| path.is_file())
         .collect::<Vec<_>>()
         .par_iter()
         .filter_map(|path| RawBook::generate_from_file_trusted(path).ok())
