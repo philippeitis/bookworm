@@ -74,10 +74,6 @@ impl RawBook {
             }
         };
 
-        if !path.is_file() {
-            return Err(BookError::FileError);
-        }
-
         Self::generate_from_file_trusted(path)
     }
 

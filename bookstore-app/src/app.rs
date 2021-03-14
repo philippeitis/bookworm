@@ -89,7 +89,9 @@ impl<DBError> From<CommandStringError> for ApplicationError<DBError> {
     }
 }
 
-// 0.75
+// Benchmarks:
+// 5.3k books, Windows: 0.75s
+// 332 books, Linux: ~0.042s
 fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::io::Error> {
     // TODO: Handle reads erroring out due to filesystem issues somehow.
     Ok(jwalk::WalkDir::new(std::fs::canonicalize(dir)?)
