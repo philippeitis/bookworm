@@ -382,6 +382,95 @@ impl SQLiteDatabase {
         }
         tx.commit().await
     }
+
+    async fn edit_book_by_id_async<S0: AsRef<str>, S1: AsRef<str>>(
+        &mut self,
+        id: BookID,
+        edits: &[(S0, S1)],
+    ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
+        if !self.local_cache.edit_book_with_id(id, &edits)? {
+            return Err(DatabaseError::BookNotFound(id));
+        }
+        let mut tx = self.backend.begin().await.map_err(DatabaseError::Backend)?;
+
+        let idx = u64::from(id) as i64;
+        for (column, new_value) in edits {
+            let new_value = new_value.as_ref();
+            match column.as_ref().into() {
+                ColumnIdentifier::Title => {
+                    sqlx::query!(
+                        "UPDATE books SET title = ? WHERE book_id = ?;",
+                        new_value,
+                        idx
+                    )
+                    .execute(&mut tx)
+                    .await
+                    .map_err(DatabaseError::Backend)?;
+                }
+                ColumnIdentifier::Author => {
+                    sqlx::query!(
+                    "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES('author', ?, ?);",
+                    new_value,
+                    idx
+                ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
+                }
+                ColumnIdentifier::Series => {
+                    let series = str_to_series(new_value);
+                    let (series, series_index) = match series.as_ref() {
+                        None => (None, None),
+                        Some((series, series_index)) => (Some(series), series_index.clone()),
+                    };
+
+                    sqlx::query!(
+                        "UPDATE books SET series_name = ?, series_id = ? WHERE book_id = ?",
+                        series,
+                        series_index,
+                        idx
+                    )
+                    .execute(&mut tx)
+                    .await
+                    .map_err(DatabaseError::Backend)?;
+                }
+                ColumnIdentifier::ID => {
+                    unreachable!(
+                        "id is immutable, and this case is reached when local cache is modified"
+                    );
+                }
+                ColumnIdentifier::Variants => {
+                    sqlx::query!(
+                        "UPDATE books SET title = ? WHERE book_id = ?",
+                        new_value,
+                        idx
+                    )
+                    .execute(&mut tx)
+                    .await
+                    .map_err(DatabaseError::Backend)?;
+                }
+                ColumnIdentifier::Description => {
+                    sqlx::query!(
+                        "UPDATE variants SET description = ? WHERE book_id = ?",
+                        new_value,
+                        idx
+                    )
+                    .execute(&mut tx)
+                    .await
+                    .map_err(DatabaseError::Backend)?;
+                }
+                ColumnIdentifier::ExtendedTag(t) => {
+                    sqlx::query!(
+                        "INSERT into extended_tags (tag_name, tag_value, book_id) VALUES(?, ?, ?)",
+                        t,
+                        new_value,
+                        idx
+                    )
+                    .execute(&mut tx)
+                    .await
+                    .map_err(DatabaseError::Backend)?;
+                }
+            }
+        }
+        tx.commit().await.map_err(DatabaseError::Backend)
+    }
 }
 
 // TODO: Should we use a separate process to mirror changes to SQL database?
@@ -511,78 +600,7 @@ impl AppDatabase for SQLiteDatabase {
         edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "UPDATE {} SET {} = {} WHERE book_id = {};"
-        if !self.local_cache.edit_book_with_id(id, &edits)? {
-            return Err(DatabaseError::BookNotFound(id));
-        }
-
-        let idx = u64::from(id) as i64;
-        for (column, new_value) in edits {
-            let new_value = new_value.as_ref();
-            match column.as_ref().into() {
-                ColumnIdentifier::Title => {
-                    execute_query!(
-                        self,
-                        "UPDATE books SET title = ? WHERE book_id = ?",
-                        new_value,
-                        idx
-                    )?;
-                }
-                ColumnIdentifier::Author => {
-                    execute_query!(
-                    self,
-                    "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES('author', ?, ?);",
-                    new_value,
-                    idx
-                )?;
-                }
-                ColumnIdentifier::Series => {
-                    let series = str_to_series(new_value);
-                    let (series, series_index) = match series.as_ref() {
-                        None => (None, None),
-                        Some((series, series_index)) => (Some(series), series_index.clone()),
-                    };
-
-                    execute_query!(
-                        self,
-                        "UPDATE books SET series_name = ?, series_id = ? WHERE book_id = ?",
-                        series,
-                        series_index,
-                        idx
-                    )?;
-                }
-                ColumnIdentifier::ID => {
-                    unreachable!(
-                        "id is immutable, and this case is reached when local cache is modified"
-                    );
-                }
-                ColumnIdentifier::Variants => {
-                    execute_query!(
-                        self,
-                        "UPDATE books SET title = ? WHERE book_id = ?",
-                        new_value,
-                        idx
-                    )?;
-                }
-                ColumnIdentifier::Description => {
-                    execute_query!(
-                        self,
-                        "UPDATE variants SET description = ? WHERE book_id = ?",
-                        new_value,
-                        idx
-                    )?;
-                }
-                ColumnIdentifier::ExtendedTag(t) => {
-                    execute_query!(
-                        self,
-                        "INSERT into extended_tags (tag_name, tag_value, book_id) VALUES(?, ?, ?)",
-                        t,
-                        new_value,
-                        idx
-                    )?;
-                }
-            }
-        }
-        Ok(())
+        block_on(self.edit_book_by_id_async(id, edits))
     }
 
     fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
