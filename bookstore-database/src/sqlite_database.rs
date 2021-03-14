@@ -604,6 +604,8 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
+        // SELECT title, book_id FROM books GROUP BY LOWER(title) HAVING COUNT(*) > 1;
+        // Then, for authors ??
         let merged = self.local_cache.merge_similar_merge_ids();
         block_on(self.merge_by_ids(&merged)).map_err(DatabaseError::Backend)?;
         let to_remove = merged.into_iter().map(|(_, m)| m).collect();
@@ -650,7 +652,10 @@ impl IndexableDatabase for SQLiteDatabase {
         &self,
         indices: impl RangeBounds<usize>,
     ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
-        // "SELECT * FROM {} ORDER BY {} {} LIMIT {} OFFSET {};
+        // NOTE: The query below would require a paginated search.
+        //  Jumping to end is possible with the reverse search pattern,
+        //  BUT: for searches, finding all results can be expensive
+        // SELECT * FROM books WHERE book_id > last_id ORDER BY {} [} LIMIT {};
         let start = match indices.start_bound() {
             Bound::Included(i) => *i,
             Bound::Excluded(i) => *i + 1,
@@ -684,8 +689,11 @@ impl IndexableDatabase for SQLiteDatabase {
     }
 
     fn remove_book_indexed(&mut self, index: usize) -> Result<(), DatabaseError<Self::Error>> {
-        // "DELETE FROM books ORDER BY {} {} LIMIT 1 OFFSET {}"
-        // "DELETE FROM books ORDER BY {} {} LIMIT {} OFFSET {}"
+        // "DELETE FROM books WHERE book_id > last_id ORDER BY {} {} LIMIT 1"
+        // NOTE: remove_book_indexed is for removing a selected book -
+        // a book can only be selected if it is already loaded - eg. in cache.
+        // "DELETE FROM books WHERE book_id = {}"
+
         let book = self
             .local_cache
             .get_book_indexed(index)
@@ -699,7 +707,10 @@ impl IndexableDatabase for SQLiteDatabase {
         index: usize,
         edits: &[(S0, S1)],
     ) -> Result<(), DatabaseError<Self::Error>> {
-        // "UPDATE {} SET {} = {} ORDER BY {} {} LIMIT 1 OFFSET {}"
+        // "UPDATE {} SET {} = {} WHERE book_id > last_id ORDER BY {} {} LIMIT 1"
+        // NOTE: edit_book_indexed is for editing a selected book -
+        // a book can only be selected if it is already loaded - eg. in cache.
+
         let book = self
             .local_cache
             .get_book_indexed(index)
