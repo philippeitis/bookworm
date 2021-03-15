@@ -196,11 +196,14 @@ impl SQLiteDatabase {
         let variant_data = run_query_as!(self, VariantData, "SELECT * FROM variants")?;
         let tag_data = run_query_as!(self, TagData, "SELECT * FROM extended_tags")?;
 
-        let mut books = HashMap::new();
-        for book in book_data.into_iter() {
-            let book: Book = book.into();
-            books.insert(book.get_id(), book);
-        }
+        let mut books: HashMap<_, _> = book_data
+            .into_iter()
+            .map(|book| {
+                let book: Book = book.into();
+                (book.get_id(), book)
+            })
+            .collect();
+
         for variant in variant_data.into_iter() {
             let id = NonZeroU64::try_from(variant.book_id as u64).unwrap();
             let variant: BookVariant = variant.into();
