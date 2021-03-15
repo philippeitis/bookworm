@@ -43,6 +43,7 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
 /// Also provides storage for additional tags which are not specified here.
 pub struct RawBook {
     pub title: Option<String>,
+    // TODO: Should authors be a hashset?
     pub authors: Option<Vec<String>>,
     pub series: Option<(String, Option<f32>)>,
     pub description: Option<String>,
@@ -233,40 +234,58 @@ impl RawBook {
         // }
 
         match column {
-            ColumnIdentifier::Series => {
-                let s_series = self.get_series();
-                let o_series = other.get_series();
-                if s_series.eq(&o_series) {
-                    Ordering::Equal
-                } else if let Some((s_st, s_ind)) = s_series {
-                    if let Some((o_st, o_ind)) = o_series {
-                        if s_st.eq(o_st) {
-                            match s_ind.partial_cmp(o_ind) {
-                                Some(o) => o,
-                                None => match s_ind.map(|f| f.is_nan()) {
-                                    Some(true) => match o_ind.map(|f| f.is_nan()) {
-                                        Some(true) => Ordering::Equal,
-                                        Some(false) => Ordering::Less,
-                                        None => {
-                                            unreachable!("Neither s_ind nor o_ind can be None.")
-                                        }
-                                    },
-                                    Some(false) => Ordering::Greater,
-                                    None => unreachable!("Neither s_ind nor o_ind can be None."),
+            ColumnIdentifier::ID => Ordering::Equal,
+            ColumnIdentifier::Series => match (self.get_series(), other.get_series()) {
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Less,
+                (Some(_), None) => Ordering::Greater,
+                (Some((s_st, s_ind)), Some((o_st, o_ind))) => {
+                    if s_st.eq(o_st) {
+                        match s_ind.partial_cmp(o_ind) {
+                            Some(o) => o,
+                            None => match s_ind.map(|f| f.is_nan()) {
+                                Some(true) => match o_ind.map(|f| f.is_nan()) {
+                                    Some(true) => Ordering::Equal,
+                                    Some(false) => Ordering::Less,
+                                    None => {
+                                        unreachable!("Neither s_ind nor o_ind can be None.")
+                                    }
                                 },
-                            }
-                        } else {
-                            s_st.cmp(&o_st)
+                                Some(false) => Ordering::Greater,
+                                None => unreachable!("Neither s_ind nor o_ind can be None."),
+                            },
                         }
                     } else {
-                        Ordering::Greater
+                        s_st.cmp(&o_st)
                     }
-                } else {
-                    Ordering::Less
                 }
-            }
-            ColumnIdentifier::ID => Ordering::Equal,
+            },
             ColumnIdentifier::Title => self.get_title().cmp(&other.get_title()),
+            ColumnIdentifier::Description => {
+                self.description.as_ref().cmp(&other.get_description())
+            }
+            ColumnIdentifier::Author => match (&self.authors, &other.authors) {
+                // TODO: Better comparison algorithm.
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Less,
+                (Some(_), None) => Ordering::Greater,
+                (Some(self_authors), Some(other_authors)) => {
+                    let mut self_iter = self_authors.iter();
+                    let mut other_iter = other_authors.iter();
+                    let mut res = Ordering::Equal;
+                    while res == Ordering::Equal {
+                        let auth_a = self_iter.next();
+                        let auth_b = other_iter.next();
+                        res = auth_a.cmp(&auth_b);
+
+                        // Only need to check one - if equal and one is none, both are none
+                        if auth_a.is_none() {
+                            break;
+                        }
+                    }
+                    res
+                }
+            },
             c => self.get_column(c).cmp(&other.get_column(c)),
         }
     }
