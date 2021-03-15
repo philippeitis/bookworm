@@ -12,10 +12,7 @@ unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.gi
 sublime_fuzzy = "0.7.0"
 indexmap = { version = "1.6.2", default-features = false, features = ['serde-1', 'rayon'] }
 regex = "1.4.2"
-serde = { version = "1.0", features = ["derive", "rc"] }
-
-# Rustbreak dependencies
-rustbreak = { version = "2", features = ["ron_enc"], optional = true }
+serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 
 # SQLx dependencies
 sqlx = { version = "0.5.1", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
@@ -24,7 +21,7 @@ ron = { version = "0.6.4", optional = true }
 
 [features]
 sqlite = ["sqlx", "futures", "ron"]
-default = ["rustbreak"]
+default = ["sqlite"]
 
 [dev-dependencies]
 tempfile = "3.1.0"

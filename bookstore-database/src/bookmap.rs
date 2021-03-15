@@ -1,14 +1,18 @@
-use crate::search::{Error, Search};
+use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+use std::sync::{Arc, RwLock};
+
+use indexmap::map::IndexMap;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+use unicase::UniCase;
+
 use bookstore_records::{
     book::{BookID, ColumnIdentifier, RawBook},
     Book, BookError,
 };
-use indexmap::map::IndexMap;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::sync::{Arc, RwLock};
-use unicase::UniCase;
+
+use crate::search::{Error, Search};
 
 macro_rules! book {
     ($book: ident) => {
@@ -28,7 +32,8 @@ macro_rules! book_mut {
     };
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug)]
 pub(crate) struct BookMap {
     max_id: u64,
     books: IndexMap<BookID, Arc<RwLock<Book>>>,
