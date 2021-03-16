@@ -36,7 +36,7 @@ jobs:
     - name: Check path
       run: echo $DATABASE_URL
     - name: Check path
-      run: find / -name reference.db
+      run: find $PWD -name reference.db
     - name: Build
       run: cargo test --verbose
   test_ubuntu_install:
