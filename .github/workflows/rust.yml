@@ -33,6 +33,10 @@ jobs:
       run: ls .
     - name: Environment Variables
       run: echo "DATABASE_URL=sqlite:$/{PWD##/}/reference.db" >> $GITHUB_ENV
+    - name: Check path
+      run: echo $DATABASE_URL
+    - name: Check path
+      run: find / -name reference.db
     - name: Build
       run: cargo test --verbose
   test_ubuntu_install:
