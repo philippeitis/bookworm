@@ -29,6 +29,8 @@ jobs:
       with:
         toolchain: ${{ matrix.rust }}
         override: true
+    - name: ls
+      run: ls .
     - name: Environment Variables
       run: echo "DATABASE_URL=sqlite:$/{PWD##/}/reference.db" >> $GITHUB_ENV
     - name: Build
