@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
         rust: [stable]
     steps:
     - uses: actions/checkout@v2
@@ -29,30 +29,16 @@ jobs:
       with:
         toolchain: ${{ matrix.rust }}
         override: true
-    - name: Environment Variables
+    - name: Environment Variables (Windows)
+      if: matrix.os == 'windows-latest'
+      run: echo "DATABASE_URL=sqlite:$(echo "$pwd\reference.db")" >> $GITHUB_ENV
+    - name: Environment Variables (Linux)
+      if: matrix.os != 'windows-latest'
       run: echo "DATABASE_URL=sqlite:$(echo "/${PWD##/}/reference.db")" >> $GITHUB_ENV
-    - name: Build
-      run: cargo test --verbose
-  test-windows:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        rust: [stable]
-    steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        toolchain: ${{ matrix.rust }}
-        override: true
-    - name: ls
-      run: ls .
-    - name: Environment Variables
-      run: echo "DATABASE_URL=sqlite:$(echo %cd%\reference.db)" >> $GITHUB_ENV
     - name: Check path
       run: echo $DATABASE_URL
     - name: Build
       run: cargo test --verbose
-
   test_ubuntu_install:
     runs-on: ubuntu-latest
     strategy:
