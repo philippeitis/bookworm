@@ -30,7 +30,7 @@ jobs:
         toolchain: ${{ matrix.rust }}
         override: true
     - name: Environment Variables
-      run: echo "DATABASE_URL=sqlite:${PWD##/}/reference.db" >> $GITHUB_ENV
+      run: echo "DATABASE_URL=sqlite:$/{PWD##/}/reference.db" >> $GITHUB_ENV
     - name: Build
       run: cargo test --verbose
   test_ubuntu_install:
@@ -46,7 +46,7 @@ jobs:
     - name: Run install steps
       run: sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
     - name: Environment Variables
-      run: echo "DATABASE_URL=sqlite:${PWD##/}/reference.db" >> $GITHUB_ENV
+      run: echo "DATABASE_URL=sqlite:$/{PWD##/}/reference.db" >> $GITHUB_ENV
     - name: Test bookstore with copypaste
       run: cargo +nightly test -Z package-features --features bookstore-tui/copypaste
   fmt:
