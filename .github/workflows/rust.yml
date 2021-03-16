@@ -31,7 +31,7 @@ jobs:
         override: true
     - name: Environment Variables (Windows)
       if: matrix.os == 'windows-latest'
-      run: echo "DATABASE_URL=sqlite:$(echo "$pwd\reference.db")" >> $GITHUB_ENV
+      run: echo "DATABASE_URL=sqlite:$(echo "$pwd\reference.db")" >> $env:GITHUB_ENV
     - name: Environment Variables (Linux)
       if: matrix.os != 'windows-latest'
       run: echo "DATABASE_URL=sqlite:$(echo "/${PWD##/}/reference.db")" >> $GITHUB_ENV
