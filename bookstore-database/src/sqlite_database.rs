@@ -17,6 +17,7 @@ use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use unicase::UniCase;
 
 use bookstore_records::book::{str_to_series, BookID, ColumnIdentifier, RawBook};
+use bookstore_records::series::Series;
 use bookstore_records::{Book, BookVariant};
 
 use crate::bookmap::BookCache;
@@ -149,7 +150,13 @@ impl From<BookData> for Book {
     fn from(bd: BookData) -> Self {
         let rb = RawBook {
             title: bd.title.clone(),
-            series: bd.series_name.as_ref().map(|sn| (sn.clone(), bd.series_id)),
+            series: {
+                let series_id = bd.series_id;
+                bd.series_name.map(|sn| Series {
+                    name: sn,
+                    index: series_id,
+                })
+            },
             ..Default::default()
         };
         Book::from_raw_book(
@@ -279,9 +286,9 @@ impl SQLiteDatabase {
             for book in book_iter.by_ref().take(transaction_size) {
                 index += 1;
                 let title = book.title.as_ref();
-                let (series, series_index) = match book.series.as_ref() {
+                let (series, series_index) = match book.get_series() {
                     None => (None, None),
-                    Some((series, series_index)) => (Some(series), series_index.clone()),
+                    Some(series) => (Some(&series.name), series.index.clone()),
                 };
 
                 let id = sqlx::query!(

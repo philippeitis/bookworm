@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::{fmt, path};
 
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::series::Series;
 use crate::{BookError, BookVariant};
 
 pub type BookID = std::num::NonZeroU64;
@@ -36,7 +38,8 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Default)]
 /// The struct which contains the major fields a book will have, a set of variants,
 /// which corresponds to particular file formats of this book (eg. a EPUB and MOBI version),
 /// or even differing realizations of the book (eg. a French and English of the same book).
@@ -45,7 +48,7 @@ pub struct RawBook {
     pub title: Option<String>,
     // TODO: Should authors be a hashset?
     pub authors: Option<Vec<String>>,
-    pub series: Option<(String, Option<f32>)>,
+    pub series: Option<Series>,
     pub description: Option<String>,
     pub variants: Vec<BookVariant>,
     pub extended_tags: HashMap<String, String>,
@@ -113,7 +116,7 @@ impl RawBook {
         self.title.as_deref()
     }
 
-    pub fn get_series(&self) -> Option<&(String, Option<f32>)> {
+    pub fn get_series(&self) -> Option<&Series> {
         self.series.as_ref()
     }
 
@@ -133,14 +136,7 @@ impl RawBook {
         Some(match column {
             ColumnIdentifier::Title => self.get_title()?.to_string(),
             ColumnIdentifier::Author => self.get_authors()?.join(", "),
-            ColumnIdentifier::Series => {
-                let (series_name, nth_in_series) = self.get_series()?;
-                if let Some(nth_in_series) = nth_in_series {
-                    format!("{} [{}]", series_name, nth_in_series)
-                } else {
-                    series_name.clone()
-                }
-            }
+            ColumnIdentifier::Series => self.get_series()?.to_string(),
             ColumnIdentifier::Description => self.description.as_ref()?.to_string(),
             ColumnIdentifier::ExtendedTag(x) => self.extended_tags.get(x)?.to_string(),
             _ => return None,
@@ -199,7 +195,7 @@ impl RawBook {
                 return Err(BookError::ImmutableColumnError);
             }
             ColumnIdentifier::Series => {
-                self.series = str_to_series(value);
+                self.series = Series::from_str(&value).ok();
             }
             ColumnIdentifier::ExtendedTag(column) => {
                 self.extended_tags
@@ -235,31 +231,7 @@ impl RawBook {
 
         match column {
             ColumnIdentifier::ID => Ordering::Equal,
-            ColumnIdentifier::Series => match (self.get_series(), other.get_series()) {
-                (None, None) => Ordering::Equal,
-                (None, Some(_)) => Ordering::Less,
-                (Some(_), None) => Ordering::Greater,
-                (Some((s_st, s_ind)), Some((o_st, o_ind))) => {
-                    if s_st.eq(o_st) {
-                        match s_ind.partial_cmp(o_ind) {
-                            Some(o) => o,
-                            None => match s_ind.map(|f| f.is_nan()) {
-                                Some(true) => match o_ind.map(|f| f.is_nan()) {
-                                    Some(true) => Ordering::Equal,
-                                    Some(false) => Ordering::Less,
-                                    None => {
-                                        unreachable!("Neither s_ind nor o_ind can be None.")
-                                    }
-                                },
-                                Some(false) => Ordering::Greater,
-                                None => unreachable!("Neither s_ind nor o_ind can be None."),
-                            },
-                        }
-                    } else {
-                        s_st.cmp(&o_st)
-                    }
-                }
-            },
+            ColumnIdentifier::Series => self.get_series().cmp(&other.get_series()),
             ColumnIdentifier::Title => self.get_title().cmp(&other.get_title()),
             ColumnIdentifier::Description => {
                 self.description.as_ref().cmp(&other.get_description())
@@ -328,7 +300,8 @@ impl RawBook {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq)]
 /// Stores an underlying `RawBook`, alongside an associated ID.
 pub struct Book {
     id: Option<BookID>,
@@ -345,7 +318,7 @@ impl Book {
     }
 
     #[allow(dead_code)]
-    pub fn get_series(&self) -> Option<&(String, Option<f32>)> {
+    pub fn get_series(&self) -> Option<&Series> {
         self.raw_book.get_series()
     }
 

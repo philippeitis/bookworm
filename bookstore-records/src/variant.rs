@@ -5,6 +5,7 @@ use std::str::FromStr;
 use isbn2::Isbn;
 use mobi::MobiMetadata;
 use quick_epub::{IdentifierScheme, Metadata as EpubMetadata};
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::BookError;
@@ -19,13 +20,15 @@ fn unravel_author(author: &str) -> String {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Identifier {
     ISBN(Isbn),
     Unknown(String, String),
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// Enumerates all supported book types.
 pub enum BookType {
     EPUB,
@@ -56,7 +59,8 @@ impl BookType {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BookVariant {
     pub book_type: BookType,
     pub path: path::PathBuf,

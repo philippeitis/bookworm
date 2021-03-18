@@ -5,7 +5,7 @@ authors = ["philippeitis <33013301+philippeitis@users.noreply.github.com>"]
 edition = "2018"
 
 [dependencies]
-bookstore-records = { version = "0.1.0", path = "../bookstore-records" }
+bookstore-records = { version = "0.1.0", path = "../bookstore-records", features = ["serde"] }
 
 unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.git", branch = "serde", features = ["serde"] }
 
