@@ -254,33 +254,39 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
 
             match self.get_input() {
                 Ok(true) => {
-                    if let Some(path) = &self.settings_path {
-                        let state = self.ui_state.deref().borrow();
-                        // TODO: Write multiple settings files to allow multiple databases.
-                        let s = Settings {
-                            interface_style: state.style,
-                            columns: state
-                                .table_view
-                                .selected_cols()
-                                .iter()
-                                .map(|s| s.clone().into_inner())
-                                .collect(),
-                            sort_settings: self.app.sort_settings().clone(),
-                            navigation_settings: state.nav_settings,
-                            database_settings: DatabaseSettings {
-                                path: self.app.db_path(),
-                            },
-                        };
-                        if let Some(p) = path.parent() {
-                            std::fs::create_dir_all(p)?;
-                        }
-                        s.write(path)?;
-                    }
+                    self.write_settings()?;
                     return Ok(terminal.clear()?);
                 }
                 Ok(false) => {}
                 Err(_e) => {} // TODO: Handle errors
             }
         }
+    }
+
+    fn write_settings(&self) -> Result<(), TuiError<D::Error>> {
+        if let Some(path) = &self.settings_path {
+            let state = self.ui_state.deref().borrow();
+            // TODO: Have central settings file that lists other databases in order of recent usage.
+            // TODO: Write multiple settings files to allow multiple databases.
+            let s = Settings {
+                interface_style: state.style,
+                columns: state
+                    .table_view
+                    .selected_cols()
+                    .iter()
+                    .map(|s| s.clone().into_inner())
+                    .collect(),
+                sort_settings: self.app.sort_settings().clone(),
+                navigation_settings: state.nav_settings,
+                database_settings: DatabaseSettings {
+                    path: self.app.db_path(),
+                },
+            };
+            if let Some(p) = path.parent() {
+                std::fs::create_dir_all(p)?;
+            }
+            s.write(path)?;
+        }
+        Ok(())
     }
 }
