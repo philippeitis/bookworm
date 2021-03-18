@@ -61,10 +61,7 @@ impl BookCache {
         books: IndexMap<BookID, Arc<RwLock<Book>>>,
         cols: HashSet<UniCase<String>>,
     ) -> Self {
-        BookCache {
-            books,
-            cols,
-        }
+        BookCache { books, cols }
     }
     pub(crate) fn insert_book_with_id(&mut self, book: Book) {
         self.books
