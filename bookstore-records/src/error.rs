@@ -1,13 +1,13 @@
-use quick_epub::Error as EpubError;
+use std::ffi::OsString;
 
-use crate::variant::BookType;
+use quick_epub::Error as EpubError;
 
 #[derive(Debug, PartialEq, Eq)]
 /// Enumerates all potential errors that can occur when using a Book.
 pub enum BookError {
     FileError,
     ImmutableColumnError,
-    UnsupportedExtension(BookType), //    MetadataError,
+    UnsupportedExtension(OsString), //    MetadataError,
 }
 
 impl From<std::io::Error> for BookError {

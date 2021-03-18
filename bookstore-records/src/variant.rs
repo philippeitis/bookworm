@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufReader, SeekFrom};
 use std::io::{Read, Seek};
@@ -38,28 +39,27 @@ pub enum BookType {
     // Look at lo-pdf and pdf-extract.
     PDF,
     // TODO: AZW3, DJVU, DOC, RTF, custom extensions?
-    Unsupported(OsString),
+}
+
+impl TryFrom<&OsStr> for BookType {
+    type Error = BookError;
+
+    /// Returns a new `BookType` from the provided string - this should be a file extension.
+    fn try_from(o_str: &OsStr) -> Result<Self, Self::Error> {
+        match o_str.to_str() {
+            Some(s) => match s.to_ascii_lowercase().as_str() {
+                "epub" => Ok(BookType::EPUB),
+                "mobi" => Ok(BookType::MOBI),
+                "pdf" => Ok(BookType::PDF),
+                _ => Err(BookError::UnsupportedExtension(o_str.to_os_string())),
+            },
+            None => Err(BookError::UnsupportedExtension(o_str.to_os_string())),
+        }
+    }
 }
 
 impl BookType {
     // TODO: Implement timeout to prevent crashing if reading explodes.
-    /// Returns a new `BookType` from the provided string - this should be a file extension.
-    fn new<S>(s: S) -> BookType
-    where
-        S: AsRef<OsStr>,
-    {
-        let so = s.as_ref();
-        match so.to_str() {
-            Some(s) => match s.to_ascii_lowercase().as_str() {
-                "epub" => BookType::EPUB,
-                "mobi" => BookType::MOBI,
-                "pdf" => BookType::PDF,
-                _ => BookType::Unsupported(so.to_os_string()),
-            },
-            None => BookType::Unsupported(so.to_os_string()),
-        }
-    }
-
     fn metadata_filler<R: std::io::Read + std::io::Seek>(
         &self,
         reader: R,
@@ -71,7 +71,7 @@ impl BookType {
             BookType::MOBI => Ok(Box::new(
                 MobiMetadata::from_read(reader).map_err(|_| BookError::FileError)?,
             )),
-            _ => Err(BookError::UnsupportedExtension(self.clone())),
+            _ => Err(BookError::UnsupportedExtension(OsString::from("PDF"))),
         }
     }
 }
@@ -111,14 +111,12 @@ impl BookVariant {
     /// * ` file_path ` - The path to the file of interest.
     ///
     /// # Errors
-    /// Will return an error if the provided path does not lead to a file.
+    /// Will return an error if the provided path can not be read.
     /// Will panic if the title can not be set.
     pub fn generate_from_file<P>(file_path: P) -> Result<Self, BookError>
     where
         P: AsRef<path::Path>,
     {
-        // let file = File::open(file_path.clone()).map_err(|_e| BookError::FileError)?;
-        // let data = file.metadata().map_err(|_e| BookError::MetadataError)?;
         let path = file_path.as_ref();
 
         let file_name = if let Some(file_name) = path.file_name() {
@@ -133,10 +131,7 @@ impl BookVariant {
             return Err(BookError::FileError);
         };
 
-        let book_type = match BookType::new(ext) {
-            x @ BookType::Unsupported(_) => return Err(BookError::UnsupportedExtension(x)),
-            supported => supported,
-        };
+        let book_type = BookType::try_from(ext)?;
 
         let (reader, hash) = {
             let mut file = std::fs::File::open(&path)?;
