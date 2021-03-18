@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::ffi::OsString;
 use std::num::NonZeroU64;
 use std::ops::{Bound, RangeBounds};
@@ -13,7 +13,6 @@ use std::sync::{Arc, RwLock};
 use futures::executor::block_on;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection, SqliteConnection};
-
 use unicase::UniCase;
 
 use bookstore_records::book::{str_to_series, BookID, ColumnIdentifier, RawBook};
@@ -49,6 +48,7 @@ const CREATE_VARIANTS: &str = r#"CREATE TABLE IF NOT EXISTS `variants` (
 `language` TEXT DEFAULT NULL,
 `description` TEXT DEFAULT NULL,
 `id` INTEGER DEFAULT NULL,
+`hash` BLOB NOT NULL,
 `book_id` INTEGER NOT NULL,
 FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
@@ -122,6 +122,7 @@ struct VariantData {
     identifier: Option<String>,
     description: Option<String>,
     id: Option<i64>,
+    hash: Vec<u8>,
 }
 
 struct TagData {
@@ -186,6 +187,7 @@ impl From<VariantData> for BookVariant {
             translators: None,
             description: vd.description,
             id: vd.id.map(|id| u32::try_from(id).unwrap()),
+            hash: vd.hash.try_into().expect("Provided hash is too long."),
         }
     }
 }
@@ -317,8 +319,9 @@ impl SQLiteDatabase {
                         let language = &variant.language;
                         let description = &variant.description;
                         let sub_id = &variant.id;
+                        let hash = variant.hash.to_vec();
                         sqlx::query!(
-                            "INSERT into variants (book_type, path, local_title, identifier, language, description, id, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                            "INSERT into variants (book_type, path, local_title, identifier, language, description, id, hash, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             book_type,
                             path,
                             local_title,
@@ -326,7 +329,8 @@ impl SQLiteDatabase {
                             language,
                             description,
                             sub_id,
-                            id
+                            hash,
+                            id,
                         ).execute(&mut tx).await?;
                     }
                 }

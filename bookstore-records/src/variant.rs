@@ -1,4 +1,6 @@
 use std::ffi::{OsStr, OsString};
+use std::io::{BufReader, SeekFrom};
+use std::io::{Read, Seek};
 use std::path;
 use std::str::FromStr;
 
@@ -7,6 +9,7 @@ use mobi::MobiMetadata;
 use quick_epub::{IdentifierScheme, Metadata as EpubMetadata};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::BookError;
 
@@ -71,8 +74,7 @@ pub struct BookVariant {
     pub translators: Option<Vec<String>>,
     pub description: Option<String>,
     pub id: Option<u32>,
-    #[cfg(feature = "hash")]
-    pub hash: Option<[u8; 32]>,
+    pub hash: [u8; 32],
 }
 
 impl BookVariant {
@@ -121,8 +123,7 @@ impl BookVariant {
             translators: None,
             description: None,
             id: None,
-            #[cfg(feature = "hash")]
-            hash: None,
+            hash: [0; 32],
         };
 
         let _ = book.fill_in_metadata();
@@ -141,34 +142,31 @@ impl BookVariant {
 
     /// Fills in the metadata for book from the internal book type.
     fn fill_in_metadata(&mut self) -> Result<(), BookError> {
-        #[cfg(feature = "hash")]
-        let mut reader = {
-            use sha2::{Digest, Sha256};
-            use std::io::Read;
-
-            let file = std::fs::File::open(&self.path)?;
+        // TODO: Figure out how to avoid re-reading first 4kb.
+        // TODO: Use BufReader::seek_relative when stabilized.
+        let reader = {
+            let mut file = std::fs::File::open(&self.path)?;
             let len = file.metadata()?.len();
             let bytes_to_read = (len as usize).min(4096);
 
-            let mut reader = std::io::BufReader::with_capacity(bytes_to_read, file);
             let mut buf = [0; 4096];
-
-            reader.read_exact(&mut buf[..bytes_to_read])?;
-            reader.seek_relative(-(bytes_to_read as i64))?;
+            file.read_exact(&mut buf[..bytes_to_read])?;
+            file.seek(SeekFrom::Start(0))?;
 
             let mut hasher = Sha256::new();
             hasher.update(&buf[..bytes_to_read]);
             let res = hasher.finalize();
-            self.hash = Some(res.into());
+            self.hash = res.into();
 
-            reader
+            BufReader::with_capacity(
+                len.saturating_sub(4096).max(4096) as usize,
+                file,
+            )
         };
+
         match &self.book_type {
             BookType::EPUB => {
-                #[cfg(feature = "hash")]
-                let metadata = EpubMetadata::from_read(&mut reader)?;
-                #[cfg(not(feature = "hash"))]
-                let metadata = EpubMetadata::open(&self.path)?;
+                let metadata = EpubMetadata::from_read(reader)?;
 
                 if self.local_title.is_none() {
                     self.local_title = metadata.title;
@@ -206,10 +204,8 @@ impl BookVariant {
                 Ok(())
             }
             BookType::MOBI => {
-                #[cfg(feature = "hash")]
-                let doc = MobiMetadata::from_read(&mut reader)?;
-                #[cfg(not(feature = "hash"))]
-                let doc = MobiMetadata::from_path(&self.path)?;
+                let doc = MobiMetadata::from_read(reader)?;
+
                 if self.additional_authors.is_none() {
                     if let Some(author) = doc.author() {
                         self.additional_authors = Some(vec![unravel_author(&author)]);
