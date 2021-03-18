@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
 use std::sync::{Arc, RwLock};
 
 use indexmap::map::IndexMap;
@@ -8,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
 use bookstore_records::{
-    book::{BookID, ColumnIdentifier, RawBook},
+    book::{BookID, ColumnIdentifier},
     Book, BookError,
 };
 
