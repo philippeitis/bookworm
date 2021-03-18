@@ -19,7 +19,7 @@ use unicase::UniCase;
 use bookstore_records::book::{str_to_series, BookID, ColumnIdentifier, RawBook};
 use bookstore_records::{Book, BookVariant};
 
-use crate::bookmap::BookMap;
+use crate::bookmap::BookCache;
 use crate::search::Search;
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
@@ -185,7 +185,7 @@ impl From<VariantData> for BookVariant {
 
 pub struct SQLiteDatabase {
     backend: SqliteConnection,
-    local_cache: BookMap,
+    local_cache: BookCache,
     path: PathBuf,
 }
 
@@ -245,7 +245,7 @@ impl SQLiteDatabase {
             }
         }
 
-        self.local_cache = BookMap::from_values_unchecked(
+        self.local_cache = BookCache::from_values_unchecked(
             books
                 .into_iter()
                 .map(|(a, b)| (a, Arc::new(RwLock::new(b))))
@@ -506,7 +506,7 @@ impl AppDatabase for SQLiteDatabase {
 
         let mut db = Self {
             backend: database,
-            local_cache: BookMap::default(),
+            local_cache: BookCache::default(),
             path: file_path.as_ref().to_path_buf(),
         };
 

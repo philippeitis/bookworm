@@ -32,18 +32,19 @@ macro_rules! book_mut {
     };
 }
 
+/// `BookCache` acts as an intermediate caching layer between the backend database
+/// and the front-end UI - allowing books that are already in memory to be provided
+/// without going through the database.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub(crate) struct BookMap {
-    max_id: u64,
+pub(crate) struct BookCache {
     books: IndexMap<BookID, Arc<RwLock<Book>>>,
     cols: HashSet<UniCase<String>>,
 }
 
-impl Default for BookMap {
+impl Default for BookCache {
     fn default() -> Self {
-        BookMap {
-            max_id: 1,
+        BookCache {
             books: IndexMap::default(),
             cols: ["title", "authors", "series", "id", "description"]
                 .iter()
@@ -54,30 +55,13 @@ impl Default for BookMap {
     }
 }
 
-impl BookMap {
-    /// Return a monotonically increasing ID to use for a new
-    /// book.
-    ///
-    /// # Errors
-    /// Will panic if the ID can no longer be correctly increased.
-    fn new_id(&mut self) -> BookID {
-        let id = self.max_id;
-        self.max_id = self
-            .max_id
-            .checked_add(1)
-            .expect("Current ID is at maximum value and can not be increased.");
-        BookID::try_from(id).expect("Attempted to return an invalid ID.")
-    }
-}
-
-impl BookMap {
+impl BookCache {
     #[allow(dead_code)]
     pub(crate) fn from_values_unchecked(
         books: IndexMap<BookID, Arc<RwLock<Book>>>,
         cols: HashSet<UniCase<String>>,
     ) -> Self {
-        BookMap {
-            max_id: 1,
+        BookCache {
             books,
             cols,
         }
@@ -85,12 +69,6 @@ impl BookMap {
     pub(crate) fn insert_book_with_id(&mut self, book: Book) {
         self.books
             .insert(book.get_id(), Arc::new(RwLock::new(book)));
-    }
-
-    pub fn insert_raw_book(&mut self, book: RawBook) -> BookID {
-        let id = self.new_id();
-        self.insert_book_with_id(Book::from_raw_book(id, book));
-        id
     }
 
     pub fn len(&self) -> usize {
@@ -110,7 +88,6 @@ impl BookMap {
     }
 
     pub fn clear(&mut self) {
-        self.max_id = 1;
         self.books.clear();
     }
 
@@ -199,16 +176,6 @@ impl BookMap {
         merges
     }
 
-    /// Merges all books with matching titles and authors (case insensitive), in no
-    /// particular order. Books that are merged will not necessarily free IDs no longer in use.
-    /// Returns a HashSet containing the IDs of all books that have been merged.
-    pub fn merge_similar(&mut self) -> HashSet<BookID> {
-        self.merge_similar_merge_ids()
-            .into_iter()
-            .map(|(_, m)| m)
-            .collect()
-    }
-
     pub fn find_matches(&self, searches: &[Search]) -> Result<Vec<Arc<RwLock<Book>>>, Error> {
         let mut results: Vec<_> = self.books.values().cloned().collect();
         for search in searches {
@@ -248,25 +215,6 @@ impl BookMap {
             self.books
                 .par_sort_by(|_, a, _, b| book!(a).cmp_columns(&book!(b), &cols))
         }
-    }
-
-    pub fn init_columns(&mut self) {
-        let mut c = HashSet::new();
-
-        for &col in &["title", "authors", "series", "id", "description"] {
-            c.insert(col.to_owned());
-        }
-
-        for book in self.books.values() {
-            let book = book!(book);
-            for key in book.get_extended_columns().keys() {
-                if !c.contains(key) {
-                    c.insert(key.to_owned());
-                }
-            }
-        }
-
-        self.cols = c.into_iter().map(UniCase::new).collect();
     }
 
     pub(crate) fn has_column(&self, col: &UniCase<String>) -> bool {
