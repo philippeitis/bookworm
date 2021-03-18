@@ -2,18 +2,17 @@ use std::ffi::{OsStr, OsString};
 use std::io::{BufReader, SeekFrom};
 use std::io::{Read, Seek};
 use std::path;
-use std::str::FromStr;
 
 use isbn2::Isbn;
 use mobi::MobiMetadata;
-use quick_epub::{IdentifierScheme, Metadata as EpubMetadata};
+use quick_epub::Metadata as EpubMetadata;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::BookError;
 
-fn unravel_author(author: &str) -> String {
+pub(crate) fn unravel_author(author: &str) -> String {
     if let Some(i) = author.find(',') {
         let (a, b) = author.split_at(i);
         let b = b.trim_start_matches(',').trim_start_matches(' ');
@@ -42,8 +41,8 @@ pub enum BookType {
     Unsupported(OsString),
 }
 
-// TODO: Implement timeout to prevent crashing if reading explodes.
 impl BookType {
+    // TODO: Implement timeout to prevent crashing if reading explodes.
     /// Returns a new `BookType` from the provided string - this should be a file extension.
     fn new<S>(s: S) -> BookType
     where
@@ -60,6 +59,33 @@ impl BookType {
             None => BookType::Unsupported(so.to_os_string()),
         }
     }
+
+    fn metadata_filler<R: std::io::Read + std::io::Seek>(
+        &self,
+        reader: R,
+    ) -> Result<Box<dyn MetadataFiller>, BookError> {
+        match self {
+            BookType::EPUB => Ok(Box::new(
+                EpubMetadata::from_read(reader).map_err(|_| BookError::FileError)?,
+            )),
+            BookType::MOBI => Ok(Box::new(
+                MobiMetadata::from_read(reader).map_err(|_| BookError::FileError)?,
+            )),
+            _ => Err(BookError::UnsupportedExtension(self.clone())),
+        }
+    }
+}
+
+pub trait MetadataFiller {
+    fn take_title(&mut self, title: &mut Option<String>);
+
+    fn take_description(&mut self, description: &mut Option<String>);
+
+    fn take_language(&mut self, language: &mut Option<String>);
+
+    fn take_identifier(&mut self, identifier: &mut Option<Identifier>);
+
+    fn take_authors(&mut self, authors: &mut Option<Vec<String>>);
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -95,27 +121,46 @@ impl BookVariant {
         // let data = file.metadata().map_err(|_e| BookError::MetadataError)?;
         let path = file_path.as_ref();
 
-        if !path.is_file() {
-            return Err(BookError::FileError);
-        }
-
         let file_name = if let Some(file_name) = path.file_name() {
-            file_name.to_owned()
+            file_name
         } else {
             return Err(BookError::FileError);
         };
+
         let ext = if let Some(ext) = path.extension() {
             ext
         } else {
             return Err(BookError::FileError);
         };
+
         let book_type = match BookType::new(ext) {
             x @ BookType::Unsupported(_) => return Err(BookError::UnsupportedExtension(x)),
             supported => supported,
         };
+
+        let (reader, hash) = {
+            let mut file = std::fs::File::open(&path)?;
+            let len = file.metadata()?.len();
+            let bytes_to_read = (len as usize).min(4096);
+
+            let mut buf = [0; 4096];
+            file.read_exact(&mut buf[..bytes_to_read])?;
+            file.seek(SeekFrom::Start(0))?;
+
+            let mut hasher = Sha256::new();
+            hasher.update(&buf[..bytes_to_read]);
+            let res = hasher.finalize();
+
+            (
+                BufReader::with_capacity(len.saturating_sub(4096).max(4096) as usize, file),
+                res.into(),
+            )
+        };
+
         let mut book = BookVariant {
             book_type,
             path: path.to_owned(),
+            hash,
             local_title: None,
             identifier: None,
             language: None,
@@ -123,10 +168,15 @@ impl BookVariant {
             translators: None,
             description: None,
             id: None,
-            hash: [0; 32],
         };
 
-        let _ = book.fill_in_metadata();
+        if let Ok(mut metadata_filler) = book.book_type.metadata_filler(reader) {
+            metadata_filler.take_title(&mut book.local_title);
+            metadata_filler.take_authors(&mut book.additional_authors);
+            metadata_filler.take_description(&mut book.description);
+            metadata_filler.take_language(&mut book.language);
+            metadata_filler.take_identifier(&mut book.identifier);
+        }
 
         if book.local_title.is_none() {
             book.local_title = Some(
@@ -138,108 +188,6 @@ impl BookVariant {
         }
 
         Ok(book)
-    }
-
-    /// Fills in the metadata for book from the internal book type.
-    fn fill_in_metadata(&mut self) -> Result<(), BookError> {
-        // TODO: Figure out how to avoid re-reading first 4kb.
-        // TODO: Use BufReader::seek_relative when stabilized.
-        let reader = {
-            let mut file = std::fs::File::open(&self.path)?;
-            let len = file.metadata()?.len();
-            let bytes_to_read = (len as usize).min(4096);
-
-            let mut buf = [0; 4096];
-            file.read_exact(&mut buf[..bytes_to_read])?;
-            file.seek(SeekFrom::Start(0))?;
-
-            let mut hasher = Sha256::new();
-            hasher.update(&buf[..bytes_to_read]);
-            let res = hasher.finalize();
-            self.hash = res.into();
-
-            BufReader::with_capacity(
-                len.saturating_sub(4096).max(4096) as usize,
-                file,
-            )
-        };
-
-        match &self.book_type {
-            BookType::EPUB => {
-                let metadata = EpubMetadata::from_read(reader)?;
-
-                if self.local_title.is_none() {
-                    self.local_title = metadata.title;
-                }
-
-                if self.additional_authors.is_none() {
-                    if let Some(author) = metadata.author {
-                        self.additional_authors = Some(vec![unravel_author(&author)]);
-                    }
-                }
-
-                if self.language.is_none() {
-                    self.language = metadata.language;
-                }
-
-                if self.description.is_none() {
-                    self.description = metadata.description;
-                }
-
-                if self.identifier.is_none() {
-                    match metadata.identifier {
-                        Some((id, value)) => match id {
-                            IdentifierScheme::ISBN => {
-                                self.identifier = Isbn::from_str(&value).ok().map(Identifier::ISBN)
-                            }
-                            IdentifierScheme::Unknown(id) => {
-                                self.identifier = Some(Identifier::Unknown(id, value));
-                            }
-                            x => self.identifier = Some(Identifier::Unknown(x.to_string(), value)),
-                        },
-                        None => {}
-                    }
-                }
-
-                Ok(())
-            }
-            BookType::MOBI => {
-                let doc = MobiMetadata::from_read(reader)?;
-
-                if self.additional_authors.is_none() {
-                    if let Some(author) = doc.author() {
-                        self.additional_authors = Some(vec![unravel_author(&author)]);
-                    }
-                }
-
-                if self.language.is_none() {
-                    self.language = doc.language();
-                }
-
-                if self.identifier.is_none() {
-                    if let Some(isbn) = doc.isbn() {
-                        if let Ok(isbn) = Isbn::from_str(&isbn) {
-                            self.identifier = Some(Identifier::ISBN(isbn));
-                        }
-                    }
-                }
-
-                if self.description.is_none() {
-                    self.description = doc.description();
-                }
-
-                if self.local_title.is_none() {
-                    if doc.title().is_none() {
-                        self.local_title = Some(doc.name);
-                    } else {
-                        self.local_title = doc.title();
-                    }
-                }
-
-                Ok(())
-            }
-            b => Err(BookError::UnsupportedExtension(b.clone())),
-        }
     }
 
     pub fn path(&self) -> &path::Path {

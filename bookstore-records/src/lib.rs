@@ -1,5 +1,7 @@
 pub mod book;
+mod epub;
 pub mod error;
+mod mobi;
 pub mod series;
 pub mod variant;
 
