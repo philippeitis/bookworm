@@ -147,7 +147,7 @@ impl BookVariant {
             let res = hasher.finalize();
 
             (
-                BufReader::with_capacity(len.saturating_sub(4096).max(4096) as usize, file),
+                BufReader::with_capacity(len.saturating_sub(4096).min(4096) as usize, file),
                 res.into(),
             )
         };
