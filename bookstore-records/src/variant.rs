@@ -146,10 +146,7 @@ impl BookVariant {
             hasher.update(&buf[..bytes_to_read]);
             let res = hasher.finalize();
 
-            (
-                BufReader::with_capacity(len.saturating_sub(4096).min(4096) as usize, file),
-                res.into(),
-            )
+            (BufReader::with_capacity(bytes_to_read, file), res.into())
         };
 
         let mut book = BookVariant {
