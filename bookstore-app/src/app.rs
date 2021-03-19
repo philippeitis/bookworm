@@ -95,7 +95,6 @@ impl<DBError> From<CommandStringError> for ApplicationError<DBError> {
 fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::io::Error> {
     // TODO: Handle reads erroring out due to filesystem issues somehow.
     Ok(jwalk::WalkDir::new(std::fs::canonicalize(dir)?)
-        .min_depth(0)
         .max_depth(depth as usize)
         .into_iter()
         .filter_map(|res| res.map(|e| e.path()).ok())
