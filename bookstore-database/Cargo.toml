@@ -10,7 +10,7 @@ bookstore-records = { version = "0.1.0", path = "../bookstore-records", features
 unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.git", branch = "serde", features = ["serde"] }
 
 sublime_fuzzy = "0.7.0"
-indexmap = { version = "1.6.2", default-features = false, features = ['serde-1', 'rayon'] }
+indexmap = { version = "1.6.2", default-features = false, features = ["std", "serde-1", "rayon"] }
 regex = "1.4.2"
 serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 
