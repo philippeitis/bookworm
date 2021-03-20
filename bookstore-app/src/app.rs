@@ -100,7 +100,7 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<BookVariant>, s
         .filter_map(|res| res.map(|e| e.path()).ok())
         .collect::<Vec<_>>()
         .par_iter()
-        .filter_map(|path| BookVariant::generate_from_file(path).ok())
+        .filter_map(|path| BookVariant::from_path(path).ok())
         .collect::<Vec<_>>())
 }
 
@@ -314,7 +314,7 @@ impl<D: IndexableDatabase> App<D> {
                 self.sort_settings.is_sorted = false;
             }
             Command::AddBookFromFile(f) => {
-                self.write(|db| db.insert_book(BookVariant::generate_from_file(&f)?))?;
+                self.write(|db| db.insert_book(BookVariant::from_path(&f)?))?;
                 self.sort_settings.is_sorted = false;
             }
             Command::AddBooksFromDir(dir, depth) => {

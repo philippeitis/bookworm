@@ -116,7 +116,7 @@ impl BookVariant {
     /// # Errors
     /// Will return an error if the provided path can not be read.
     /// Will panic if the title can not be set.
-    pub fn generate_from_file<P>(file_path: P) -> Result<Self, BookError>
+    pub fn from_path<P>(file_path: P) -> Result<Self, BookError>
     where
         P: AsRef<path::Path>,
     {
