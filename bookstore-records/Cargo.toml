@@ -10,5 +10,5 @@ edition = "2018"
 mobi = "0.5.1"
 quick-epub = { version = "0.1.0", git = "https://github.com/philippeitis/quick-epub.git" }
 serde = { version = "1.0", features = ["derive"], optional = true }
-isbn2 = { git = "https://github.com/philippeitis/isbn-rs.git", features = ["serialize"] }
+isbn2 = { version = "0.4.0", features = ["serialize"] }
 sha2 = { version = "0.9.3" }
