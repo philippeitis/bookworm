@@ -323,7 +323,7 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
                 .find_matches(searches)?
                 .into_iter()
                 .map(|book| {
-                    let id = book!(book).get_id();
+                    let id = book!(book).id();
                     (id, book)
                 })
                 .collect(),
@@ -337,7 +337,7 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
 
                 results
                     .into_iter()
-                    .map(|b| (book!(b).get_id(), b.clone()))
+                    .map(|b| (book!(b).id(), b.clone()))
                     .collect()
             }
         };
@@ -367,7 +367,7 @@ impl<D: IndexableDatabase> ScrollableBookView<D> for SearchableBookView<D> {
                 }
                 results.first().cloned().map(|b| {
                     books
-                        .get_index_of(&book!(b).get_id())
+                        .get_index_of(&book!(b).id())
                         .expect("Reference to existing book was invalidated during search.")
                 })
             }

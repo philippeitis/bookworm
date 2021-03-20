@@ -72,36 +72,36 @@ pub struct Book {
 }
 
 impl Book {
-    pub fn get_authors(&self) -> Option<&[String]> {
+    pub fn authors(&self) -> Option<&[String]> {
         self.authors.as_deref()
     }
 
-    pub fn get_title(&self) -> Option<&str> {
+    pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
     }
 
-    pub fn get_series(&self) -> Option<&Series> {
+    pub fn series(&self) -> Option<&Series> {
         self.series.as_ref()
     }
 
-    pub fn get_variants(&self) -> &[BookVariant] {
+    pub fn variants(&self) -> &[BookVariant] {
         &self.variants
     }
 
-    pub fn get_extended_columns(&self) -> &HashMap<String, String> {
+    pub fn tags(&self) -> &HashMap<String, String> {
         &self.extended_tags
     }
 
-    pub fn get_description(&self) -> Option<&String> {
+    pub fn description(&self) -> Option<&String> {
         self.description.as_ref()
     }
 
     pub fn get_column(&self, column: &ColumnIdentifier) -> Option<String> {
         Some(match column {
             ColumnIdentifier::ID => self.id?.to_string(),
-            ColumnIdentifier::Title => self.get_title()?.to_string(),
-            ColumnIdentifier::Author => self.get_authors()?.join(", "),
-            ColumnIdentifier::Series => self.get_series()?.to_string(),
+            ColumnIdentifier::Title => self.title()?.to_string(),
+            ColumnIdentifier::Author => self.authors()?.join(", "),
+            ColumnIdentifier::Series => self.series()?.to_string(),
             ColumnIdentifier::Description => self.description.as_ref()?.to_string(),
             ColumnIdentifier::ExtendedTag(x) => self.extended_tags.get(x)?.to_string(),
             _ => return None,
@@ -137,7 +137,7 @@ impl Book {
 impl Book {
     /// Generates a placeholder book, which should not be used except as a way to reduce
     /// the run-time of specific operations. Placeholders do not have an ID, and calling
-    /// get_id() on a placeholder will result in a panic.
+    /// id() on a placeholder will result in a panic.
     pub fn placeholder() -> Book {
         Self::default()
     }
@@ -162,7 +162,7 @@ impl Book {
     }
 
     /// Provides a u64 version of the internal ID for comparison.
-    pub fn get_u64_id(&self) -> u64 {
+    pub fn u64_id(&self) -> u64 {
         self.id.map(u64::from).unwrap_or(0)
     }
 
@@ -170,7 +170,7 @@ impl Book {
     ///
     /// # Errors
     /// Will panic if `self` was created by placeholder.
-    pub fn get_id(&self) -> BookID {
+    pub fn id(&self) -> BookID {
         self.id.expect("Called get_id on placeholder book.")
     }
 }
@@ -228,12 +228,10 @@ impl Book {
     /// * ` column ` - the column of interest.
     pub fn cmp_column(&self, other: &Self, column: &ColumnIdentifier) -> Ordering {
         match column {
-            ColumnIdentifier::ID => self.get_u64_id().cmp(&other.get_u64_id()),
-            ColumnIdentifier::Series => self.get_series().cmp(&other.get_series()),
-            ColumnIdentifier::Title => self.get_title().cmp(&other.get_title()),
-            ColumnIdentifier::Description => {
-                self.description.as_ref().cmp(&other.get_description())
-            }
+            ColumnIdentifier::ID => self.u64_id().cmp(&other.u64_id()),
+            ColumnIdentifier::Series => self.series().cmp(&other.series()),
+            ColumnIdentifier::Title => self.title().cmp(&other.title()),
+            ColumnIdentifier::Description => self.description.as_ref().cmp(&other.description()),
             ColumnIdentifier::Author => match (&self.authors, &other.authors) {
                 // TODO: Better comparison algorithm.
                 (None, None) => Ordering::Equal,

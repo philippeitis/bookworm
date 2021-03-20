@@ -269,7 +269,7 @@ impl CommandString {
     /// Writes the current autofill to self.
     fn write_back(&mut self) {
         if self.autofilled.is_some() {
-            let v = self.get_values_autofilled();
+            let v = self.autofilled_values();
             self.cursored_text.text = CommandString::vals_to_string(v).chars().collect();
             self.cursored_text.cursor = self.cursored_text.text.len();
             self.cursored_text.selection = None;
@@ -326,9 +326,9 @@ impl CommandString {
 
         if let Some(af) = self.auto_fill.as_mut() {
             let path = if dir {
-                af.get_next_word_by(|x| x.is_dir())
+                af.next_word_by(|x| x.is_dir())
             } else {
-                af.get_next_word()
+                af.next_word()
             };
 
             if let Some(p) = path {
@@ -361,7 +361,7 @@ impl CommandString {
             }
             None => {
                 if self.autofilled.is_some() {
-                    let v = self.get_values_autofilled();
+                    let v = self.autofilled_values();
                     CharChunks::Unselected(CommandString::vals_to_string(v), String::new())
                 } else {
                     let (a, b) = ct.text.split_at(ct.cursor);
@@ -393,7 +393,7 @@ impl CommandString {
     /// Returns a Vector of tuples (bool, String), where the bool indicates whether
     /// the string needs to be escaped or not, and the string is the content of a
     /// quote escaped string, or is a regular word without whitespace.
-    pub fn get_values_autofilled(&self) -> Vec<(bool, String)> {
+    pub fn autofilled_values(&self) -> Vec<(bool, String)> {
         let mut values: Vec<_> = self.get_values().collect();
         if let Some(s) = &self.autofilled {
             if !self.keep_last {
@@ -408,7 +408,7 @@ impl CommandString {
 impl fmt::Display for CommandString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.autofilled.is_some() {
-            let mut vals = CommandString::vals_to_string(self.get_values_autofilled());
+            let mut vals = CommandString::vals_to_string(self.autofilled_values());
             if self.open_end && vals.ends_with('"') {
                 vals.pop();
             }

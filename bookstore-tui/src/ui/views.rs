@@ -493,7 +493,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
 
                         let args: Vec<_> = state
                             .curr_command
-                            .get_values_autofilled()
+                            .autofilled_values()
                             .into_iter()
                             .map(|(_, a)| a)
                             .collect();
@@ -615,7 +615,7 @@ impl<D: IndexableDatabase> EditWidget<D> {
     fn reset_edit(&mut self) {
         let value = self
             .state()
-            .get_selected_table_value()
+            .selected_table_value()
             .expect("Selected value should exist when in edit mode.")
             .to_owned();
         self.edit = EditState::new(value);

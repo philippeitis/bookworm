@@ -64,8 +64,7 @@ impl BookCache {
     }
 
     pub(crate) fn insert_book(&mut self, book: Book) {
-        self.books
-            .insert(book.get_id(), Arc::new(RwLock::new(book)));
+        self.books.insert(book.id(), Arc::new(RwLock::new(book)));
     }
 
     pub fn len(&self) -> usize {
@@ -143,14 +142,14 @@ impl BookCache {
         let mut merges = vec![];
         for book in self.books.values() {
             let book = book!(book);
-            if let Some(title) = book.get_title() {
-                if let Some(authors) = book.get_authors() {
+            if let Some(title) = book.title() {
+                if let Some(authors) = book.authors() {
                     let a: String = authors.join(", ").to_ascii_lowercase();
                     let val = (title.to_ascii_lowercase(), a);
                     if let Some(id) = ref_map.get(&val) {
-                        merges.push((*id, book.get_id()));
+                        merges.push((*id, book.id()));
                     } else {
-                        ref_map.insert(val, book.get_id());
+                        ref_map.insert(val, book.id());
                     }
                 }
             }
@@ -192,7 +191,7 @@ impl BookCache {
         // get_index_of should not fail - book ID is immutable, and books should not be changed.
         Ok(results.first().map(|b| {
             self.books
-                .get_index_of(&book!(b).get_id())
+                .get_index_of(&book!(b).id())
                 .expect("Reference to existing book was invalidated during search.")
         }))
     }

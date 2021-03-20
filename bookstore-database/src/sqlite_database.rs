@@ -212,7 +212,7 @@ impl SQLiteDatabase {
             .into_iter()
             .map(|book| {
                 let book: Book = book.into();
-                (book.get_id(), book)
+                (book.id(), book)
             })
             .collect();
 
@@ -737,7 +737,7 @@ impl IndexableDatabase for SQLiteDatabase {
             .get_book_indexed(index)
             .ok_or(DatabaseError::IndexOutOfBounds(index))?;
         let book = book!(book);
-        self.remove_book(book.get_id())
+        self.remove_book(book.id())
     }
 
     fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
@@ -754,6 +754,6 @@ impl IndexableDatabase for SQLiteDatabase {
             .get_book_indexed(index)
             .ok_or(DatabaseError::IndexOutOfBounds(index))?;
         let book = book!(book);
-        self.edit_book_with_id(book.get_id(), edits)
+        self.edit_book_with_id(book.id(), edits)
     }
 }

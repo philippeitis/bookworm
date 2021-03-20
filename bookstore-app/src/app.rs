@@ -111,7 +111,7 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<BookVariant>, s
 ///
 /// * ` book ` - The book to find a path for.
 fn get_book_path(book: &Book, index: usize) -> Option<&Path> {
-    Some(book.get_variants().get(index)?.path())
+    Some(book.variants().get(index)?.path())
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -241,7 +241,7 @@ impl<D: IndexableDatabase> App<D> {
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         let book = book_view.get_selected_book()?;
-        let id = book!(book).get_id();
+        let id = book!(book).id();
         self.edit_book_with_id(id, edits)
     }
 

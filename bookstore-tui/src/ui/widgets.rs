@@ -238,13 +238,13 @@ impl BookWidget {
             Err(_) => None,
         };
 
-        let mut data = if let Some(t) = book.get_title() {
+        let mut data = if let Some(t) = book.title() {
             Text::styled(t.to_string(), field_exists)
         } else {
             Text::styled("No title provided", field_not_provided)
         };
 
-        if let Some(a) = book.get_authors() {
+        if let Some(a) = book.authors() {
             let mut s = String::from("By: ");
             s.push_str(&a.join(", "));
             data.extend(Text::styled(s, field_exists));
@@ -252,13 +252,13 @@ impl BookWidget {
             data.extend(Text::styled("No author provided", field_not_provided));
         }
 
-        if let Some(d) = book.get_description() {
+        if let Some(d) = book.description() {
             data.extend(Text::styled("\n", field_exists));
             // TODO: Make this look nice in the TUI.
             data.extend(Text::raw(html2text::from_read(d.as_bytes(), width)));
         }
 
-        let columns = book.get_extended_columns();
+        let columns = book.tags();
         if !columns.is_empty() {
             data.extend(Text::raw("\nTags provided:"));
             for (key, value) in columns.iter() {
@@ -269,7 +269,7 @@ impl BookWidget {
             }
         }
 
-        let variants = book.get_variants();
+        let variants = book.variants();
         if !variants.is_empty() {
             data.extend(Text::raw("\nVariant paths:"));
             for variant in variants {
