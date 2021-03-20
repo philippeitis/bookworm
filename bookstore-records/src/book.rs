@@ -295,7 +295,9 @@ mod test {
     #[test]
     fn test_setting_columns() {
         let id = BookID::try_from(1).unwrap();
-        let mut book = Book::from_variant(id, BookVariant::default());
+        let mut book = Book::default();
+        book.id = Some(id);
+
         let test_sets = [
             ("title", "hello", Ok(()), "hello"),
             ("authors", "world", Ok(()), "world"),
