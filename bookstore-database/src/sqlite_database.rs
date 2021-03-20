@@ -356,8 +356,7 @@ impl SQLiteDatabase {
 
                 let id = BookID::try_from(id as u64)
                     .expect("SQLite database should never return NULL ID from primary key.");
-                self.local_cache
-                    .insert_book_with_id(Book::from_raw_book(id, book));
+                self.local_cache.insert_book(Book::from_raw_book(id, book));
 
                 ids.push(id);
             }
@@ -490,6 +489,17 @@ impl SQLiteDatabase {
             }
         }
         tx.commit().await.map_err(DatabaseError::Backend)
+    }
+
+    async fn update_books_async<I: IntoIterator<Item = BookVariant>>(
+        &mut self,
+        books: I,
+        transaction_size: usize,
+    ) -> Result<Vec<BookID>, <Self as AppDatabase>::Error> {
+        // Get file sizes and hashes
+        let books: Vec<BookVariant> = books.into_iter().collect();
+        let sizes_and_hashes: Vec<_> = books.iter().map(|b| (b.file_size, b.hash)).collect();
+        unimplemented!();
     }
 }
 

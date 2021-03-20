@@ -63,7 +63,7 @@ impl BookCache {
         BookCache { books, cols }
     }
 
-    pub(crate) fn insert_book_with_id(&mut self, book: Book) {
+    pub(crate) fn insert_book(&mut self, book: Book) {
         self.books
             .insert(book.get_id(), Arc::new(RwLock::new(book)));
     }
