@@ -274,19 +274,20 @@ impl SQLiteDatabase {
         Ok(ids[0])
     }
 
-    async fn insert_books_async(
+    async fn insert_books_async<I: IntoIterator<Item = RawBook>>(
         &mut self,
-        books: Vec<RawBook>,
+        books: I,
         transaction_size: usize,
     ) -> Result<Vec<BookID>, <Self as AppDatabase>::Error> {
-        let mut ids = Vec::with_capacity(books.len());
-        let len = books.len();
-        let mut book_iter = books.into_iter();
-        let mut index = 0;
-        while index != len {
+        let mut book_iter = books.into_iter().peekable();
+        let mut ids = Vec::with_capacity({
+            let (low, high) = book_iter.size_hint();
+            high.unwrap_or(low)
+        });
+
+        while book_iter.peek().is_some() {
             let mut tx = self.backend.begin().await?;
             for book in book_iter.by_ref().take(transaction_size) {
-                index += 1;
                 let title = book.title.as_ref();
                 let (series, series_index) = match book.get_series() {
                     None => (None, None),
@@ -542,9 +543,9 @@ impl AppDatabase for SQLiteDatabase {
         block_on(self.insert_book_async(book)).map_err(DatabaseError::Backend)
     }
 
-    fn insert_books(
+    fn insert_books<I: IntoIterator<Item = RawBook>>(
         &mut self,
-        books: Vec<RawBook>,
+        books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
         block_on(self.insert_books_async(books, 5000)).map_err(DatabaseError::Backend)
     }

@@ -79,9 +79,9 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the books can not be inserted into the database.
-    fn insert_books(
+    fn insert_books<I: IntoIterator<Item = RawBook>>(
         &mut self,
-        books: Vec<RawBook>,
+        books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;
 
     /// Removes the book with the given ID. If no book with the given ID exists, no change occurs.
