@@ -9,7 +9,7 @@ use tui::widgets::{Block, Borders, Paragraph};
 use tui::Frame;
 
 use bookstore_app::user_input::{CharChunks, CommandString, Direction};
-use bookstore_records::Book;
+use bookstore_database::Book;
 
 use crate::ui::scrollable_text::BlindOffset;
 

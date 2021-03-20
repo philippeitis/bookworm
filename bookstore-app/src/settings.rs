@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-
 use unicase::UniCase;
+
+use bookstore_database::ColumnOrder;
 
 #[derive(Copy, Clone)]
 pub enum Color {
@@ -70,7 +71,7 @@ impl Default for InterfaceStyle {
 
 #[derive(Debug, Clone)]
 pub struct SortSettings {
-    pub columns: Box<[(UniCase<String>, bool)]>,
+    pub columns: Box<[(UniCase<String>, ColumnOrder)]>,
     pub is_sorted: bool,
 }
 
@@ -290,7 +291,7 @@ impl From<TomlSort> for SortSettings {
         let columns = t.columns.unwrap_or_default();
         let columns: Vec<_> = columns
             .into_iter()
-            .map(|(s, r)| (UniCase::new(s), r.unwrap_or(false)))
+            .map(|(s, r)| (UniCase::new(s), ColumnOrder::from_bool(r.unwrap_or(false))))
             .collect();
         SortSettings {
             is_sorted: columns.is_empty(),
@@ -306,7 +307,7 @@ impl From<SortSettings> for TomlSort {
                 s.columns
                     .into_vec()
                     .into_iter()
-                    .map(|(c, r)| (c.into_inner(), Some(r)))
+                    .map(|(c, r)| (c.into_inner(), Some(r.as_bool())))
                     .collect(),
             ),
         }

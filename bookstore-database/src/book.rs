@@ -6,10 +6,17 @@ use std::str::FromStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::series::Series;
-use crate::{BookError, BookVariant};
+use bookstore_records::series::Series;
+use bookstore_records::BookVariant;
+
+use crate::ColumnOrder;
 
 pub type BookID = std::num::NonZeroU64;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RecordError {
+    ImmutableColumn,
+}
 
 /// Identifies the columns a Book provides. Intended to provide a way to access arbitrary columns,
 /// for the sake of bulk operations which access specific columns.
@@ -191,7 +198,7 @@ impl Book {
         &mut self,
         column: &ColumnIdentifier,
         value: S,
-    ) -> Result<(), BookError> {
+    ) -> Result<(), RecordError> {
         let value = value.as_ref();
         match column {
             ColumnIdentifier::Title => {
@@ -204,7 +211,7 @@ impl Book {
                 self.authors = Some(vec![value.to_owned()]);
             }
             ColumnIdentifier::ID | ColumnIdentifier::Variants => {
-                return Err(BookError::ImmutableColumnError);
+                return Err(RecordError::ImmutableColumn);
             }
             ColumnIdentifier::Series => {
                 self.series = Series::from_str(&value).ok();
@@ -258,13 +265,19 @@ impl Book {
         }
     }
 
-    pub fn cmp_columns(&self, other: &Self, columns: &[(ColumnIdentifier, bool)]) -> Ordering {
+    pub fn cmp_columns(
+        &self,
+        other: &Self,
+        columns: &[(ColumnIdentifier, ColumnOrder)],
+    ) -> Ordering {
         let mut ordering = Ordering::Equal;
-        for (column, reverse) in columns {
+        for (column, column_order) in columns {
             ordering = self.cmp_column(other, column);
-            if *reverse {
+
+            if *column_order == ColumnOrder::Descending {
                 ordering = ordering.reverse();
             }
+
             if ordering != Ordering::Equal {
                 return ordering;
             }
@@ -299,7 +312,7 @@ mod test {
         let test_sets = [
             ("title", "hello", Ok(()), "hello"),
             ("authors", "world", Ok(()), "world"),
-            ("id", "5", Err(BookError::ImmutableColumnError), "1"),
+            ("id", "5", Err(RecordError::ImmutableColumn), "1"),
             ("series", "hello world", Ok(()), "hello world"),
             ("series", "hello world [1.2]", Ok(()), "hello world [1.2]"),
             ("random_tag", "random value", Ok(()), "random value"),

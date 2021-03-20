@@ -6,7 +6,6 @@ use quick_epub::Error as EpubError;
 /// Enumerates all potential errors that can occur when using a Book.
 pub enum BookError {
     FileError,
-    ImmutableColumnError,
     UnsupportedExtension(OsString), //    MetadataError,
 }
 

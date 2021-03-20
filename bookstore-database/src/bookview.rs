@@ -6,11 +6,10 @@ use std::sync::{Arc, RwLock};
 use indexmap::map::IndexMap;
 use unicase::UniCase;
 
-use bookstore_records::book::BookID;
-use bookstore_records::{book::ColumnIdentifier, Book, BookError};
-
+use crate::book::{BookID, ColumnIdentifier, RecordError};
 use crate::search::{Error as SearchError, Search};
 use crate::{AppDatabase, DatabaseError, IndexableDatabase, PageCursor};
+use crate::{Book, ColumnOrder};
 
 macro_rules! book {
     ($book: ident) => {
@@ -22,8 +21,8 @@ macro_rules! book {
 pub enum BookViewError<DBError> {
     Database(DatabaseError<DBError>),
     NoBookSelected,
-    SearchError,
-    BookError,
+    Search,
+    Record,
 }
 
 pub enum BookViewIndex {
@@ -39,13 +38,13 @@ impl<DBError> From<DatabaseError<DBError>> for BookViewError<DBError> {
 
 impl<DBError> From<SearchError> for BookViewError<DBError> {
     fn from(_: SearchError) -> Self {
-        BookViewError::SearchError
+        BookViewError::Search
     }
 }
 
-impl<DBError> From<BookError> for BookViewError<DBError> {
-    fn from(_: BookError) -> Self {
-        BookViewError::BookError
+impl<DBError> From<RecordError> for BookViewError<DBError> {
+    fn from(_: RecordError) -> Self {
+        BookViewError::Record
     }
 }
 
@@ -57,12 +56,12 @@ pub trait BookView<D: AppDatabase> {
     fn sort_by_column<S: AsRef<str>>(
         &mut self,
         col: S,
-        reverse: bool,
+        reverse: ColumnOrder,
     ) -> Result<(), DatabaseError<D::Error>>;
 
     fn sort_by_columns<S: AsRef<str>>(
         &mut self,
-        cols: &[(S, bool)],
+        cols: &[(S, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>>;
 
     fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError<D::Error>>;
@@ -164,10 +163,10 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
     fn sort_by_column<S: AsRef<str>>(
         &mut self,
         col: S,
-        reverse: bool,
+        column_order: ColumnOrder,
     ) -> Result<(), DatabaseError<D::Error>> {
         let col = ColumnIdentifier::from(col);
-        if reverse {
+        if column_order == ColumnOrder::Descending {
             self.scopes.iter_mut().for_each(|(_, scope)| {
                 scope.sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
             });
@@ -182,7 +181,7 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 
     fn sort_by_columns<S: AsRef<str>>(
         &mut self,
-        cols: &[(S, bool)],
+        cols: &[(S, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>> {
         let cols: Vec<_> = cols
             .iter()

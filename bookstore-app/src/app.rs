@@ -9,13 +9,13 @@ use std::sync::{Arc, RwLock};
 use rayon::prelude::*;
 use unicase::UniCase;
 
+use bookstore_database::book::{BookID, RecordError};
 use bookstore_database::bookview::BookViewIndex;
 use bookstore_database::{
-    bookview::BookViewError, AppDatabase, BookView, DatabaseError, IndexableDatabase,
-    NestedBookView, ScrollableBookView, SearchableBookView,
+    bookview::BookViewError, AppDatabase, Book, BookView, ColumnOrder, DatabaseError,
+    IndexableDatabase, NestedBookView, ScrollableBookView, SearchableBookView,
 };
-use bookstore_records::book::BookID;
-use bookstore_records::{Book, BookError, BookVariant};
+use bookstore_records::{BookError, BookVariant};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;
@@ -45,6 +45,7 @@ macro_rules! book {
 #[derive(Debug)]
 pub enum ApplicationError<DBError> {
     IO(std::io::Error),
+    Record(RecordError),
     Book(BookError),
     Database(DatabaseError<DBError>),
     BookView(BookViewError<DBError>),
@@ -62,7 +63,6 @@ impl<DBError> From<DatabaseError<DBError>> for ApplicationError<DBError> {
     fn from(e: DatabaseError<DBError>) -> Self {
         match e {
             DatabaseError::Io(e) => ApplicationError::IO(e),
-            DatabaseError::Book(e) => ApplicationError::Book(e),
             e => ApplicationError::Database(e),
         }
     }
@@ -71,6 +71,12 @@ impl<DBError> From<DatabaseError<DBError>> for ApplicationError<DBError> {
 impl<DBError> From<BookError> for ApplicationError<DBError> {
     fn from(e: BookError) -> Self {
         ApplicationError::Book(e)
+    }
+}
+
+impl<DBError> From<RecordError> for ApplicationError<DBError> {
+    fn from(e: RecordError) -> Self {
+        ApplicationError::Record(e)
     }
 }
 
@@ -314,7 +320,10 @@ impl<D: IndexableDatabase> App<D> {
                 self.sort_settings.is_sorted = false;
             }
             Command::AddBookFromFile(f) => {
-                self.write(|db| db.insert_book(BookVariant::from_path(&f)?))?;
+                self.write(move |db| {
+                    let book = BookVariant::from_path(&f)?;
+                    db.insert_book(book).map_err(ApplicationError::Database)
+                })?;
                 self.sort_settings.is_sorted = false;
             }
             Command::AddBooksFromDir(dir, depth) => {
@@ -402,7 +411,7 @@ impl<D: IndexableDatabase> App<D> {
         let cols: Vec<_> = cols
             .into_vec()
             .into_iter()
-            .map(|(s, r)| (UniCase::new(s), r))
+            .map(|(s, r)| (UniCase::new(s), ColumnOrder::from_bool(r)))
             .collect();
 
         self.sort_settings.columns = cols.into_boxed_slice();

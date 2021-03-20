@@ -6,12 +6,9 @@ use indexmap::map::IndexMap;
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
-use bookstore_records::{
-    book::{BookID, ColumnIdentifier},
-    Book, BookError,
-};
-
+use crate::book::{BookID, ColumnIdentifier, RecordError};
 use crate::search::{Error, Search};
+use crate::{Book, ColumnOrder};
 
 macro_rules! book {
     ($book: ident) => {
@@ -103,7 +100,7 @@ impl BookCache {
         &mut self,
         id: BookID,
         edits: &[(S0, S1)],
-    ) -> Result<bool, BookError> {
+    ) -> Result<bool, RecordError> {
         match self.books.get_mut(&id) {
             None => Ok(false),
             Some(book) => {
@@ -120,7 +117,7 @@ impl BookCache {
         &mut self,
         index: usize,
         edits: &[(S0, S1)],
-    ) -> Result<bool, BookError> {
+    ) -> Result<bool, RecordError> {
         match self.books.get_index_mut(index) {
             None => Ok(false),
             Some((_, book)) => {
@@ -196,7 +193,7 @@ impl BookCache {
         }))
     }
 
-    pub fn sort_books_by_cols<S: AsRef<str>>(&mut self, cols: &[(S, bool)]) {
+    pub fn sort_books_by_cols<S: AsRef<str>>(&mut self, cols: &[(S, ColumnOrder)]) {
         let cols: Vec<_> = cols
             .iter()
             .map(|(c, r)| (ColumnIdentifier::from(c), *r))

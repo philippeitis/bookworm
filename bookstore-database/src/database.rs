@@ -5,16 +5,17 @@ use std::sync::{Arc, RwLock};
 
 use unicase::UniCase;
 
-use crate::search::{Error as SearchError, Search};
+use bookstore_records::BookVariant;
 
-use bookstore_records::book::BookID;
-use bookstore_records::{Book, BookError, BookVariant};
+use crate::book::{BookID, RecordError};
+use crate::search::{Error as SearchError, Search};
+use crate::{Book, ColumnOrder};
 
 #[derive(Debug)]
 pub enum DatabaseError<DBError> {
     Io(std::io::Error),
     Search(SearchError),
-    Book(BookError),
+    Record(RecordError),
     BookNotFound(BookID),
     IndexOutOfBounds(usize),
     Backend(DBError),
@@ -26,9 +27,9 @@ impl<DBError> From<std::io::Error> for DatabaseError<DBError> {
     }
 }
 
-impl<DBError> From<BookError> for DatabaseError<DBError> {
-    fn from(e: BookError) -> Self {
-        DatabaseError::Book(e)
+impl<DBError> From<RecordError> for DatabaseError<DBError> {
+    fn from(e: RecordError) -> Self {
+        DatabaseError::Record(e)
     }
 }
 
@@ -202,7 +203,7 @@ pub trait AppDatabase {
     /// This function will return an error if the database fails.
     fn sort_books_by_cols<S: AsRef<str>>(
         &mut self,
-        columns: &[(S, bool)],
+        columns: &[(S, ColumnOrder)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 
     /// Returns the number of books stored internally.

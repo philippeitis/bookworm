@@ -1,8 +1,8 @@
 use regex::{Error as RegexError, Regex};
 use sublime_fuzzy::best_match;
 
-use bookstore_records::book::ColumnIdentifier;
-use bookstore_records::Book;
+use crate::book::ColumnIdentifier;
+use crate::Book;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum SearchMode {
