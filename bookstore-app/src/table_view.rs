@@ -1,8 +1,8 @@
 use unicase::UniCase;
 
-use bookstore_database::book::ColumnIdentifier;
 use bookstore_database::bookview::BookViewError;
 use bookstore_database::{BookView, IndexableDatabase};
+use bookstore_records::book::ColumnIdentifier;
 
 macro_rules! book {
     ($book: ident) => {

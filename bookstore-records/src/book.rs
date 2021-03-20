@@ -6,9 +6,8 @@ use std::str::FromStr;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use bookstore_records::series::Series;
-use bookstore_records::BookVariant;
-
+use crate::series::Series;
+use crate::BookVariant;
 use crate::ColumnOrder;
 
 pub type BookID = std::num::NonZeroU64;
@@ -168,11 +167,6 @@ impl Book {
         }
     }
 
-    /// Provides a u64 version of the internal ID for comparison.
-    pub fn u64_id(&self) -> u64 {
-        self.id.map(u64::from).unwrap_or(0)
-    }
-
     /// Returns the ID, which can be used as an index.
     ///
     /// # Errors
@@ -235,7 +229,7 @@ impl Book {
     /// * ` column ` - the column of interest.
     pub fn cmp_column(&self, other: &Self, column: &ColumnIdentifier) -> Ordering {
         match column {
-            ColumnIdentifier::ID => self.u64_id().cmp(&other.u64_id()),
+            ColumnIdentifier::ID => self.id.cmp(&other.id),
             ColumnIdentifier::Series => self.series().cmp(&other.series()),
             ColumnIdentifier::Title => self.title().cmp(&other.title()),
             ColumnIdentifier::Description => self.description.as_ref().cmp(&other.description()),

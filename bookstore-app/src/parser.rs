@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use bookstore_database::book::{BookID, ColumnIdentifier};
 use bookstore_database::search::{Search, SearchMode};
+use bookstore_records::book::{BookID, ColumnIdentifier};
 
 #[derive(Debug)]
 pub enum Flag {

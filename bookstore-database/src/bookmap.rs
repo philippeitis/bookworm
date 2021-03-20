@@ -6,9 +6,10 @@ use indexmap::map::IndexMap;
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
-use crate::book::{BookID, ColumnIdentifier, RecordError};
+use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
+use bookstore_records::{Book, ColumnOrder};
+
 use crate::search::{Error, Search};
-use crate::{Book, ColumnOrder};
 
 macro_rules! book {
     ($book: ident) => {

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
-use bookstore_database::ColumnOrder;
+use bookstore_records::ColumnOrder;
 
 #[derive(Copy, Clone)]
 pub enum Color {

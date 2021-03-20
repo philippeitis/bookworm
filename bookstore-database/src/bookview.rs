@@ -6,10 +6,11 @@ use std::sync::{Arc, RwLock};
 use indexmap::map::IndexMap;
 use unicase::UniCase;
 
-use crate::book::{BookID, ColumnIdentifier, RecordError};
+use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
+use bookstore_records::{Book, ColumnOrder};
+
 use crate::search::{Error as SearchError, Search};
 use crate::{AppDatabase, DatabaseError, IndexableDatabase, PageCursor};
-use crate::{Book, ColumnOrder};
 
 macro_rules! book {
     ($book: ident) => {

@@ -17,7 +17,7 @@ use unicase::UniCase;
 
 use bookstore_records::book::{str_to_series, BookID, ColumnIdentifier};
 use bookstore_records::series::Series;
-use bookstore_records::{Book, BookVariant};
+use bookstore_records::{Book, BookVariant, ColumnOrder};
 
 use crate::bookmap::BookCache;
 use crate::search::Search;
@@ -669,7 +669,7 @@ impl AppDatabase for SQLiteDatabase {
 
     fn sort_books_by_cols<S: AsRef<str>>(
         &mut self,
-        columns: &[(S, bool)],
+        columns: &[(S, ColumnOrder)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         self.local_cache.sort_books_by_cols(columns);
         Ok(())

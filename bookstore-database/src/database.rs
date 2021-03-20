@@ -5,11 +5,10 @@ use std::sync::{Arc, RwLock};
 
 use unicase::UniCase;
 
-use bookstore_records::BookVariant;
+use bookstore_records::book::{BookID, RecordError};
+use bookstore_records::{Book, BookVariant, ColumnOrder};
 
-use crate::book::{BookID, RecordError};
 use crate::search::{Error as SearchError, Search};
-use crate::{Book, ColumnOrder};
 
 #[derive(Debug)]
 pub enum DatabaseError<DBError> {

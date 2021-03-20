@@ -9,13 +9,13 @@ use std::sync::{Arc, RwLock};
 use rayon::prelude::*;
 use unicase::UniCase;
 
-use bookstore_database::book::{BookID, RecordError};
 use bookstore_database::bookview::BookViewIndex;
 use bookstore_database::{
-    bookview::BookViewError, AppDatabase, Book, BookView, ColumnOrder, DatabaseError,
-    IndexableDatabase, NestedBookView, ScrollableBookView, SearchableBookView,
+    bookview::BookViewError, AppDatabase, Book, BookView, DatabaseError, IndexableDatabase,
+    NestedBookView, ScrollableBookView, SearchableBookView,
 };
-use bookstore_records::{BookError, BookVariant};
+use bookstore_records::book::{BookID, RecordError};
+use bookstore_records::{BookError, BookVariant, ColumnOrder};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;

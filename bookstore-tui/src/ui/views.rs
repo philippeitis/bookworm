@@ -21,9 +21,8 @@ use clipboard::{ClipboardContext, ClipboardProvider};
 use bookstore_app::settings::Color;
 use bookstore_app::{parse_args, App, ApplicationError, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
-use bookstore_database::book::RecordError;
 use bookstore_database::{BookView, IndexableDatabase, NestedBookView, ScrollableBookView};
-use bookstore_records::BookError;
+use bookstore_records::book::RecordError;
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::terminal_ui::UIState;
