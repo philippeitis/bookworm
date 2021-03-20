@@ -85,10 +85,11 @@ impl RawBook {
     where
         P: AsRef<path::Path>,
     {
+        Ok(Self::from_variant(BookVariant::generate_from_file(path)?))
+    }
+
+    pub fn from_variant(mut variant: BookVariant) -> RawBook {
         let mut book = RawBook::default();
-
-        let mut variant = BookVariant::generate_from_file(path)?;
-
         variant.id = Some(0);
         if book.title.is_none() {
             book.title = std::mem::take(&mut variant.local_title);
@@ -103,7 +104,7 @@ impl RawBook {
         }
         book.variants = vec![variant];
 
-        Ok(book)
+        book
     }
 }
 
