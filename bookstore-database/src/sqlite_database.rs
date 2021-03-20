@@ -15,7 +15,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use unicase::UniCase;
 
-use bookstore_records::book::{str_to_series, BookID, ColumnIdentifier, RawBook};
+use bookstore_records::book::{str_to_series, BookID, ColumnIdentifier};
 use bookstore_records::series::Series;
 use bookstore_records::{Book, BookVariant};
 
@@ -151,7 +151,11 @@ fn v16_to_v8(a: Vec<u16>) -> Vec<u8> {
 
 impl From<BookData> for Book {
     fn from(bd: BookData) -> Self {
-        let rb = RawBook {
+        Book {
+            id: Some(
+                NonZeroU64::try_from(bd.book_id as u64)
+                    .expect("SQLite database returned NULL primary ID."),
+            ),
             title: bd.title.clone(),
             series: {
                 let series_id = bd.series_id;
@@ -161,12 +165,7 @@ impl From<BookData> for Book {
                 })
             },
             ..Default::default()
-        };
-        Book::from_raw_book(
-            NonZeroU64::try_from(bd.book_id as u64)
-                .expect("SQLite database returned NULL primary ID."),
-            rb,
-        )
+        }
     }
 }
 
@@ -221,7 +220,7 @@ impl SQLiteDatabase {
             let id = NonZeroU64::try_from(variant.book_id as u64).unwrap();
             let variant: BookVariant = variant.into();
             if let Some(book) = books.get_mut(&id) {
-                book.inner_mut().push_variant(variant);
+                book.push_variant(variant);
             } else {
                 // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
                 panic!(
@@ -272,13 +271,13 @@ impl SQLiteDatabase {
 impl SQLiteDatabase {
     async fn insert_book_async(
         &mut self,
-        book: RawBook,
+        book: BookVariant,
     ) -> Result<BookID, <Self as AppDatabase>::Error> {
         let ids = self.insert_books_async(vec![book], 1).await?;
         Ok(ids[0])
     }
 
-    async fn insert_books_async<I: IntoIterator<Item = RawBook>>(
+    async fn insert_books_async<I: IntoIterator<Item = BookVariant>>(
         &mut self,
         books: I,
         transaction_size: usize,
@@ -291,73 +290,81 @@ impl SQLiteDatabase {
 
         while book_iter.peek().is_some() {
             let mut tx = self.backend.begin().await?;
-            for book in book_iter.by_ref().take(transaction_size) {
-                let title = book.title.as_ref();
-                let (series, series_index) = match book.get_series() {
-                    None => (None, None),
-                    Some(series) => (Some(&series.name), series.index.clone()),
-                };
+            for variant in book_iter.by_ref().take(transaction_size) {
+                let variant: BookVariant = variant;
+                let title = variant.local_title.as_ref();
+                // let (series, series_index) = (None, None);
+                // match book.get_series() {
+                //     None => (None, None),
+                //     Some(series) => (Some(&series.name), series.index.clone()),
+                // };
 
-                let id = sqlx::query!(
-                    "INSERT into books (title, series_name, series_id) VALUES(?, ?, ?)",
-                    title,
-                    series,
-                    series_index
-                )
-                .execute(&mut tx)
-                .await?
-                .last_insert_rowid();
+                // let id = sqlx::query!(
+                //     "INSERT into books (title, series_name, series_id) VALUES(?, ?, ?)",
+                //     title,
+                //     series,
+                //     series_index
+                // )
+                // .execute(&mut tx)
+                // .await?
+                // .last_insert_rowid();
 
-                let variants = book.get_variants();
-                if !variants.is_empty() {
-                    for variant in variants {
-                        let book_type = ron::to_string(variant.book_type())
-                            .expect("Serialization of value should never fail.");
-                        #[cfg(unix)]
-                        let path = variant.path().as_os_str().as_bytes();
-                        #[cfg(windows)]
-                        let path = v16_to_v8(variant.path().as_os_str().encode_wide().collect());
-                        let local_title = &variant.local_title;
-                        let identifier = variant.identifier.as_ref().map(|i| {
-                            ron::to_string(i).expect("Serialization of value should never fail.")
-                        });
-                        let language = &variant.language;
-                        let description = &variant.description;
-                        let sub_id = &variant.id;
-                        let hash = variant.hash.to_vec();
-                        let file_size = variant.file_size as i64;
-                        sqlx::query!(
-                            "INSERT into variants (book_type, path, local_title, identifier, language, description, id, hash, file_size, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            book_type,
-                            path,
-                            local_title,
-                            identifier,
-                            language,
-                            description,
-                            sub_id,
-                            hash,
-                            file_size,
-                            id,
-                        ).execute(&mut tx).await?;
-                    }
+                let id = sqlx::query!("INSERT into books (title) VALUES(?)", title,)
+                    .execute(&mut tx)
+                    .await?
+                    .last_insert_rowid();
+
+                let book_type = ron::to_string(variant.book_type())
+                    .expect("Serialization of value should never fail.");
+                #[cfg(unix)]
+                let path = variant.path().as_os_str().as_bytes();
+                #[cfg(windows)]
+                let path = v16_to_v8(variant.path().as_os_str().encode_wide().collect());
+                let local_title = &variant.local_title;
+                let identifier = variant
+                    .identifier
+                    .as_ref()
+                    .map(|i| ron::to_string(i).expect("Serialization of value should never fail."));
+                let language = &variant.language;
+                let description = &variant.description;
+                let sub_id = &variant.id;
+                let hash = variant.hash.to_vec();
+                let file_size = variant.file_size as i64;
+                sqlx::query!(
+                    "INSERT into variants (book_type, path, local_title, identifier, language, description, id, hash, file_size, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    book_type,
+                    path,
+                    local_title,
+                    identifier,
+                    language,
+                    description,
+                    sub_id,
+                    hash,
+                    file_size,
+                    id,
+                ).execute(&mut tx).await?;
+
+                for (name, value) in variant.tags.iter() {
+                    sqlx::query!(
+                        "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES(?, ?, ?);",
+                        name,
+                        value,
+                        id
+                    )
+                    .execute(&mut tx)
+                    .await?;
                 }
 
-                let tags = book.get_extended_columns();
-                if !tags.is_empty() {
-                    let mut query = String::from(
-                        "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES",
-                    );
-                    query.extend(tags.iter().map(|(tag_name, tag_value)| {
-                        format!("({}, {}, {}),", tag_name, tag_value, id)
-                    }));
-                    query.pop();
-                    query.push(';');
-                    sqlx::query(&query).execute(&mut tx).await?;
+                if let Some(authors) = &variant.additional_authors {
+                    for author in authors {
+                        sqlx::query!("INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES(\"author\", ?, ?);", author, id).execute(&mut tx).await?;
+                    }
                 }
 
                 let id = BookID::try_from(id as u64)
                     .expect("SQLite database should never return NULL ID from primary key.");
-                self.local_cache.insert_book(Book::from_raw_book(id, book));
+                self.local_cache
+                    .insert_book(Book::from_variant(id, variant));
 
                 ids.push(id);
             }
@@ -555,11 +562,11 @@ impl AppDatabase for SQLiteDatabase {
         Ok(())
     }
 
-    fn insert_book(&mut self, book: RawBook) -> Result<BookID, DatabaseError<Self::Error>> {
+    fn insert_book(&mut self, book: BookVariant) -> Result<BookID, DatabaseError<Self::Error>> {
         block_on(self.insert_book_async(book)).map_err(DatabaseError::Backend)
     }
 
-    fn insert_books<I: IntoIterator<Item = RawBook>>(
+    fn insert_books<I: IntoIterator<Item = BookVariant>>(
         &mut self,
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {

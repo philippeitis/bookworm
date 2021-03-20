@@ -7,8 +7,8 @@ use unicase::UniCase;
 
 use crate::search::{Error as SearchError, Search};
 
-use bookstore_records::book::{BookID, RawBook};
-use bookstore_records::{Book, BookError};
+use bookstore_records::book::BookID;
+use bookstore_records::{Book, BookError, BookVariant};
 
 #[derive(Debug)]
 pub enum DatabaseError<DBError> {
@@ -70,7 +70,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    fn insert_book(&mut self, book: RawBook) -> Result<BookID, DatabaseError<Self::Error>>;
+    fn insert_book(&mut self, book: BookVariant) -> Result<BookID, DatabaseError<Self::Error>>;
 
     /// Stores each book into the database, and returns a Vec of corresponding IDs.
     ///
@@ -79,7 +79,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the books can not be inserted into the database.
-    fn insert_books<I: IntoIterator<Item = RawBook>>(
+    fn insert_books<I: IntoIterator<Item = BookVariant>>(
         &mut self,
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;

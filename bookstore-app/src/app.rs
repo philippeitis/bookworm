@@ -15,7 +15,7 @@ use bookstore_database::{
     NestedBookView, ScrollableBookView, SearchableBookView,
 };
 use bookstore_records::book::BookID;
-use bookstore_records::{book::RawBook, Book, BookError, BookVariant};
+use bookstore_records::{Book, BookError, BookVariant};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;
@@ -314,18 +314,12 @@ impl<D: IndexableDatabase> App<D> {
                 self.sort_settings.is_sorted = false;
             }
             Command::AddBookFromFile(f) => {
-                self.write(|db| db.insert_book(RawBook::generate_from_file(&f)?))?;
+                self.write(|db| db.insert_book(BookVariant::generate_from_file(&f)?))?;
                 self.sort_settings.is_sorted = false;
             }
             Command::AddBooksFromDir(dir, depth) => {
                 // TODO: Handle failed reads.
-                self.write(|db| {
-                    db.insert_books(
-                        books_in_dir(&dir, depth)?
-                            .into_iter()
-                            .map(RawBook::from_variant),
-                    )
-                })?;
+                self.write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
                 self.sort_settings.is_sorted = false;
             }
             Command::AddColumn(column) => {
