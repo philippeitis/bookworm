@@ -93,6 +93,7 @@ pub trait MetadataFiller {
 pub struct BookVariant {
     pub book_type: BookType,
     pub path: path::PathBuf,
+    pub file_size: u64,
     pub local_title: Option<String>,
     pub identifier: Option<Identifier>,
     pub language: Option<String>,
@@ -133,7 +134,7 @@ impl BookVariant {
 
         let book_type = BookType::try_from(ext)?;
 
-        let (reader, hash) = {
+        let (reader, hash, file_size) = {
             let mut file = std::fs::File::open(&path)?;
             let len = file.metadata()?.len();
             let bytes_to_read = (len as usize).min(4096);
@@ -146,13 +147,18 @@ impl BookVariant {
             hasher.update(&buf[..bytes_to_read]);
             let res = hasher.finalize();
 
-            (BufReader::with_capacity(bytes_to_read, file), res.into())
+            (
+                BufReader::with_capacity(bytes_to_read, file),
+                res.into(),
+                len,
+            )
         };
 
         let mut book = BookVariant {
             book_type,
             path: path.to_owned(),
             hash,
+            file_size,
             local_title: None,
             identifier: None,
             language: None,

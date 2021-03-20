@@ -49,6 +49,7 @@ const CREATE_VARIANTS: &str = r#"CREATE TABLE IF NOT EXISTS `variants` (
 `description` TEXT DEFAULT NULL,
 `id` INTEGER DEFAULT NULL,
 `hash` BLOB NOT NULL,
+`file_size` INTEGER NOT NULL,
 `book_id` INTEGER NOT NULL,
 FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
@@ -122,6 +123,7 @@ struct VariantData {
     identifier: Option<String>,
     description: Option<String>,
     id: Option<i64>,
+    file_size: i64,
     hash: Vec<u8>,
 }
 
@@ -188,6 +190,7 @@ impl From<VariantData> for BookVariant {
             description: vd.description,
             id: vd.id.map(|id| u32::try_from(id).unwrap()),
             hash: vd.hash.try_into().expect("Provided hash is too long."),
+            file_size: vd.file_size as u64,
         }
     }
 }
@@ -321,8 +324,9 @@ impl SQLiteDatabase {
                         let description = &variant.description;
                         let sub_id = &variant.id;
                         let hash = variant.hash.to_vec();
+                        let file_size = variant.file_size as i64;
                         sqlx::query!(
-                            "INSERT into variants (book_type, path, local_title, identifier, language, description, id, hash, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            "INSERT into variants (book_type, path, local_title, identifier, language, description, id, hash, file_size, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             book_type,
                             path,
                             local_title,
@@ -331,6 +335,7 @@ impl SQLiteDatabase {
                             description,
                             sub_id,
                             hash,
+                            file_size,
                             id,
                         ).execute(&mut tx).await?;
                     }
