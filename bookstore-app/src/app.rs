@@ -15,7 +15,7 @@ use bookstore_database::{
     NestedBookView, ScrollableBookView, SearchableBookView,
 };
 use bookstore_records::book::BookID;
-use bookstore_records::{book::RawBook, Book, BookError};
+use bookstore_records::{book::RawBook, Book, BookError, BookVariant};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;
@@ -92,7 +92,7 @@ impl<DBError> From<CommandStringError> for ApplicationError<DBError> {
 // Benchmarks:
 // 5.3k books, Windows: 0.75s
 // 332 books, Linux: ~0.042s
-fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::io::Error> {
+fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<BookVariant>, std::io::Error> {
     // TODO: Handle reads erroring out due to filesystem issues somehow.
     Ok(jwalk::WalkDir::new(std::fs::canonicalize(dir)?)
         .max_depth(depth as usize)
@@ -100,7 +100,7 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<RawBook>, std::
         .filter_map(|res| res.map(|e| e.path()).ok())
         .collect::<Vec<_>>()
         .par_iter()
-        .filter_map(|path| RawBook::generate_from_file_trusted(path).ok())
+        .filter_map(|path| BookVariant::generate_from_file(path).ok())
         .collect::<Vec<_>>())
 }
 
@@ -319,7 +319,13 @@ impl<D: IndexableDatabase> App<D> {
             }
             Command::AddBooksFromDir(dir, depth) => {
                 // TODO: Handle failed reads.
-                self.write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
+                self.write(|db| {
+                    db.insert_books(
+                        books_in_dir(&dir, depth)?
+                            .into_iter()
+                            .map(RawBook::from_variant),
+                    )
+                })?;
                 self.sort_settings.is_sorted = false;
             }
             Command::AddColumn(column) => {
