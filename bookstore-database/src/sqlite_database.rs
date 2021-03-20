@@ -191,6 +191,7 @@ impl From<VariantData> for BookVariant {
             id: vd.id.map(|id| u32::try_from(id).unwrap()),
             hash: vd.hash.try_into().expect("Provided hash is too long."),
             file_size: vd.file_size as u64,
+            tags: HashMap::new(),
         }
     }
 }

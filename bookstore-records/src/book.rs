@@ -91,17 +91,11 @@ impl RawBook {
     pub fn from_variant(mut variant: BookVariant) -> RawBook {
         let mut book = RawBook::default();
         variant.id = Some(0);
-        if book.title.is_none() {
-            book.title = std::mem::take(&mut variant.local_title);
-        }
 
-        if book.authors.is_none() {
-            book.authors = std::mem::take(&mut variant.additional_authors);
-        }
-
-        if book.description.is_none() {
-            book.description = std::mem::take(&mut variant.description);
-        }
+        book.title = std::mem::take(&mut variant.local_title);
+        book.authors = std::mem::take(&mut variant.additional_authors);
+        book.description = std::mem::take(&mut variant.description);
+        book.extended_tags = std::mem::take(&mut variant.tags);
         book.variants = vec![variant];
 
         book
