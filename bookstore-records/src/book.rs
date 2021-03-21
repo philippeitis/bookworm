@@ -62,14 +62,17 @@ impl ColumnIdentifier {
 
 pub fn str_to_series(value: &str) -> Option<(String, Option<f32>)> {
     if value.ends_with(']') {
-        // Replace with rsplit_once when stable.
+        // TODO: Replace with rsplit_once when stable (1.52).
         let mut words = value.rsplitn(2, char::is_whitespace);
-        if let Some(id) = words.next() {
-            if let Some(series) = words.next() {
-                if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str()) {
-                    return Some((series.to_owned(), Some(id)));
+        match (words.next(), words.next()) {
+            (Some(id), Some(series)) => {
+                if id.starts_with('[') {
+                    if let Ok(id) = f32::from_str(&id[1..id.len() - 1]) {
+                        return Some((series.to_owned(), Some(id)));
+                    }
                 }
             }
+            _ => {}
         }
     }
     Some((value.to_owned(), None))
