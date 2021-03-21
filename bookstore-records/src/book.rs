@@ -130,7 +130,20 @@ impl Book {
         })
     }
 
-    pub fn push_variant(&mut self, variant: BookVariant) {
+    pub fn push_variant(&mut self, mut variant: BookVariant) {
+        if self.title.is_none() {
+            self.title = std::mem::take(&mut variant.local_title);
+        }
+        if self.authors.is_none() {
+            self.authors = std::mem::take(&mut variant.additional_authors);
+        }
+        if self.description.is_none() {
+            self.description = std::mem::take(&mut variant.description);
+        }
+        if self.extended_tags.is_empty() {
+            self.extended_tags = std::mem::take(&mut variant.tags);
+        }
+
         self.variants.push(variant);
     }
 
