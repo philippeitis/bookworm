@@ -65,14 +65,14 @@ impl PageCursor {
             let ind = {
                 let min = self.window_size.min(self.height);
                 if min == 0 {
-                    min
+                    None
                 } else if ind >= min {
-                    min - 1
+                    Some(min - 1)
                 } else {
-                    ind
+                    Some(ind)
                 }
             };
-            !self.selected.replace_and_equal(Some(ind))
+            !self.selected.replace_and_equal(ind)
         } else {
             !self.selected.replace_and_equal(index)
         }
@@ -308,5 +308,13 @@ mod test {
         assert!(cursor.selected().unwrap() < 25);
         cursor.scroll_up(40);
         assert!(cursor.selected().unwrap() < 25);
+    }
+
+    #[test]
+    fn test_select_up_down_no_select_when_empty() {
+        let mut cursor = PageCursor::new(25, 0);
+        assert!(!cursor.select_up());
+        assert!(!cursor.select_down());
+        assert!(!cursor.select(Some(0)));
     }
 }
