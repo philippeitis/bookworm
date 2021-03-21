@@ -1,7 +1,9 @@
-use crate::variant::{unravel_author, Identifier, MetadataFiller};
+use std::str::FromStr;
+
 use isbn2::Isbn;
 use quick_epub::{IdentifierScheme, Metadata};
-use std::str::FromStr;
+
+use crate::variant::{unravel_author, Identifier, MetadataFiller};
 
 impl MetadataFiller for Metadata {
     fn take_title(&mut self, title: &mut Option<String>) {

@@ -1,7 +1,10 @@
-use crate::variant::{unravel_author, Identifier, MetadataFiller};
+use std::collections::HashMap;
+use std::str::FromStr;
+
 use isbn2::Isbn;
 use mobi::MobiMetadata;
-use std::str::FromStr;
+
+use crate::variant::{unravel_author, Identifier, MetadataFiller};
 
 impl MetadataFiller for MobiMetadata {
     fn take_title(&mut self, title: &mut Option<String>) {
