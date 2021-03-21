@@ -97,34 +97,44 @@ impl BookCache {
         self.books.values().cloned().collect()
     }
 
-    pub fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
+    pub fn edit_book_with_id<S: AsRef<str>>(
         &mut self,
         id: BookID,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
     ) -> Result<bool, RecordError> {
         match self.books.get_mut(&id) {
             None => Ok(false),
             Some(book) => {
                 for (column, new_value) in edits {
-                    book_mut!(book).set_column(&column.as_ref().into(), new_value)?;
-                    self.cols.insert(UniCase::new(column.as_ref().to_owned()));
+                    book_mut!(book).set_column(&column, new_value)?;
+                    match column {
+                        ColumnIdentifier::ExtendedTag(x) => {
+                            self.cols.insert(UniCase::new(x.to_owned()));
+                        }
+                        _ => {}
+                    }
                 }
                 Ok(true)
             }
         }
     }
 
-    pub fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
+    pub fn edit_book_indexed<S: AsRef<str>>(
         &mut self,
         index: usize,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
     ) -> Result<bool, RecordError> {
         match self.books.get_index_mut(index) {
             None => Ok(false),
             Some((_, book)) => {
                 for (column, new_value) in edits {
-                    book_mut!(book).set_column(&column.as_ref().into(), new_value)?;
-                    self.cols.insert(UniCase::new(column.as_ref().to_owned()));
+                    book_mut!(book).set_column(&column, new_value)?;
+                    match column {
+                        ColumnIdentifier::ExtendedTag(x) => {
+                            self.cols.insert(UniCase::new(x.to_owned()));
+                        }
+                        _ => {}
+                    }
                 }
                 Ok(true)
             }
@@ -194,12 +204,7 @@ impl BookCache {
         }))
     }
 
-    pub fn sort_books_by_cols<S: AsRef<str>>(&mut self, cols: &[(S, ColumnOrder)]) {
-        let cols: Vec<_> = cols
-            .iter()
-            .map(|(c, r)| (ColumnIdentifier::from(c), *r))
-            .collect();
-
+    pub fn sort_books_by_cols(&mut self, cols: &[(ColumnIdentifier, ColumnOrder)]) {
         // Use some heuristic to sort in parallel when it would offer speedup -
         // parallel threads are slower for small sorts.
         if self.books.len() < 2500 {

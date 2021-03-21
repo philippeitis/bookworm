@@ -14,7 +14,7 @@ use bookstore_database::{
     bookview::BookViewError, AppDatabase, Book, BookView, DatabaseError, IndexableDatabase,
     NestedBookView, ScrollableBookView, SearchableBookView,
 };
-use bookstore_records::book::{BookID, RecordError};
+use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant, ColumnOrder};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
@@ -241,9 +241,9 @@ impl<D: IndexableDatabase> App<D> {
         }
     }
 
-    pub fn edit_selected_book<S0: AsRef<str>, S1: AsRef<str>>(
+    pub fn edit_selected_book<S: AsRef<str>>(
         &mut self,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         let book = book_view.get_selected_book()?;
@@ -251,10 +251,10 @@ impl<D: IndexableDatabase> App<D> {
         self.edit_book_with_id(id, edits)
     }
 
-    pub fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
+    pub fn edit_book_with_id<S: AsRef<str>>(
         &mut self,
         id: BookID,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
     ) -> Result<(), ApplicationError<D::Error>> {
         Ok(self.write(|db| db.edit_book_with_id(id, edits))?)
     }
@@ -402,19 +402,12 @@ impl<D: IndexableDatabase> App<D> {
     ///
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
-    fn update_selected_columns(&mut self, cols: Box<[(String, bool)]>) {
+    fn update_selected_columns(&mut self, cols: Box<[(ColumnIdentifier, ColumnOrder)]>) {
         // let word = UniCase::new(match word.to_ascii_lowercase().as_str() {
         //     "author" => String::from("authors"),
         //     _ => word,
         // });
-
-        let cols: Vec<_> = cols
-            .into_vec()
-            .into_iter()
-            .map(|(s, r)| (UniCase::new(s), ColumnOrder::from_bool(r)))
-            .collect();
-
-        self.sort_settings.columns = cols.into_boxed_slice();
+        self.sort_settings.columns = cols;
         self.sort_settings.is_sorted = false;
     }
 

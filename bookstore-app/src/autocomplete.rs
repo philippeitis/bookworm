@@ -26,8 +26,8 @@ impl AutoCompleter<PathBuf> {
     ///
     /// # Errors
     /// If the glob fails, an error will be returned.
-    pub fn new<S: AsRef<str>>(word: S) -> Result<Self, AutoCompleteError> {
-        let word = word.as_ref().to_owned();
+    pub fn new<S: Into<String>>(word: S) -> Result<Self, AutoCompleteError> {
+        let word = word.into();
         let word_len = word.len();
         let glob_str = word + "*";
 

@@ -3,6 +3,7 @@ use std::str::FromStr;
 
 use bookstore_database::search::{Search, SearchMode};
 use bookstore_records::book::{BookID, ColumnIdentifier};
+use bookstore_records::ColumnOrder;
 
 #[derive(Debug)]
 pub enum Flag {
@@ -25,12 +26,12 @@ pub enum Command {
     DeleteBook(BookIndex),
     DeleteAll,
     // TODO: Add + syntax for appending to existing text
-    EditBook(BookIndex, Box<[(String, String)]>),
+    EditBook(BookIndex, Box<[(ColumnIdentifier, String)]>),
     AddBookFromFile(PathBuf),
     AddBooksFromDir(PathBuf, u8),
     AddColumn(String),
     RemoveColumn(String),
-    SortColumns(Box<[(String, bool)]>),
+    SortColumns(Box<[(ColumnIdentifier, ColumnOrder)]>),
     OpenBookInApp(BookIndex, usize),
     OpenBookInExplorer(BookIndex, usize),
     TryMergeAllBooks,
@@ -266,7 +267,7 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 };
                 while let Some(field) = args.next() {
                     let value = args.next().ok_or_else(insuf)?;
-                    chunks.push((field, value));
+                    chunks.push((ColumnIdentifier::from(field), value));
                 }
 
                 if chunks.is_empty() {
@@ -307,11 +308,19 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                             return Err(CommandError::InvalidCommand);
                         }
                         let mut args = args.into_iter();
-                        sort_cols.push((args.next().ok_or_else(insuf)?, true));
-                        sort_cols.extend(args.map(|s| (s, false)));
+                        sort_cols.push((
+                            ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
+                            ColumnOrder::Descending,
+                        ));
+                        sort_cols.extend(
+                            args.map(|s| (ColumnIdentifier::from(s), ColumnOrder::Ascending)),
+                        );
                     }
                     Flag::StartingArguments(args) => {
-                        sort_cols.extend(args.into_iter().map(|s| (s, false)));
+                        sort_cols.extend(
+                            args.into_iter()
+                                .map(|s| (ColumnIdentifier::from(s), ColumnOrder::Ascending)),
+                        );
                     }
                     _ => {
                         return Err(CommandError::InvalidCommand);

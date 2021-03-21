@@ -45,6 +45,21 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
     }
 }
 
+impl ColumnIdentifier {
+    pub fn into_string(self) -> String {
+        match self {
+            ColumnIdentifier::Title => "Title",
+            ColumnIdentifier::Author => "Author",
+            ColumnIdentifier::Series => "Series",
+            ColumnIdentifier::ID => "ID",
+            ColumnIdentifier::Variants => "Variants",
+            ColumnIdentifier::Description => "Description",
+            ColumnIdentifier::ExtendedTag(t) => return t,
+        }
+        .to_string()
+    }
+}
+
 pub fn str_to_series(value: &str) -> Option<(String, Option<f32>)> {
     if value.ends_with(']') {
         // Replace with rsplit_once when stable.
@@ -324,7 +339,10 @@ mod test {
                     assert_eq!(&e, err);
                 }
             }
-            assert_eq!(book.get_column(&col).map(Cow::into_owned), Some(expected.to_string()));
+            assert_eq!(
+                book.get_column(&col).map(Cow::into_owned),
+                Some(expected.to_string())
+            );
         }
     }
 }

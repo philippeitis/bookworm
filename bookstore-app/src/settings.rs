@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use unicase::UniCase;
 
+use bookstore_records::book::ColumnIdentifier;
 use bookstore_records::ColumnOrder;
 
 #[derive(Copy, Clone)]
@@ -71,7 +71,7 @@ impl Default for InterfaceStyle {
 
 #[derive(Debug, Clone)]
 pub struct SortSettings {
-    pub columns: Box<[(UniCase<String>, ColumnOrder)]>,
+    pub columns: Box<[(ColumnIdentifier, ColumnOrder)]>,
     pub is_sorted: bool,
 }
 
@@ -291,7 +291,12 @@ impl From<TomlSort> for SortSettings {
         let columns = t.columns.unwrap_or_default();
         let columns: Vec<_> = columns
             .into_iter()
-            .map(|(s, r)| (UniCase::new(s), ColumnOrder::from_bool(r.unwrap_or(false))))
+            .map(|(s, r)| {
+                (
+                    ColumnIdentifier::from(s),
+                    ColumnOrder::from_bool(r.unwrap_or(false)),
+                )
+            })
             .collect();
         SortSettings {
             is_sorted: columns.is_empty(),
@@ -307,7 +312,7 @@ impl From<SortSettings> for TomlSort {
                 s.columns
                     .into_vec()
                     .into_iter()
-                    .map(|(c, r)| (c.into_inner(), Some(r.as_bool())))
+                    .map(|(c, r)| (c.into_string(), Some(r.as_bool())))
                     .collect(),
             ),
         }
@@ -389,12 +394,12 @@ impl Settings {
     ///
     /// # Arguments
     ///
-    /// * ` file ` - The path to the settings.
+    /// * ` path ` - The path to the settings.
     ///
     /// # Error
     /// Errors if reading the file or parsing the settings fails.
-    pub fn open<P: AsRef<Path>>(file: P) -> Result<Self, std::io::Error> {
-        let f = std::fs::read_to_string(file.as_ref())?;
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
+        let f = std::fs::read_to_string(path)?;
         let value: TomlSettings = toml::from_str(f.as_str())?;
         Ok(Settings {
             interface_style: value.colors.unwrap_or_default().into(),
@@ -405,7 +410,7 @@ impl Settings {
         })
     }
 
-    pub fn write<P: AsRef<Path>>(&self, file: P) -> Result<(), std::io::Error> {
+    pub fn write<P: AsRef<Path>>(&self, path: P) -> Result<(), std::io::Error> {
         let value = TomlSettings {
             colors: Some(self.interface_style.clone().into()),
             layout: Some(self.columns.clone().into()),
@@ -414,7 +419,7 @@ impl Settings {
             database: Some(self.database_settings.clone().into()),
         };
         std::fs::write(
-            file,
+            path,
             toml::to_string(&value)
                 .expect("Unknown error when serializing settings.")
                 .as_bytes(),

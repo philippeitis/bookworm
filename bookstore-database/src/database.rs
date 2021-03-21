@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use unicase::UniCase;
 
-use bookstore_records::book::{BookID, RecordError};
+use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, BookVariant, ColumnOrder};
 
 use crate::search::{Error as SearchError, Search};
@@ -153,10 +153,10 @@ pub trait AppDatabase {
     /// # Errors
     /// This function will return an error if updating the database fails, or a field can not
     /// be set.
-    fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
+    fn edit_book_with_id<S: AsRef<str>>(
         &mut self,
         id: BookID,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 
     /// Merges all books with matching titles and authors (case insensitive), in no
@@ -200,9 +200,9 @@ pub trait AppDatabase {
     /// whether the column should be reversed or not.
     /// # Errors
     /// This function will return an error if the database fails.
-    fn sort_books_by_cols<S: AsRef<str>>(
+    fn sort_books_by_cols(
         &mut self,
-        columns: &[(S, ColumnOrder)],
+        columns: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 
     /// Returns the number of books stored internally.
@@ -260,9 +260,9 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     ///
     /// # Errors
     /// This function will return an error if updating the database fails.
-    fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
+    fn edit_book_indexed<S: AsRef<str>>(
         &mut self,
         index: usize,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 }

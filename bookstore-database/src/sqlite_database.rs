@@ -410,10 +410,10 @@ impl SQLiteDatabase {
         tx.commit().await
     }
 
-    async fn edit_book_by_id_async<S0: AsRef<str>, S1: AsRef<str>>(
+    async fn edit_book_by_id_async<S: AsRef<str>>(
         &mut self,
         id: BookID,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
     ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
         if !self.local_cache.edit_book_with_id(id, &edits)? {
             return Err(DatabaseError::BookNotFound(id));
@@ -423,7 +423,7 @@ impl SQLiteDatabase {
         let idx = u64::from(id) as i64;
         for (column, new_value) in edits {
             let new_value = new_value.as_ref();
-            match column.as_ref().into() {
+            match column {
                 ColumnIdentifier::Title => {
                     sqlx::query!(
                         "UPDATE books SET title = ? WHERE book_id = ?;",
@@ -632,10 +632,10 @@ impl AppDatabase for SQLiteDatabase {
         Ok(self.local_cache.has_column(col))
     }
 
-    fn edit_book_with_id<S0: AsRef<str>, S1: AsRef<str>>(
+    fn edit_book_with_id<S: AsRef<str>>(
         &mut self,
         id: BookID,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "UPDATE {} SET {} = {} WHERE book_id = {};"
         block_on(self.edit_book_by_id_async(id, edits))
@@ -667,9 +667,9 @@ impl AppDatabase for SQLiteDatabase {
         Ok(self.local_cache.find_book_index(searches)?)
     }
 
-    fn sort_books_by_cols<S: AsRef<str>>(
+    fn sort_books_by_cols(
         &mut self,
-        columns: &[(S, ColumnOrder)],
+        columns: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         self.local_cache.sort_books_by_cols(columns);
         Ok(())
@@ -682,6 +682,13 @@ impl AppDatabase for SQLiteDatabase {
 
     fn saved(&self) -> bool {
         true
+    }
+
+    fn update<I: IntoIterator<Item = BookVariant>>(
+        &mut self,
+        books: I,
+    ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
+        unimplemented!()
     }
 }
 
@@ -740,10 +747,10 @@ impl IndexableDatabase for SQLiteDatabase {
         self.remove_book(book.id())
     }
 
-    fn edit_book_indexed<S0: AsRef<str>, S1: AsRef<str>>(
+    fn edit_book_indexed<S: AsRef<str>>(
         &mut self,
         index: usize,
-        edits: &[(S0, S1)],
+        edits: &[(ColumnIdentifier, S)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "UPDATE {} SET {} = {} WHERE book_id > last_id ORDER BY {} {} LIMIT 1"
         // NOTE: edit_book_indexed is for editing a selected book -

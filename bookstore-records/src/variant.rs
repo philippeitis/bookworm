@@ -118,15 +118,9 @@ impl BookVariant {
     /// Will panic if the title can not be set.
     pub fn from_path<P>(file_path: P) -> Result<Self, BookError>
     where
-        P: AsRef<path::Path>,
+        P: Into<path::PathBuf>,
     {
-        let path = file_path.as_ref();
-
-        let file_name = if let Some(file_name) = path.file_name() {
-            file_name
-        } else {
-            return Err(BookError::FileError);
-        };
+        let path = file_path.into();
 
         let ext = if let Some(ext) = path.extension() {
             ext
@@ -158,7 +152,7 @@ impl BookVariant {
 
         let mut book = BookVariant {
             book_type,
-            path: path.to_owned(),
+            path,
             hash,
             file_size,
             local_title: None,
@@ -180,6 +174,12 @@ impl BookVariant {
         }
 
         if book.local_title.is_none() {
+            let file_name = if let Some(file_name) = book.path.file_name() {
+                file_name
+            } else {
+                return Err(BookError::FileError);
+            };
+
             book.local_title = Some(
                 file_name
                     .to_str()

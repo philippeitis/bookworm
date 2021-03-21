@@ -54,15 +54,15 @@ pub trait BookView<D: AppDatabase> {
 
     fn get_books_cursored(&self) -> Result<Vec<Arc<RwLock<Book>>>, BookViewError<D::Error>>;
 
-    fn sort_by_column<S: AsRef<str>>(
+    fn sort_by_column(
         &mut self,
-        col: S,
+        col: ColumnIdentifier,
         reverse: ColumnOrder,
     ) -> Result<(), DatabaseError<D::Error>>;
 
-    fn sort_by_columns<S: AsRef<str>>(
+    fn sort_by_columns(
         &mut self,
-        cols: &[(S, ColumnOrder)],
+        cols: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>>;
 
     fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError<D::Error>>;
@@ -161,12 +161,12 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    fn sort_by_column<S: AsRef<str>>(
+    fn sort_by_column(
         &mut self,
-        col: S,
+        col: ColumnIdentifier,
         column_order: ColumnOrder,
     ) -> Result<(), DatabaseError<D::Error>> {
-        let col = ColumnIdentifier::from(col);
+        let col = col.into();
         if column_order == ColumnOrder::Descending {
             self.scopes.iter_mut().for_each(|(_, scope)| {
                 scope.sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
@@ -180,14 +180,10 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         Ok(())
     }
 
-    fn sort_by_columns<S: AsRef<str>>(
+    fn sort_by_columns(
         &mut self,
-        cols: &[(S, ColumnOrder)],
+        cols: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>> {
-        let cols: Vec<_> = cols
-            .iter()
-            .map(|(c, r)| (ColumnIdentifier::from(c), *r))
-            .collect();
         self.scopes.iter_mut().for_each(|(_, scope)| {
             scope.sort_by(|_, a, _, b| book!(b).cmp_columns(&book!(a), &cols))
         });

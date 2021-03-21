@@ -6,8 +6,8 @@ pub(crate) struct ScrollableText {
 }
 
 impl ScrollableText {
-    pub(crate) fn new(text: impl AsRef<str>) -> Self {
-        let text = text.as_ref().to_string();
+    pub(crate) fn new<S: Into<String>>(text: S) -> Self {
+        let text = text.into();
         Self {
             height: text.lines().count(),
             text,

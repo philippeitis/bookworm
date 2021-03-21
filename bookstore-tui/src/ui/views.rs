@@ -22,7 +22,7 @@ use bookstore_app::settings::Color;
 use bookstore_app::{parse_args, App, ApplicationError, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
 use bookstore_database::{BookView, IndexableDatabase, NestedBookView, ScrollableBookView};
-use bookstore_records::book::RecordError;
+use bookstore_records::book::{ColumnIdentifier, RecordError};
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::terminal_ui::UIState;
@@ -599,7 +599,7 @@ impl<D: IndexableDatabase> EditWidget<D> {
                 self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
             };
             match app.edit_selected_book(
-                &[(column, &self.edit.value_to_string())],
+                &[(ColumnIdentifier::from(column), &self.edit.value_to_string())],
                 &mut state_mut!(self).book_view,
             ) {
                 Ok(_) => {}

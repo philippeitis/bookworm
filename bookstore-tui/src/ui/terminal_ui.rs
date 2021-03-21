@@ -116,7 +116,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     ///
     /// # Errors
     /// None.
-    pub(crate) fn new<S: AsRef<str>>(
+    pub(crate) fn new<S: Into<String>>(
         name: S,
         settings: InterfaceSettings,
         settings_path: Option<PathBuf>,
@@ -131,7 +131,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             book_view: app.new_book_view(),
         }));
         AppInterface {
-            border_widget: BorderWidget::new(name.as_ref().to_string(), app.db_path()),
+            border_widget: BorderWidget::new(name.into(), app.db_path()),
             active_view: Box::new(ColumnWidget {
                 state: state.clone(),
                 book_widget: None,
