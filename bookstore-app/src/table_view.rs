@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use unicase::UniCase;
 
 use bookstore_database::bookview::BookViewError;
@@ -46,7 +48,11 @@ impl TableView {
 
         for book in bv.get_books_cursored()?.iter().map(|b| book!(b)) {
             for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
-                column.push(book.get_column(&col).unwrap_or_else(String::new));
+                column.push(match book.get_column(&col) {
+                    None => String::new(),
+                    Some(Cow::Borrowed(s)) => s.to_string(),
+                    Some(Cow::Owned(s)) => s,
+                });
             }
         }
 

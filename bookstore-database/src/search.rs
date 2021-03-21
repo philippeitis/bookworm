@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use regex::{Error as RegexError, Regex};
 use sublime_fuzzy::best_match;
 
@@ -65,8 +67,11 @@ impl Matcher for RegexMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
-        self.regex
-            .is_match(&book.get_column(&self.column).unwrap_or_else(String::new))
+        match book.get_column(&self.column) {
+            None => self.regex.is_match(""),
+            Some(Cow::Borrowed(value)) => self.regex.is_match(value),
+            Some(Cow::Owned(value)) => self.regex.is_match(&value),
+        }
     }
 }
 
@@ -85,8 +90,11 @@ impl Matcher for ExactSubstringMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
-        self.regex
-            .is_match(&book.get_column(&self.column).unwrap_or_else(String::new))
+        match book.get_column(&self.column) {
+            None => self.regex.is_match(""),
+            Some(Cow::Borrowed(value)) => self.regex.is_match(value),
+            Some(Cow::Owned(value)) => self.regex.is_match(&value),
+        }
     }
 }
 
@@ -105,7 +113,11 @@ impl Matcher for ExactStringMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
-        self.string == book.get_column(&self.column).unwrap_or_else(String::new)
+        match book.get_column(&self.column) {
+            None => self.string.is_empty(),
+            Some(Cow::Borrowed(value)) => self.string == value,
+            Some(Cow::Owned(value)) => self.string == value,
+        }
     }
 }
 
@@ -124,10 +136,11 @@ impl Matcher for DefaultMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
-        best_match(
-            &self.string,
-            &book.get_column(&self.column).unwrap_or_else(String::new),
-        )
+        match book.get_column(&self.column) {
+            None => best_match(&self.string, ""),
+            Some(Cow::Borrowed(value)) => best_match(&self.string, value),
+            Some(Cow::Owned(value)) => best_match(&self.string, &value),
+        }
         .is_some()
     }
 }

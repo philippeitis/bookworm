@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
@@ -102,14 +103,14 @@ impl Book {
         self.description.as_ref()
     }
 
-    pub fn get_column(&self, column: &ColumnIdentifier) -> Option<String> {
+    pub fn get_column(&self, column: &ColumnIdentifier) -> Option<Cow<str>> {
         Some(match column {
-            ColumnIdentifier::ID => self.id?.to_string(),
-            ColumnIdentifier::Title => self.title()?.to_string(),
-            ColumnIdentifier::Author => self.authors()?.join(", "),
-            ColumnIdentifier::Series => self.series()?.to_string(),
-            ColumnIdentifier::Description => self.description.as_ref()?.to_string(),
-            ColumnIdentifier::ExtendedTag(x) => self.extended_tags.get(x)?.to_string(),
+            ColumnIdentifier::ID => Cow::Owned(self.id?.to_string()),
+            ColumnIdentifier::Title => Cow::Borrowed(self.title()?),
+            ColumnIdentifier::Author => Cow::Owned(self.authors()?.join(", ")),
+            ColumnIdentifier::Series => Cow::Owned(self.series()?.to_string()),
+            ColumnIdentifier::Description => Cow::Borrowed(self.description.as_ref()?),
+            ColumnIdentifier::ExtendedTag(x) => Cow::Borrowed(self.extended_tags.get(x)?),
             _ => return None,
         })
     }
@@ -323,7 +324,7 @@ mod test {
                     assert_eq!(&e, err);
                 }
             }
-            assert_eq!(book.get_column(&col), Some(expected.to_string()));
+            assert_eq!(book.get_column(&col).map(Cow::into_owned), Some(expected.to_string()));
         }
     }
 }
