@@ -505,8 +505,8 @@ impl SQLiteDatabase {
         transaction_size: usize,
     ) -> Result<Vec<BookID>, <Self as AppDatabase>::Error> {
         // Get file sizes and hashes
-        let books: Vec<BookVariant> = books.into_iter().collect();
-        let sizes_and_hashes: Vec<_> = books.iter().map(|b| (b.file_size, b.hash)).collect();
+        // let books: Vec<BookVariant> = books.into_iter().collect();
+        // let sizes_and_hashes: Vec<_> = books.iter().map(|b| (b.file_size, b.hash)).collect();
         unimplemented!();
     }
 }

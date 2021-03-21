@@ -212,6 +212,11 @@ pub trait AppDatabase {
     /// that it has been changed - eg. if a change is immediately undone, the database may still
     /// be marked as unsaved.
     fn saved(&self) -> bool;
+
+    fn update<I: IntoIterator<Item = BookVariant>>(
+        &mut self,
+        books: I,
+    ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;
 }
 
 pub trait IndexableDatabase: AppDatabase + Sized {
