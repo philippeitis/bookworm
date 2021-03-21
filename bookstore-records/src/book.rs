@@ -60,24 +60,6 @@ impl ColumnIdentifier {
     }
 }
 
-pub fn str_to_series(value: &str) -> Option<(String, Option<f32>)> {
-    if value.ends_with(']') {
-        // TODO: Replace with rsplit_once when stable (1.52).
-        let mut words = value.rsplitn(2, char::is_whitespace);
-        match (words.next(), words.next()) {
-            (Some(id), Some(series)) => {
-                if id.starts_with('[') {
-                    if let Ok(id) = f32::from_str(&id[1..id.len() - 1]) {
-                        return Some((series.to_owned(), Some(id)));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    Some((value.to_owned(), None))
-}
-
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq, Default)]
 /// Stores the metadata for a specific book, with an associated ID, variants, and fields shared

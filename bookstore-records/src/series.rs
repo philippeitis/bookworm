@@ -19,20 +19,22 @@ impl FromStr for Series {
     /// Parses a string of form `SeriesName [SeriesIndex]` into a book with series `SeriesName` and
     /// index `SeriesIndex`. If `SeriesIndex` can not be parsed as `f32`, or no brackets exist,
     /// the entire string is returned as `SeriesName`, with no associated `SeriesIndex`.
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.ends_with(']') {
-            // Replace with rsplit_once when stable.
+            // TODO: Replace with rsplit_once when stable (1.52).
             let mut words = s.rsplitn(2, char::is_whitespace);
-            if let Some(id) = words.next() {
-                if let Some(name) = words.next() {
-                    if let Ok(id) = f32::from_str(id.replace(&['[', ']'][..], "").as_str()) {
-                        return Ok(Self {
-                            name: name.to_owned(),
-                            index: Some(id),
-                        });
+            match (words.next(), words.next()) {
+                (Some(id), Some(name)) => {
+                    if id.starts_with('[') {
+                        if let Ok(id) = f32::from_str(&id[1..id.len() - 1]) {
+                            return Ok(Self {
+                                name: name.to_owned(),
+                                index: Some(id),
+                            });
+                        }
                     }
                 }
+                _ => {}
             }
         }
 

@@ -8,6 +8,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 #[cfg(windows)]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 use futures::executor::block_on;
@@ -15,7 +16,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use unicase::UniCase;
 
-use bookstore_records::book::{str_to_series, BookID, ColumnIdentifier};
+use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::series::Series;
 use bookstore_records::{Book, BookVariant, ColumnOrder};
 
@@ -442,10 +443,10 @@ impl SQLiteDatabase {
                 ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
                 }
                 ColumnIdentifier::Series => {
-                    let series = str_to_series(new_value);
-                    let (series, series_index) = match series.as_ref() {
+                    let series = Series::from_str(new_value).ok();
+                    let (series, series_index) = match series {
                         None => (None, None),
-                        Some((series, series_index)) => (Some(series), series_index.clone()),
+                        Some(Series { name, index }) => (Some(name), index.clone()),
                     };
 
                     sqlx::query!(
