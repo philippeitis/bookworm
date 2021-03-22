@@ -26,6 +26,7 @@ pub enum Command {
     DeleteBook(BookIndex),
     DeleteAll,
     // TODO: Add + syntax for appending to existing text
+    // TODO: Add deletion of fields and tags.
     EditBook(BookIndex, Box<[(ColumnIdentifier, String)]>),
     AddBookFromFile(PathBuf),
     AddBooksFromDir(PathBuf, u8),

@@ -67,6 +67,11 @@ impl Matcher for RegexMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
+        if self.column == ColumnIdentifier::Tag {
+            return book.free_tags.iter().any(|v| self.regex.is_match(v))
+                || self.regex.is_match("");
+        }
+
         match book.get_column(&self.column) {
             None => self.regex.is_match(""),
             Some(Cow::Borrowed(value)) => self.regex.is_match(value),
@@ -90,6 +95,11 @@ impl Matcher for ExactSubstringMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
+        if self.column == ColumnIdentifier::Tag {
+            return book.free_tags.iter().any(|v| self.regex.is_match(v))
+                || self.regex.is_match("");
+        }
+
         match book.get_column(&self.column) {
             None => self.regex.is_match(""),
             Some(Cow::Borrowed(value)) => self.regex.is_match(value),
@@ -113,6 +123,10 @@ impl Matcher for ExactStringMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
+        if self.column == ColumnIdentifier::Tag {
+            return book.free_tags.contains(&self.string) || self.string.is_empty();
+        }
+
         match book.get_column(&self.column) {
             None => self.string.is_empty(),
             Some(Cow::Borrowed(value)) => self.string == value,
@@ -136,6 +150,14 @@ impl Matcher for DefaultMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
+        if self.column == ColumnIdentifier::Tag {
+            return book
+                .free_tags
+                .iter()
+                .any(|value| best_match(&self.string, value).is_some())
+                || best_match(&self.string, "").is_some();
+        }
+
         match book.get_column(&self.column) {
             None => best_match(&self.string, ""),
             Some(Cow::Borrowed(value)) => best_match(&self.string, value),

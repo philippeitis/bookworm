@@ -587,6 +587,7 @@ impl<D: IndexableDatabase> EditWidget<D> {
     fn state(&self) -> Ref<UIState<D>> {
         self.state.as_ref().borrow()
     }
+
     fn state_mut(&mut self) -> RefMut<UIState<D>> {
         self.state.as_ref().borrow_mut()
     }

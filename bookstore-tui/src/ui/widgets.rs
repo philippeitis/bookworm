@@ -260,12 +260,20 @@ impl BookWidget {
 
         let columns = book.tags();
         if !columns.is_empty() {
-            data.extend(Text::raw("\nTags provided:"));
+            data.extend(Text::raw("\nNamed tags provided:"));
             for (key, value) in columns.iter() {
                 data.extend(Text::styled(
                     [key.as_str(), value.as_str()].join(": "),
                     field_exists,
                 ));
+            }
+        }
+
+        let free_tags = book.free_tags();
+        if !free_tags.is_empty() {
+            data.extend(Text::raw("\nTags provided:"));
+            for value in free_tags.iter() {
+                data.extend(Text::styled(value.clone(), field_exists));
             }
         }
 

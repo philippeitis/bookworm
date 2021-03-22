@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -28,7 +28,8 @@ pub enum ColumnIdentifier {
     ID,
     Variants,
     Description,
-    ExtendedTag(String),
+    Tag,
+    NamedTag(String),
 }
 
 impl<S: AsRef<str>> From<S> for ColumnIdentifier {
@@ -40,7 +41,8 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
             "id" => Self::ID,
             "variant" | "variants" => Self::Variants,
             "description" => Self::Description,
-            _ => Self::ExtendedTag(val.as_ref().to_owned()),
+            "tag" => Self::Tag,
+            _ => Self::NamedTag(val.as_ref().to_owned()),
         }
     }
 }
@@ -54,7 +56,8 @@ impl ColumnIdentifier {
             ColumnIdentifier::ID => "ID",
             ColumnIdentifier::Variants => "Variants",
             ColumnIdentifier::Description => "Description",
-            ColumnIdentifier::ExtendedTag(t) => return t,
+            ColumnIdentifier::Tag => "Tag",
+            ColumnIdentifier::NamedTag(t) => return t,
         }
         .to_string()
     }
@@ -75,7 +78,8 @@ pub struct Book {
     pub series: Option<Series>,
     pub description: Option<String>,
     pub variants: Vec<BookVariant>,
-    pub extended_tags: HashMap<String, String>,
+    pub free_tags: HashSet<String>,
+    pub named_tags: HashMap<String, String>,
 }
 
 impl Book {
@@ -96,7 +100,11 @@ impl Book {
     }
 
     pub fn tags(&self) -> &HashMap<String, String> {
-        &self.extended_tags
+        &self.named_tags
+    }
+
+    pub fn free_tags(&self) -> &HashSet<String> {
+        &self.free_tags
     }
 
     pub fn description(&self) -> Option<&String> {
@@ -109,8 +117,8 @@ impl Book {
             ColumnIdentifier::Title => Cow::Borrowed(self.title()?),
             ColumnIdentifier::Author => Cow::Owned(self.authors()?.join(", ")),
             ColumnIdentifier::Series => Cow::Owned(self.series()?.to_string()),
-            ColumnIdentifier::Description => Cow::Borrowed(self.description.as_ref()?),
-            ColumnIdentifier::ExtendedTag(x) => Cow::Borrowed(self.extended_tags.get(x)?),
+            ColumnIdentifier::Description => Cow::Borrowed(self.description()?),
+            ColumnIdentifier::NamedTag(x) => Cow::Borrowed(self.named_tags.get(x)?),
             _ => return None,
         })
     }
@@ -125,8 +133,8 @@ impl Book {
         if self.description.is_none() {
             self.description = std::mem::take(&mut variant.description);
         }
-        if self.extended_tags.is_empty() {
-            self.extended_tags = std::mem::take(&mut variant.tags);
+        if self.named_tags.is_empty() {
+            self.named_tags = std::mem::take(&mut variant.named_tags);
         }
 
         self.variants.push(variant);
@@ -150,7 +158,7 @@ impl Book {
         }
 
         self.variants.extend_from_slice(&other.variants);
-        self.extended_tags.extend(other.extended_tags.clone());
+        self.named_tags.extend(other.named_tags.clone());
     }
 }
 
@@ -176,7 +184,8 @@ impl Book {
             authors: std::mem::take(&mut variant.additional_authors),
             series: None,
             description: std::mem::take(&mut variant.description),
-            extended_tags: std::mem::take(&mut variant.tags),
+            named_tags: std::mem::take(&mut variant.named_tags),
+            free_tags: std::mem::take(&mut variant.free_tags),
             variants: vec![variant],
         }
     }
@@ -224,9 +233,11 @@ impl Book {
             ColumnIdentifier::Series => {
                 self.series = Series::from_str(&value).ok();
             }
-            ColumnIdentifier::ExtendedTag(column) => {
-                self.extended_tags
-                    .insert(column.to_owned(), value.to_owned());
+            ColumnIdentifier::NamedTag(column) => {
+                self.named_tags.insert(column.to_owned(), value.to_owned());
+            }
+            ColumnIdentifier::Tag => {
+                self.free_tags.insert(value.to_owned());
             }
         }
         Ok(())

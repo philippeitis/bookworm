@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::ffi::{OsStr, OsString};
 use std::io::{BufReader, SeekFrom};
@@ -103,7 +103,8 @@ pub struct BookVariant {
     pub description: Option<String>,
     pub id: Option<u32>,
     pub hash: [u8; 32],
-    pub tags: HashMap<String, String>,
+    pub free_tags: HashSet<String>,
+    pub named_tags: HashMap<String, String>,
 }
 
 impl BookVariant {
@@ -162,7 +163,8 @@ impl BookVariant {
             translators: None,
             description: None,
             id: None,
-            tags: HashMap::new(),
+            free_tags: HashSet::new(),
+            named_tags: HashMap::new(),
         };
 
         if let Ok(mut metadata_filler) = book.book_type.metadata_filler(reader) {

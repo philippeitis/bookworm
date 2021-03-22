@@ -108,7 +108,7 @@ impl BookCache {
                 for (column, new_value) in edits {
                     book_mut!(book).set_column(&column, new_value)?;
                     match column {
-                        ColumnIdentifier::ExtendedTag(x) => {
+                        ColumnIdentifier::NamedTag(x) => {
                             self.cols.insert(UniCase::new(x.to_owned()));
                         }
                         _ => {}
@@ -130,7 +130,7 @@ impl BookCache {
                 for (column, new_value) in edits {
                     book_mut!(book).set_column(&column, new_value)?;
                     match column {
-                        ColumnIdentifier::ExtendedTag(x) => {
+                        ColumnIdentifier::NamedTag(x) => {
                             self.cols.insert(UniCase::new(x.to_owned()));
                         }
                         _ => {}

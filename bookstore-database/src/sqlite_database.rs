@@ -32,9 +32,17 @@ const CREATE_BOOKS: &str = r#"CREATE TABLE IF NOT EXISTS `books` (
 );"#;
 
 // Authors are stored here as well.
-const CREATE_EXTENDED_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `extended_tags` (
-`tag_name` TEXT NOT NULL,
-`tag_value` TEXT NOT NULL,
+const CREATE_NAMED_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `named_tags` (
+`name` TEXT NOT NULL,
+`value` TEXT NOT NULL,
+`book_id` INTEGER NOT NULL,
+FOREIGN KEY(book_id) REFERENCES books(book_id)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
+);"#;
+
+const CREATE_FREE_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `free_tags` (
+`value` TEXT NOT NULL,
 `book_id` INTEGER NOT NULL,
 FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
@@ -128,9 +136,14 @@ struct VariantData {
     hash: Vec<u8>,
 }
 
-struct TagData {
-    tag_name: String,
-    tag_value: String,
+struct NamedTagData {
+    name: String,
+    value: String,
+    book_id: i64,
+}
+
+struct FreeTagData {
+    value: String,
     book_id: i64,
 }
 
@@ -191,7 +204,8 @@ impl From<VariantData> for BookVariant {
             id: vd.id.map(|id| u32::try_from(id).unwrap()),
             hash: vd.hash.try_into().expect("Provided hash is too long."),
             file_size: vd.file_size as u64,
-            tags: HashMap::new(),
+            free_tags: HashSet::new(),
+            named_tags: HashMap::new(),
         }
     }
 }
@@ -205,11 +219,12 @@ pub struct SQLiteDatabase {
 impl SQLiteDatabase {
     fn load_books(&mut self) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
         // TODO: Benchmark this for large databases with complex books.
-        let book_data = run_query_as!(self, BookData, "SELECT * FROM books")?;
-        let variant_data = run_query_as!(self, VariantData, "SELECT * FROM variants")?;
-        let tag_data = run_query_as!(self, TagData, "SELECT * FROM extended_tags")?;
+        let raw_books = run_query_as!(self, BookData, "SELECT * FROM books")?;
+        let raw_variants = run_query_as!(self, VariantData, "SELECT * FROM variants")?;
+        let raw_named_tags = run_query_as!(self, NamedTagData, "SELECT * FROM named_tags")?;
+        let raw_free_tags = run_query_as!(self, FreeTagData, "SELECT * FROM free_tags")?;
 
-        let mut books: HashMap<_, _> = book_data
+        let mut books: HashMap<_, _> = raw_books
             .into_iter()
             .map(|book| {
                 let book: Book = book.into();
@@ -217,7 +232,7 @@ impl SQLiteDatabase {
             })
             .collect();
 
-        for variant in variant_data.into_iter() {
+        for variant in raw_variants.into_iter() {
             let id = NonZeroU64::try_from(variant.book_id as u64).unwrap();
             let variant: BookVariant = variant.into();
             if let Some(book) = books.get_mut(&id) {
@@ -237,7 +252,7 @@ impl SQLiteDatabase {
             prime_cols.insert(col.to_owned());
         }
 
-        for tag in tag_data.into_iter() {
+        for tag in raw_named_tags.into_iter() {
             let id = NonZeroU64::try_from(tag.book_id as u64).unwrap();
             match books.get_mut(&id) {
                 None => {
@@ -248,12 +263,28 @@ impl SQLiteDatabase {
                     );
                 }
                 Some(book) => {
-                    if !prime_cols.contains(&tag.tag_name) {
-                        prime_cols.insert(tag.tag_name.clone());
+                    if !prime_cols.contains(&tag.name) {
+                        prime_cols.insert(tag.name.clone());
                     }
 
-                    book.set_column(&ColumnIdentifier::from(tag.tag_name), tag.tag_value)
+                    book.set_column(&ColumnIdentifier::from(tag.name), tag.value)
                         .unwrap();
+                }
+            }
+        }
+
+        for tag in raw_free_tags.into_iter() {
+            let id = NonZeroU64::try_from(tag.book_id as u64).unwrap();
+            match books.get_mut(&id) {
+                None => {
+                    // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
+                    panic!(
+                        "SQLite database may be corrupted. Found orphan tag for {}.",
+                        id
+                    );
+                }
+                Some(book) => {
+                    book.set_column(&ColumnIdentifier::Tag, tag.value).unwrap();
                 }
             }
         }
@@ -345,9 +376,19 @@ impl SQLiteDatabase {
                     id,
                 ).execute(&mut tx).await?;
 
-                for (name, value) in variant.tags.iter() {
+                for value in variant.free_tags.iter() {
                     sqlx::query!(
-                        "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES(?, ?, ?);",
+                        "INSERT INTO free_tags (value, book_id) VALUES(?, ?);",
+                        value,
+                        id
+                    )
+                    .execute(&mut tx)
+                    .await?;
+                }
+
+                for (name, value) in variant.named_tags.iter() {
+                    sqlx::query!(
+                        "INSERT INTO named_tags (name, value, book_id) VALUES(?, ?, ?);",
                         name,
                         value,
                         id
@@ -358,7 +399,7 @@ impl SQLiteDatabase {
 
                 if let Some(authors) = &variant.additional_authors {
                     for author in authors {
-                        sqlx::query!("INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES(\"author\", ?, ?);", author, id).execute(&mut tx).await?;
+                        sqlx::query!("INSERT INTO named_tags (name, value, book_id) VALUES(\"author\", ?, ?);", author, id).execute(&mut tx).await?;
                     }
                 }
 
@@ -376,7 +417,10 @@ impl SQLiteDatabase {
 
     async fn clear_db_async(&mut self) -> Result<(), sqlx::Error> {
         let mut tx = self.backend.begin().await?;
-        sqlx::query!("DELETE FROM extended_tags")
+        sqlx::query!("DELETE FROM free_tags")
+            .execute(&mut tx)
+            .await?;
+        sqlx::query!("DELETE FROM named_tags")
             .execute(&mut tx)
             .await?;
         sqlx::query!("DELETE FROM variants")
@@ -394,12 +438,21 @@ impl SQLiteDatabase {
             let merged_from = u64::from(merged_from) as i64;
 
             sqlx::query!(
-                "UPDATE extended_tags SET book_id = ? WHERE book_id = ?",
+                "UPDATE named_tags SET book_id = ? WHERE book_id = ?",
                 merged_into,
                 merged_from
             )
             .execute(&mut tx)
             .await?;
+
+            sqlx::query!(
+                "UPDATE free_tags SET book_id = ? WHERE book_id = ?",
+                merged_into,
+                merged_from
+            )
+            .execute(&mut tx)
+            .await?;
+
             sqlx::query!(
                 "UPDATE variants SET book_id = ? WHERE book_id = ?",
                 merged_into,
@@ -437,10 +490,13 @@ impl SQLiteDatabase {
                 }
                 ColumnIdentifier::Author => {
                     sqlx::query!(
-                    "INSERT INTO extended_tags (tag_name, tag_value, book_id) VALUES('author', ?, ?);",
-                    new_value,
-                    idx
-                ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
+                        "INSERT INTO named_tags (name, value, book_id) VALUES('author', ?, ?);",
+                        new_value,
+                        idx
+                    )
+                    .execute(&mut tx)
+                    .await
+                    .map_err(DatabaseError::Backend)?;
                 }
                 ColumnIdentifier::Series => {
                     let series = Series::from_str(new_value).ok();
@@ -484,9 +540,19 @@ impl SQLiteDatabase {
                     .await
                     .map_err(DatabaseError::Backend)?;
                 }
-                ColumnIdentifier::ExtendedTag(t) => {
+                ColumnIdentifier::Tag => {
                     sqlx::query!(
-                        "INSERT into extended_tags (tag_name, tag_value, book_id) VALUES(?, ?, ?)",
+                        "INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                        new_value,
+                        idx
+                    )
+                    .execute(&mut tx)
+                    .await
+                    .map_err(DatabaseError::Backend)?;
+                }
+                ColumnIdentifier::NamedTag(t) => {
+                    sqlx::query!(
+                        "INSERT into named_tags (name, value, book_id) VALUES(?, ?, ?)",
                         t,
                         new_value,
                         idx
@@ -547,7 +613,8 @@ impl AppDatabase for SQLiteDatabase {
         };
 
         execute_query_str!(db, CREATE_BOOKS)?;
-        execute_query_str!(db, CREATE_EXTENDED_TAGS)?;
+        execute_query_str!(db, CREATE_FREE_TAGS)?;
+        execute_query_str!(db, CREATE_NAMED_TAGS)?;
         execute_query_str!(db, CREATE_VARIANTS)?;
         if db_exists {
             db.load_books()?;
