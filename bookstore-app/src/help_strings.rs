@@ -35,9 +35,19 @@ ARGUMENTS:
 pub const EDIT_HELP_STRING: &str = r#"USAGE:
 :e: Edit the specified item.
 
+FLAGS:
+-a: Specifies that the specified column should be appended to.
+-d: Specifies that the specified column should be deleted.
+-r: Sepcifies that the specified column should be replaced.
+
 ARGUMENTS:
 <id>: (Optional) The numeric ID of the book to edit. If not specified, edits the selected item.
-(<column>, <new_value>)+: One or more column-value pairs, where column values will be set to new_value.
+(FLAG? <column>, <new_value>? <new_tag_value>?)+:
+FLAG: A flag describing what should happen to <column>. If no flag is specified, <column> is replaced.
+<column>: The column to operate on
+<new_value>: Required if no flag, or -a, is specified.
+<new_tag_value>: If no flag, or -a is specified, and <column> is 'tag', <new_tag_value> either
+replaces, or is appended to the preexisting tag with value <new_value>.
 "#;
 
 pub const MERGE_HELP_STRING: &str = r#"USAGE:
@@ -76,7 +86,7 @@ FLAGS:
 -x: Uses <match> as an exact string.
 
 ARGUMENTS:
-(FLAG? <column> <match>):
+(FLAG? <column> <match>)+:
 FLAG: A flag describing how to use <match>. If none is provided, uses fuzzy search.
 <column>: The column to match
 <match>: The value to match on

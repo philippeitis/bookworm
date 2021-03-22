@@ -319,6 +319,18 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                                 },
                                 column => (column, Edit::Append(args.next().ok_or_else(insuf)?)),
                             },
+                            "r" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
+                                ColumnIdentifier::Tags => match (args.next(), args.next()) {
+                                    (Some(value), None) => {
+                                        (ColumnIdentifier::Tags, Edit::Replace(value))
+                                    }
+                                    (Some(tag), Some(value)) => {
+                                        (ColumnIdentifier::ExactTag(tag), Edit::Replace(value))
+                                    }
+                                    _ => return Err(CommandError::InsufficientArguments),
+                                },
+                                column => (column, Edit::Replace(args.next().ok_or_else(insuf)?)),
+                            },
                             _ => return Err(CommandError::InvalidCommand),
                         };
 
