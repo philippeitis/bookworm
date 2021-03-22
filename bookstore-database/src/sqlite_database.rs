@@ -51,6 +51,16 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON DELETE CASCADE
 );"#;
 
+const CREATE_MULTIMAP_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `multimap_tags` (
+`name` TEXT NOT NULL,
+`value` TEXT NOT NULL,
+`book_id` INTEGER NOT NULL,
+UNIQUE(`name`, `value`, `book_id`),
+FOREIGN KEY(book_id) REFERENCES books(book_id)
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
+);"#;
+
 const CREATE_VARIANTS: &str = r#"CREATE TABLE IF NOT EXISTS `variants` (
 `book_type` TEXT NOT NULL,
 `path` BLOB NOT NULL,
@@ -225,6 +235,7 @@ impl SQLiteDatabase {
         let raw_variants = run_query_as!(self, VariantData, "SELECT * FROM variants")?;
         let raw_named_tags = run_query_as!(self, NamedTagData, "SELECT * FROM named_tags")?;
         let raw_free_tags = run_query_as!(self, FreeTagData, "SELECT * FROM free_tags")?;
+        let raw_multimap_tags = run_query_as!(self, NamedTagData, "SELECT * FROM multimap_tags")?;
 
         let mut books: HashMap<_, _> = raw_books
             .into_iter()
@@ -269,7 +280,7 @@ impl SQLiteDatabase {
                         prime_cols.insert(tag.name.clone());
                     }
 
-                    book.set_column(&ColumnIdentifier::from(tag.name), tag.value)
+                    book.extend_column(&ColumnIdentifier::NamedTag(tag.name), tag.value)
                         .unwrap();
                 }
             }
@@ -286,8 +297,37 @@ impl SQLiteDatabase {
                     );
                 }
                 Some(book) => {
-                    book.set_column(&ColumnIdentifier::Tag, tag.value).unwrap();
+                    book.extend_column(&ColumnIdentifier::Tags, tag.value)
+                        .unwrap();
                 }
+            }
+        }
+
+        for tag in raw_multimap_tags.into_iter() {
+            let id = NonZeroU64::try_from(tag.book_id as u64).unwrap();
+            match books.get_mut(&id) {
+                None => {
+                    // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
+                    panic!(
+                        "SQLite database may be corrupted. Found orphan tag for {}.",
+                        id
+                    );
+                }
+                Some(book) => match tag.name.as_str() {
+                    "author" => book
+                        .extend_column(&ColumnIdentifier::Author, tag.value)
+                        .unwrap(),
+                    name => {
+                        if !prime_cols.contains(name) {
+                            prime_cols.insert(name.to_string());
+                        }
+                        book.extend_column(
+                            &ColumnIdentifier::MultiMap(name.to_string()),
+                            tag.value,
+                        )
+                        .unwrap();
+                    }
+                },
             }
         }
 
@@ -401,7 +441,7 @@ impl SQLiteDatabase {
 
                 if let Some(authors) = &variant.additional_authors {
                     for author in authors {
-                        sqlx::query!("INSERT INTO named_tags (name, value, book_id) VALUES(\"author\", ?, ?);", author, id).execute(&mut tx).await?;
+                        sqlx::query!("INSERT INTO multimap_tags (name, value, book_id) VALUES(\"author\", ?, ?);", author, id).execute(&mut tx).await?;
                     }
                 }
 
@@ -419,6 +459,9 @@ impl SQLiteDatabase {
 
     async fn clear_db_async(&mut self) -> Result<(), sqlx::Error> {
         let mut tx = self.backend.begin().await?;
+        sqlx::query!("DELETE FROM multimap_tags")
+            .execute(&mut tx)
+            .await?;
         sqlx::query!("DELETE FROM free_tags")
             .execute(&mut tx)
             .await?;
@@ -462,6 +505,14 @@ impl SQLiteDatabase {
             )
             .execute(&mut tx)
             .await?;
+
+            sqlx::query!(
+                "UPDATE multimap_tags SET book_id = ? WHERE book_id = ?",
+                merged_into,
+                merged_from
+            )
+            .execute(&mut tx)
+            .await?;
         }
         tx.commit().await
     }
@@ -485,7 +536,7 @@ impl SQLiteDatabase {
                         sqlx::query!("UPDATE books SET title = null WHERE book_id = ?;", book_id)
                     }
                     ColumnIdentifier::Author => sqlx::query!(
-                        "DELETE FROM named_tags where book_id = ? AND name = 'author';",
+                        "DELETE FROM multimap_tags where book_id = ? AND name = 'author';",
                         book_id
                     ),
                     ColumnIdentifier::ID => {
@@ -502,7 +553,6 @@ impl SQLiteDatabase {
                         "UPDATE variants SET description = null WHERE book_id = ?;",
                         book_id
                     ),
-                    ColumnIdentifier::Tag => unimplemented!("Implement tag deletion."),
                     ColumnIdentifier::NamedTag(column) => {
                             sqlx::query!(
                             "DELETE FROM named_tags where book_id = ? and name = ?;",
@@ -511,7 +561,21 @@ impl SQLiteDatabase {
                         ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
                         continue;
                     },
-                }.execute(&mut tx).await.map_err(DatabaseError::Backend)?;
+                    ColumnIdentifier::ExactTag(tag) => {
+                        sqlx::query!(
+                        "DELETE FROM free_tags where book_id = ? AND value = ?;",
+                        book_id,
+                        tag
+                        ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
+                        continue;
+                    }
+                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => unimplemented!(),
+                    ColumnIdentifier::Tags => {
+                        sqlx::query!(
+                            "DELETE FROM free_tags where book_id = ?;", book_id,
+                        )
+                    }
+                    }.execute(&mut tx).await.map_err(DatabaseError::Backend)?;
                 }
                 Edit::Replace(value) => match column {
                     ColumnIdentifier::Title => {
@@ -526,7 +590,7 @@ impl SQLiteDatabase {
                     }
                     ColumnIdentifier::Author => {
                         sqlx::query!(
-                            "INSERT INTO named_tags (name, value, book_id) VALUES('author', ?, ?);",
+                            "INSERT INTO multimap_tags (name, value, book_id) VALUES('author', ?, ?);",
                             value,
                             book_id
                         )
@@ -569,7 +633,7 @@ impl SQLiteDatabase {
                         .await
                         .map_err(DatabaseError::Backend)?;
                     }
-                    ColumnIdentifier::Tag => {
+                    ColumnIdentifier::Tags => {
                         sqlx::query!(
                             "INSERT into free_tags (value, book_id) VALUES(?, ?)",
                             value,
@@ -590,6 +654,21 @@ impl SQLiteDatabase {
                         .await
                         .map_err(DatabaseError::Backend)?;
                     }
+                    ColumnIdentifier::ExactTag(tag) => {
+                        sqlx::query!(
+                            "DELETE FROM free_tags WHERE value = ? AND book_id = ?; INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                            value,
+                            book_id,
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
+                        unimplemented!()
+                    }
                 },
                 Edit::Append(value) => match column {
                     ColumnIdentifier::Title => {
@@ -604,7 +683,7 @@ impl SQLiteDatabase {
                     }
                     ColumnIdentifier::Author => {
                         sqlx::query!(
-                            "INSERT INTO named_tags (name, value, book_id) VALUES('author', ?, ?);",
+                            "INSERT INTO multimap_tags (name, value, book_id) VALUES('author', ?, ?);",
                             value,
                             book_id
                         )
@@ -633,7 +712,7 @@ impl SQLiteDatabase {
                         .await
                         .map_err(DatabaseError::Backend)?;
                     }
-                    ColumnIdentifier::Tag => {
+                    ColumnIdentifier::Tags => {
                         sqlx::query!(
                             "INSERT into free_tags (value, book_id) VALUES(?, ?)",
                             value,
@@ -656,6 +735,22 @@ impl SQLiteDatabase {
                         .execute(&mut tx)
                         .await
                         .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::ExactTag(tag) => {
+                        let new_tag = tag.to_owned() + value;
+                        sqlx::query!(
+                            "DELETE FROM free_tags where value = ? AND book_id = ?; INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                            tag,
+                            book_id,
+                            new_tag,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
+                        unimplemented!()
                     }
                 },
             }
@@ -712,6 +807,7 @@ impl AppDatabase for SQLiteDatabase {
         execute_query_str!(db, CREATE_BOOKS)?;
         execute_query_str!(db, CREATE_FREE_TAGS)?;
         execute_query_str!(db, CREATE_NAMED_TAGS)?;
+        execute_query_str!(db, CREATE_MULTIMAP_TAGS)?;
         execute_query_str!(db, CREATE_VARIANTS)?;
         if db_exists {
             db.load_books()?;

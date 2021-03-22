@@ -67,7 +67,7 @@ impl Matcher for RegexMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
-        if self.column == ColumnIdentifier::Tag {
+        if self.column == ColumnIdentifier::Tags {
             return book.free_tags.iter().any(|v| self.regex.is_match(v))
                 || self.regex.is_match("");
         }
@@ -95,7 +95,7 @@ impl Matcher for ExactSubstringMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
-        if self.column == ColumnIdentifier::Tag {
+        if self.column == ColumnIdentifier::Tags {
             return book.free_tags.iter().any(|v| self.regex.is_match(v))
                 || self.regex.is_match("");
         }
@@ -123,7 +123,7 @@ impl Matcher for ExactStringMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
-        if self.column == ColumnIdentifier::Tag {
+        if self.column == ColumnIdentifier::Tags {
             return book.free_tags.contains(&self.string) || self.string.is_empty();
         }
 
@@ -150,7 +150,7 @@ impl Matcher for DefaultMatcher {
 
     #[inline(always)]
     fn is_match(&self, book: &Book) -> bool {
-        if self.column == ColumnIdentifier::Tag {
+        if self.column == ColumnIdentifier::Tags {
             return book
                 .free_tags
                 .iter()

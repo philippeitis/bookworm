@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use crate::series::Series;
 use crate::ColumnOrder;
 use crate::{BookVariant, Edit};
-use std::collections::hash_map::Entry;
 
 pub type BookID = std::num::NonZeroU64;
 
@@ -30,7 +29,10 @@ pub enum ColumnIdentifier {
     ID,
     Variants,
     Description,
-    Tag,
+    Tags,
+    ExactTag(String),
+    MultiMap(String),
+    MultiMapExact(String, String),
     NamedTag(String),
 }
 
@@ -43,7 +45,7 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
             "id" => Self::ID,
             "variant" | "variants" => Self::Variants,
             "description" => Self::Description,
-            "tag" => Self::Tag,
+            "tag" => Self::Tags,
             _ => Self::NamedTag(val.as_ref().to_owned()),
         }
     }
@@ -58,8 +60,9 @@ impl ColumnIdentifier {
             ColumnIdentifier::ID => "ID",
             ColumnIdentifier::Variants => "Variants",
             ColumnIdentifier::Description => "Description",
-            ColumnIdentifier::Tag => "Tag",
+            ColumnIdentifier::Tags | ColumnIdentifier::ExactTag(_) => "Tag",
             ColumnIdentifier::NamedTag(t) => return t,
+            ColumnIdentifier::MultiMap(t) | ColumnIdentifier::MultiMapExact(t, _) => return t,
         }
         .to_string()
     }
@@ -238,8 +241,15 @@ impl Book {
             ColumnIdentifier::NamedTag(column) => {
                 self.named_tags.insert(column.to_owned(), value.to_owned());
             }
-            ColumnIdentifier::Tag => {
+            ColumnIdentifier::Tags => {
                 self.free_tags.insert(value.to_owned());
+            }
+            ColumnIdentifier::ExactTag(tag) => {
+                self.free_tags.remove(tag);
+                self.free_tags.insert(value.to_owned());
+            }
+            ColumnIdentifier::MultiMap(_mm) | ColumnIdentifier::MultiMapExact(_mm, _) => {
+                unimplemented!()
             }
         }
         Ok(())
@@ -288,9 +298,17 @@ impl Book {
                     .or_insert_with(String::new)
                     .push_str(value);
             }
-            ColumnIdentifier::Tag => {
+            ColumnIdentifier::Tags => {
                 self.free_tags.insert(value.to_owned());
             }
+            ColumnIdentifier::ExactTag(tag) => {
+                if !self.free_tags.remove(tag) {
+                    self.free_tags.insert(value.to_owned());
+                } else {
+                    self.free_tags.insert(tag.to_owned() + value);
+                }
+            }
+            _ => unimplemented!(),
         }
         Ok(())
     }
@@ -307,9 +325,13 @@ impl Book {
             ColumnIdentifier::NamedTag(column) => {
                 self.named_tags.remove(column);
             }
-            ColumnIdentifier::Tag => {
-                return Err(RecordError::ImmutableColumn);
+            ColumnIdentifier::Tags => {
+                self.free_tags.clear();
             }
+            ColumnIdentifier::ExactTag(t) => {
+                self.free_tags.remove(t);
+            }
+            _ => unimplemented!(),
         }
         Ok(())
     }

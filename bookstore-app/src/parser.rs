@@ -299,21 +299,31 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 match flag {
                     Flag::FlagWithArgument(f, args) => {
                         let mut args = args.into_iter();
-                        match f.as_str() {
-                            "d" => {
-                                edits.push((
-                                    ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
-                                    Edit::Delete,
-                                ));
-                            }
-                            "a" => {
-                                edits.push((
-                                    ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
-                                    Edit::Append(args.next().ok_or_else(insuf)?),
-                                ));
-                            }
+                        let edit = match f.as_str() {
+                            "d" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
+                                ColumnIdentifier::Tags => match args.next() {
+                                    None => (ColumnIdentifier::Tags, Edit::Delete),
+                                    Some(tag) => (ColumnIdentifier::ExactTag(tag), Edit::Delete),
+                                },
+                                column => (column, Edit::Delete),
+                            },
+                            "a" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
+                                ColumnIdentifier::Tags => match (args.next(), args.next()) {
+                                    (Some(value), None) => {
+                                        (ColumnIdentifier::Tags, Edit::Append(value))
+                                    }
+                                    (Some(tag), Some(value)) => {
+                                        (ColumnIdentifier::ExactTag(tag), Edit::Append(value))
+                                    }
+                                    _ => return Err(CommandError::InsufficientArguments),
+                                },
+                                column => (column, Edit::Append(args.next().ok_or_else(insuf)?)),
+                            },
                             _ => return Err(CommandError::InvalidCommand),
                         };
+
+                        edits.push(edit);
+
                         while let Some(col) = args.next() {
                             edits.push((
                                 ColumnIdentifier::from(col),
