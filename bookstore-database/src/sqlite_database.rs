@@ -18,7 +18,7 @@ use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::series::Series;
-use bookstore_records::{Book, BookVariant, ColumnOrder};
+use bookstore_records::{Book, BookVariant, ColumnOrder, Edit};
 
 use crate::bookmap::BookCache;
 use crate::search::Search;
@@ -31,11 +31,12 @@ const CREATE_BOOKS: &str = r#"CREATE TABLE IF NOT EXISTS `books` (
 `series_id` REAL DEFAULT NULL
 );"#;
 
-// Authors are stored here as well.
+// TODO: Fix inability to store multiple authors.
 const CREATE_NAMED_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `named_tags` (
 `name` TEXT NOT NULL,
 `value` TEXT NOT NULL,
 `book_id` INTEGER NOT NULL,
+UNIQUE(`name`, `book_id`),
 FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
     ON DELETE CASCADE
@@ -44,6 +45,7 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
 const CREATE_FREE_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `free_tags` (
 `value` TEXT NOT NULL,
 `book_id` INTEGER NOT NULL,
+UNIQUE(`value`, `book_id`),
 FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
     ON DELETE CASCADE
@@ -464,103 +466,198 @@ impl SQLiteDatabase {
         tx.commit().await
     }
 
-    async fn edit_book_by_id_async<S: AsRef<str>>(
+    async fn edit_book_by_id_async(
         &mut self,
         id: BookID,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
         if !self.local_cache.edit_book_with_id(id, &edits)? {
             return Err(DatabaseError::BookNotFound(id));
         }
         let mut tx = self.backend.begin().await.map_err(DatabaseError::Backend)?;
 
-        let idx = u64::from(id) as i64;
-        for (column, new_value) in edits {
-            let new_value = new_value.as_ref();
-            match column {
-                ColumnIdentifier::Title => {
-                    sqlx::query!(
-                        "UPDATE books SET title = ? WHERE book_id = ?;",
-                        new_value,
-                        idx
-                    )
-                    .execute(&mut tx)
-                    .await
-                    .map_err(DatabaseError::Backend)?;
+        let book_id = u64::from(id) as i64;
+        for (column, edit) in edits {
+            match edit {
+                Edit::Delete => {
+                    match column {
+                    ColumnIdentifier::Title => {
+                        sqlx::query!("UPDATE books SET title = null WHERE book_id = ?;", book_id)
+                    }
+                    ColumnIdentifier::Author => sqlx::query!(
+                        "DELETE FROM named_tags where book_id = ? AND name = 'author';",
+                        book_id
+                    ),
+                    ColumnIdentifier::ID => {
+                        unreachable!("Updating local cache should have errored before this could be reached.")
+                    }
+                    ColumnIdentifier::Series => sqlx::query!(
+                        "UPDATE books SET series_name = null, series_id = null WHERE book_id = ?;",
+                        book_id
+                    ),
+                    ColumnIdentifier::Variants => {
+                        unreachable!("Updating local cache should have errored before this could be reached.")
+                    }
+                    ColumnIdentifier::Description => sqlx::query!(
+                        "UPDATE variants SET description = null WHERE book_id = ?;",
+                        book_id
+                    ),
+                    ColumnIdentifier::Tag => unimplemented!("Implement tag deletion."),
+                    ColumnIdentifier::NamedTag(column) => {
+                            sqlx::query!(
+                            "DELETE FROM named_tags where book_id = ? and name = ?;",
+                            book_id,
+                            column
+                        ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
+                        continue;
+                    },
+                }.execute(&mut tx).await.map_err(DatabaseError::Backend)?;
                 }
-                ColumnIdentifier::Author => {
-                    sqlx::query!(
-                        "INSERT INTO named_tags (name, value, book_id) VALUES('author', ?, ?);",
-                        new_value,
-                        idx
-                    )
-                    .execute(&mut tx)
-                    .await
-                    .map_err(DatabaseError::Backend)?;
-                }
-                ColumnIdentifier::Series => {
-                    let series = Series::from_str(new_value).ok();
-                    let (series, series_index) = match series {
-                        None => (None, None),
-                        Some(Series { name, index }) => (Some(name), index.clone()),
-                    };
+                Edit::Replace(value) => match column {
+                    ColumnIdentifier::Title => {
+                        sqlx::query!(
+                            "UPDATE books SET title = ? WHERE book_id = ?;",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Author => {
+                        sqlx::query!(
+                            "INSERT INTO named_tags (name, value, book_id) VALUES('author', ?, ?);",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Series => {
+                        let series = Series::from_str(value).ok();
+                        let (series, series_index) = match series {
+                            None => (None, None),
+                            Some(Series { name, index }) => (Some(name), index.clone()),
+                        };
 
-                    sqlx::query!(
-                        "UPDATE books SET series_name = ?, series_id = ? WHERE book_id = ?",
-                        series,
-                        series_index,
-                        idx
-                    )
-                    .execute(&mut tx)
-                    .await
-                    .map_err(DatabaseError::Backend)?;
-                }
-                ColumnIdentifier::ID => {
-                    unreachable!(
-                        "id is immutable, and this case is reached when local cache is modified"
-                    );
-                }
-                ColumnIdentifier::Variants => {
-                    sqlx::query!(
-                        "UPDATE books SET title = ? WHERE book_id = ?",
-                        new_value,
-                        idx
-                    )
-                    .execute(&mut tx)
-                    .await
-                    .map_err(DatabaseError::Backend)?;
-                }
-                ColumnIdentifier::Description => {
-                    sqlx::query!(
-                        "UPDATE variants SET description = ? WHERE book_id = ?",
-                        new_value,
-                        idx
-                    )
-                    .execute(&mut tx)
-                    .await
-                    .map_err(DatabaseError::Backend)?;
-                }
-                ColumnIdentifier::Tag => {
-                    sqlx::query!(
-                        "INSERT into free_tags (value, book_id) VALUES(?, ?)",
-                        new_value,
-                        idx
-                    )
-                    .execute(&mut tx)
-                    .await
-                    .map_err(DatabaseError::Backend)?;
-                }
-                ColumnIdentifier::NamedTag(t) => {
-                    sqlx::query!(
-                        "INSERT into named_tags (name, value, book_id) VALUES(?, ?, ?)",
-                        t,
-                        new_value,
-                        idx
-                    )
-                    .execute(&mut tx)
-                    .await
-                    .map_err(DatabaseError::Backend)?;
-                }
+                        sqlx::query!(
+                            "UPDATE books SET series_name = ?, series_id = ? WHERE book_id = ?",
+                            series,
+                            series_index,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::ID => {
+                        unreachable!("id is immutable, and this case is reached when local cache is modified");
+                    }
+                    ColumnIdentifier::Variants => {
+                        unreachable!(
+                            "variants is immutable, and this case is reached when local cache is modified"
+                        );
+                    }
+                    ColumnIdentifier::Description => {
+                        sqlx::query!(
+                            "UPDATE variants SET description = ? WHERE book_id = ?",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Tag => {
+                        sqlx::query!(
+                            "INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::NamedTag(column) => {
+                        sqlx::query!(
+                            "INSERT into named_tags (name, value, book_id) VALUES(?, ?, ?)",
+                            column,
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                },
+                Edit::Append(value) => match column {
+                    ColumnIdentifier::Title => {
+                        sqlx::query!(
+                            "UPDATE books SET title = title || ? WHERE book_id = ?;",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Author => {
+                        sqlx::query!(
+                            "INSERT INTO named_tags (name, value, book_id) VALUES('author', ?, ?);",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Series => {
+                        unreachable!("book should reject concatenating to series");
+                    }
+                    ColumnIdentifier::ID => {
+                        unreachable!("id is immutable, and this case is reached when local cache is modified");
+                    }
+                    ColumnIdentifier::Variants => {
+                        unreachable!(
+                            "variants is immutable, and this case is reached when local cache is modified"
+                        );
+                    }
+                    ColumnIdentifier::Description => {
+                        sqlx::query!(
+                            "UPDATE variants SET description = description || ? WHERE book_id = ?",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Tag => {
+                        sqlx::query!(
+                            "INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::NamedTag(column) => {
+                        sqlx::query!(
+                            "INSERT OR REPLACE INTO named_tags (name, value, book_id) VALUES(?, \
+                            COALESCE((SELECT value from named_tags where name = ? AND book_id = ?), \'\') || ?, ?)",
+                            column,
+                            column,
+                            book_id,
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                },
             }
         }
         tx.commit().await.map_err(DatabaseError::Backend)
@@ -700,10 +797,10 @@ impl AppDatabase for SQLiteDatabase {
         Ok(self.local_cache.has_column(col))
     }
 
-    fn edit_book_with_id<S: AsRef<str>>(
+    fn edit_book_with_id(
         &mut self,
         id: BookID,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "UPDATE {} SET {} = {} WHERE book_id = {};"
         block_on(self.edit_book_by_id_async(id, edits))
@@ -815,10 +912,10 @@ impl IndexableDatabase for SQLiteDatabase {
         self.remove_book(book.id())
     }
 
-    fn edit_book_indexed<S: AsRef<str>>(
+    fn edit_book_indexed(
         &mut self,
         index: usize,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "UPDATE {} SET {} = {} WHERE book_id > last_id ORDER BY {} {} LIMIT 1"
         // NOTE: edit_book_indexed is for editing a selected book -

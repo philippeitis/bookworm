@@ -15,7 +15,7 @@ use bookstore_database::{
     NestedBookView, ScrollableBookView, SearchableBookView,
 };
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{BookError, BookVariant, ColumnOrder};
+use bookstore_records::{BookError, BookVariant, ColumnOrder, Edit};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;
@@ -241,9 +241,9 @@ impl<D: IndexableDatabase> App<D> {
         }
     }
 
-    pub fn edit_selected_book<S: AsRef<str>>(
+    pub fn edit_selected_book(
         &mut self,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         let book = book_view.get_selected_book()?;
@@ -251,10 +251,10 @@ impl<D: IndexableDatabase> App<D> {
         self.edit_book_with_id(id, edits)
     }
 
-    pub fn edit_book_with_id<S: AsRef<str>>(
+    pub fn edit_book_with_id(
         &mut self,
         id: BookID,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), ApplicationError<D::Error>> {
         Ok(self.write(|db| db.edit_book_with_id(id, edits))?)
     }

@@ -1,21 +1,18 @@
 [colors]
-selected_fg = "white"
-selected_bg = "lightblue"
+selected_fg = "White"
+selected_bg = "Blue"
+edit_fg = "White"
+edit_bg = "LightBlue"
 
 [layout]
-columns = ["Title", "Authors", "ID"]
+columns = ["Title", "Authors", "id", "???"]
 
 [sorting]
-column = "ID"
-reverse = true
+columns = [["authors", false], ["id", true]]
 
 [navigation]
 scroll = 5
 inverted = false
 
-# TODO: Support loading WASM to read metadata.
-# https://github.com/wasmerio/wasmer-rust-example
-#[read_extensions]
-#[read_extensions.azw3]             # name
-#extensions = ["azw3"]              # supported extensions
-#path = "path/to/extension.wasm"    # path to extension
+[database]
+file = "rustbreak.db"

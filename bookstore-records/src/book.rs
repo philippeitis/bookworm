@@ -8,14 +8,16 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use crate::series::Series;
-use crate::BookVariant;
 use crate::ColumnOrder;
+use crate::{BookVariant, Edit};
+use std::collections::hash_map::Entry;
 
 pub type BookID = std::num::NonZeroU64;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RecordError {
     ImmutableColumn,
+    InextensibleColumn,
 }
 
 /// Identifies the columns a Book provides. Intended to provide a way to access arbitrary columns,
@@ -238,6 +240,75 @@ impl Book {
             }
             ColumnIdentifier::Tag => {
                 self.free_tags.insert(value.to_owned());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn edit_column<E: AsRef<Edit>>(
+        &mut self,
+        column: &ColumnIdentifier,
+        edit: E,
+    ) -> Result<(), RecordError> {
+        match edit.as_ref() {
+            Edit::Delete => self.delete_column(column),
+            Edit::Replace(s) => self.set_column(column, s),
+            Edit::Append(s) => self.extend_column(column, s),
+        }
+    }
+
+    pub fn extend_column<S: AsRef<str>>(
+        &mut self,
+        column: &ColumnIdentifier,
+        value: S,
+    ) -> Result<(), RecordError> {
+        let value = value.as_ref();
+        match column {
+            ColumnIdentifier::Title => match &mut self.title {
+                x @ None => *x = Some(value.to_string()),
+                Some(title) => title.push_str(value),
+            },
+            ColumnIdentifier::Description => match &mut self.description {
+                x @ None => *x = Some(value.to_string()),
+                Some(description) => description.push_str(value),
+            },
+            ColumnIdentifier::Author => match &mut self.authors {
+                x @ None => *x = Some(vec![value.to_string()]),
+                Some(authors) => authors.push(value.to_owned()),
+            },
+            ColumnIdentifier::ID | ColumnIdentifier::Variants => {
+                return Err(RecordError::ImmutableColumn);
+            }
+            ColumnIdentifier::Series => {
+                return Err(RecordError::InextensibleColumn);
+            }
+            ColumnIdentifier::NamedTag(column) => {
+                self.named_tags
+                    .entry(column.to_owned())
+                    .or_insert_with(String::new)
+                    .push_str(value);
+            }
+            ColumnIdentifier::Tag => {
+                self.free_tags.insert(value.to_owned());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn delete_column(&mut self, column: &ColumnIdentifier) -> Result<(), RecordError> {
+        match column {
+            ColumnIdentifier::Title => self.title = None,
+            ColumnIdentifier::Description => self.description = None,
+            ColumnIdentifier::Author => self.authors = None,
+            ColumnIdentifier::ID | ColumnIdentifier::Variants => {
+                return Err(RecordError::ImmutableColumn);
+            }
+            ColumnIdentifier::Series => self.series = None,
+            ColumnIdentifier::NamedTag(column) => {
+                self.named_tags.remove(column);
+            }
+            ColumnIdentifier::Tag => {
+                return Err(RecordError::ImmutableColumn);
             }
         }
         Ok(())

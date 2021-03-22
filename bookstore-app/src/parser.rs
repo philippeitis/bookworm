@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use bookstore_database::search::{Search, SearchMode};
 use bookstore_records::book::{BookID, ColumnIdentifier};
-use bookstore_records::ColumnOrder;
+use bookstore_records::{ColumnOrder, Edit};
 
 #[derive(Debug)]
 pub enum Flag {
@@ -27,7 +27,7 @@ pub enum Command {
     DeleteAll,
     // TODO: Add + syntax for appending to existing text
     // TODO: Add deletion of fields and tags.
-    EditBook(BookIndex, Box<[(ColumnIdentifier, String)]>),
+    EditBook(BookIndex, Box<[(ColumnIdentifier, Edit)]>),
     AddBookFromFile(PathBuf),
     AddBooksFromDir(PathBuf, u8),
     AddColumn(String),
@@ -129,19 +129,12 @@ fn read_flags(args: Vec<String>) -> Vec<Flag> {
 }
 
 fn remove_string_quotes(mut s: String) -> String {
-    match s.chars().next() {
-        x @ Some('"') | x @ Some('\'') => match s.chars().last() {
-            y @ Some('"') | y @ Some('\'') => {
-                if x == y {
-                    s.remove(0);
-                    s.pop();
-                    s
-                } else {
-                    s
-                }
-            }
-            _ => s,
-        },
+    match (s.chars().next(), s.chars().last()) {
+        (Some('"'), Some('"')) | (Some('\''), Some('\'')) => {
+            s.pop();
+            s.remove(0);
+            s
+        }
         _ => s,
     }
 }
@@ -251,44 +244,44 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
                 Ok(Command::DeleteBook(BookIndex::Selected))
             }
         }
-        ":e" => match flags.into_iter().next() {
-            Some(Flag::StartingArguments(args)) => {
-                let mut chunks = Vec::with_capacity(args.len() / 2);
-                let (id, mut args) = if args.len() % 2 == 1 {
-                    let mut args = args.into_iter();
-                    (
-                        Some(
-                            BookID::from_str(&args.next().ok_or_else(insuf)?)
-                                .map_err(|_| CommandError::InvalidCommand)?,
-                        ),
-                        args,
-                    )
-                } else {
-                    (None, args.into_iter())
-                };
-                while let Some(field) = args.next() {
-                    let value = args.next().ok_or_else(insuf)?;
-                    chunks.push((ColumnIdentifier::from(field), value));
-                }
-
-                if chunks.is_empty() {
-                    return Err(CommandError::InsufficientArguments);
-                }
-
-                if let Some(id) = id {
-                    Ok(Command::EditBook(
-                        BookIndex::ID(id),
-                        chunks.into_boxed_slice(),
-                    ))
-                } else {
-                    Ok(Command::EditBook(
-                        BookIndex::Selected,
-                        chunks.into_boxed_slice(),
-                    ))
-                }
-            }
-            _ => Err(CommandError::InvalidCommand),
-        },
+        // ":e" => match flags.into_iter().next() {
+        //     Some(Flag::StartingArguments(args)) => {
+        //         let mut chunks = Vec::with_capacity(args.len() / 2);
+        //         let (id, mut args) = if args.len() % 2 == 1 {
+        //             let mut args = args.into_iter();
+        //             (
+        //                 Some(
+        //                     BookID::from_str(&args.next().ok_or_else(insuf)?)
+        //                         .map_err(|_| CommandError::InvalidCommand)?,
+        //                 ),
+        //                 args,
+        //             )
+        //         } else {
+        //             (None, args.into_iter())
+        //         };
+        //         while let Some(field) = args.next() {
+        //             let value = args.next().ok_or_else(insuf)?;
+        //             chunks.push((ColumnIdentifier::from(field), value));
+        //         }
+        //
+        //         if chunks.is_empty() {
+        //             return Err(CommandError::InsufficientArguments);
+        //         }
+        //
+        //         if let Some(id) = id {
+        //             Ok(Command::EditBook(
+        //                 BookIndex::ID(id),
+        //                 chunks.into_boxed_slice(),
+        //             ))
+        //         } else {
+        //             Ok(Command::EditBook(
+        //                 BookIndex::Selected,
+        //                 chunks.into_boxed_slice(),
+        //             ))
+        //         }
+        //     }
+        //     _ => Err(CommandError::InvalidCommand),
+        // },
         ":m" => match flags.first() {
             Some(Flag::Flag(a)) => {
                 if a == "a" {
@@ -299,6 +292,66 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
             }
             _ => Err(CommandError::InvalidCommand),
         },
+        ":e" => {
+            let mut edits = Vec::new();
+            let mut id = None;
+            for flag in flags.into_iter() {
+                match flag {
+                    Flag::FlagWithArgument(f, args) => {
+                        let mut args = args.into_iter();
+                        match f.as_str() {
+                            "d" => {
+                                edits.push((
+                                    ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
+                                    Edit::Delete,
+                                ));
+                            }
+                            "a" => {
+                                edits.push((
+                                    ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
+                                    Edit::Append(args.next().ok_or_else(insuf)?),
+                                ));
+                            }
+                            _ => return Err(CommandError::InvalidCommand),
+                        };
+                        while let Some(col) = args.next() {
+                            edits.push((
+                                ColumnIdentifier::from(col),
+                                Edit::Replace(args.next().ok_or_else(insuf)?),
+                            ));
+                        }
+                    }
+                    Flag::StartingArguments(args) => {
+                        let mut args = if args.len() % 2 == 1 {
+                            let mut args = args.into_iter();
+                            id = Some(
+                                BookID::from_str(&args.next().ok_or_else(insuf)?)
+                                    .map_err(|_| CommandError::InvalidCommand)?,
+                            );
+                            args
+                        } else {
+                            args.into_iter()
+                        };
+                        while let Some(col) = args.next() {
+                            edits.push((
+                                ColumnIdentifier::from(col),
+                                Edit::Replace(args.next().ok_or_else(insuf)?),
+                            ));
+                        }
+                    }
+                    _ => return Err(CommandError::InvalidCommand),
+                };
+            }
+
+            if edits.is_empty() {
+                Err(CommandError::InsufficientArguments)
+            } else {
+                Ok(Command::EditBook(
+                    id.map(|b| BookIndex::ID(b)).unwrap_or(BookIndex::Selected),
+                    edits.into_boxed_slice(),
+                ))
+            }
+        }
         ":s" => {
             let mut sort_cols = Vec::new();
 

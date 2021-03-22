@@ -6,7 +6,7 @@ use std::sync::{Arc, RwLock};
 use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{Book, BookVariant, ColumnOrder};
+use bookstore_records::{Book, BookVariant, ColumnOrder, Edit};
 
 use crate::search::{Error as SearchError, Search};
 
@@ -153,10 +153,10 @@ pub trait AppDatabase {
     /// # Errors
     /// This function will return an error if updating the database fails, or a field can not
     /// be set.
-    fn edit_book_with_id<S: AsRef<str>>(
+    fn edit_book_with_id(
         &mut self,
         id: BookID,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 
     /// Merges all books with matching titles and authors (case insensitive), in no
@@ -265,9 +265,9 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     ///
     /// # Errors
     /// This function will return an error if updating the database fails.
-    fn edit_book_indexed<S: AsRef<str>>(
+    fn edit_book_indexed(
         &mut self,
         index: usize,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 }

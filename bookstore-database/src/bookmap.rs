@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{Book, ColumnOrder};
+use bookstore_records::{Book, ColumnOrder, Edit};
 
 use crate::search::{Error, Search};
 
@@ -97,16 +97,17 @@ impl BookCache {
         self.books.values().cloned().collect()
     }
 
-    pub fn edit_book_with_id<S: AsRef<str>>(
+    pub fn edit_book_with_id(
         &mut self,
         id: BookID,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<bool, RecordError> {
         match self.books.get_mut(&id) {
             None => Ok(false),
-            Some(book) => {
-                for (column, new_value) in edits {
-                    book_mut!(book).set_column(&column, new_value)?;
+            Some(book_ref) => {
+                let mut book = book_mut!(book_ref);
+                for (column, edit) in edits {
+                    book.edit_column(&column, edit)?;
                     match column {
                         ColumnIdentifier::NamedTag(x) => {
                             self.cols.insert(UniCase::new(x.to_owned()));
@@ -119,16 +120,17 @@ impl BookCache {
         }
     }
 
-    pub fn edit_book_indexed<S: AsRef<str>>(
+    pub fn edit_book_indexed(
         &mut self,
         index: usize,
-        edits: &[(ColumnIdentifier, S)],
+        edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<bool, RecordError> {
         match self.books.get_index_mut(index) {
             None => Ok(false),
-            Some((_, book)) => {
-                for (column, new_value) in edits {
-                    book_mut!(book).set_column(&column, new_value)?;
+            Some((_, book_ref)) => {
+                let mut book = book_mut!(book_ref);
+                for (column, edit) in edits {
+                    book.edit_column(&column, edit)?;
                     match column {
                         ColumnIdentifier::NamedTag(x) => {
                             self.cols.insert(UniCase::new(x.to_owned()));

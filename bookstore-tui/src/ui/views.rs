@@ -29,6 +29,7 @@ use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{
     char_chunks_to_styled_text, BookWidget, CommandWidget, StyleRules, Widget,
 };
+use bookstore_records::Edit;
 
 macro_rules! state_mut {
     ($self: ident) => {
@@ -600,7 +601,10 @@ impl<D: IndexableDatabase> EditWidget<D> {
                 self.state().table_view.selected_cols()[self.state().selected_column].to_owned()
             };
             match app.edit_selected_book(
-                &[(ColumnIdentifier::from(column), &self.edit.value_to_string())],
+                &[(
+                    ColumnIdentifier::from(column),
+                    Edit::Replace(self.edit.value_to_string()),
+                )],
                 &mut state_mut!(self).book_view,
             ) {
                 Ok(_) => {}

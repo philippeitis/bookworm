@@ -30,3 +30,16 @@ impl ColumnOrder {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Edit {
+    Delete,
+    Replace(String),
+    Append(String),
+}
+
+impl AsRef<Edit> for Edit {
+    fn as_ref(&self) -> &Edit {
+        self
+    }
+}
