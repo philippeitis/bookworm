@@ -89,6 +89,7 @@ pub enum Command {
     //      Allow adding multiple books or directories at once?
     //  add books matching patterns
     //  delete books by criteria
+    //  Allow adding and removing multiple columns
 }
 
 impl Command {
@@ -246,9 +247,7 @@ impl CommandParser for Delete {
         match (index, trailing_args.remove("-a")) {
             (Some(id), None) => Ok(Delete::Book(BookIndex::ID(id))),
             (None, Some(a_args)) => {
-                if !a_args.is_empty() {
-                    Err(CommandError::InvalidCommand)
-                } else if !trailing_args.is_empty() {
+                if !a_args.is_empty() || !trailing_args.is_empty() {
                     Err(CommandError::InvalidCommand)
                 } else {
                     Ok(Delete::All)
@@ -279,9 +278,7 @@ impl CommandParser for Merge {
         let mut trailing_args: HashMap<_, _> = trailing_args.into_iter().collect();
         match (start_args.is_empty(), trailing_args.remove("-a")) {
             (true, Some(a_args)) => {
-                if !a_args.is_empty() {
-                    Err(CommandError::InvalidCommand)
-                } else if !trailing_args.is_empty() {
+                if !a_args.is_empty() || !trailing_args.is_empty() {
                     Err(CommandError::InvalidCommand)
                 } else {
                     Ok(Merge::All)
@@ -477,7 +474,7 @@ impl CommandParser for EditBook {
             Err(CommandError::InsufficientArguments)
         } else {
             Ok(EditBook {
-                index: id.map(|b| BookIndex::ID(b)).unwrap_or(BookIndex::Selected),
+                index: id.map(BookIndex::ID).unwrap_or(BookIndex::Selected),
                 edits: edits.into_boxed_slice(),
             })
         }
@@ -551,17 +548,13 @@ impl CommandParser for ModifyColumns {
         }
 
         match trailing_args.into_iter().next() {
-            None => {}
-            Some((col, _)) => {
-                return Ok(ModifyColumns::Remove(
-                    col.strip_prefix('-')
-                        .expect("col starts with '-' if it ends up in trailing_args")
-                        .to_string(),
-                ))
-            }
+            None => Err(CommandError::InvalidCommand),
+            Some((col, _)) => Ok(ModifyColumns::Remove(
+                col.strip_prefix('-')
+                    .expect("col starts with '-' if it ends up in trailing_args")
+                    .to_string(),
+            )),
         }
-
-        return Err(CommandError::InvalidCommand);
     }
 }
 

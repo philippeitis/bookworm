@@ -166,7 +166,6 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         col: ColumnIdentifier,
         column_order: ColumnOrder,
     ) -> Result<(), DatabaseError<D::Error>> {
-        let col = col.into();
         if column_order == ColumnOrder::Descending {
             self.scopes.iter_mut().for_each(|(_, scope)| {
                 scope.sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))

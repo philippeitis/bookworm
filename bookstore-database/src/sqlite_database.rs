@@ -607,7 +607,7 @@ impl SQLiteDatabase {
                         let series = Series::from_str(value).ok();
                         let (series, series_index) = match series {
                             None => (None, None),
-                            Some(Series { name, index }) => (Some(name), index.clone()),
+                            Some(Series { name, index }) => (Some(name), index),
                         };
 
                         sqlx::query!(
@@ -765,8 +765,8 @@ impl SQLiteDatabase {
 
     async fn update_books_async<I: IntoIterator<Item = BookVariant>>(
         &mut self,
-        books: I,
-        transaction_size: usize,
+        _books: I,
+        _transaction_size: usize,
     ) -> Result<Vec<BookID>, <Self as AppDatabase>::Error> {
         // Get file sizes and hashes
         // let books: Vec<BookVariant> = books.into_iter().collect();
@@ -952,7 +952,7 @@ impl AppDatabase for SQLiteDatabase {
 
     fn update<I: IntoIterator<Item = BookVariant>>(
         &mut self,
-        books: I,
+        _books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
         unimplemented!()
     }

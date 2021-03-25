@@ -7,7 +7,10 @@ use crate::variant::{unravel_author, Identifier, MetadataFiller};
 
 impl MetadataFiller for MobiMetadata {
     fn take_title(&mut self, title: &mut Option<String>) {
-        *title = Some(self.title().unwrap_or(std::mem::take(&mut self.name)));
+        *title = Some(
+            self.title()
+                .unwrap_or_else(|| std::mem::take(&mut self.name)),
+        );
     }
 
     fn take_description(&mut self, description: &mut Option<String>) {

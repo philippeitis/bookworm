@@ -51,16 +51,14 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
             Settings::open(&path).unwrap_or_default().split(),
             Some(path),
         )
+    } else if let Some(mut path) = dirs::config_dir() {
+        path.push("bookstore/settings.toml");
+        (
+            Settings::open(&path).unwrap_or_default().split(),
+            Some(path),
+        )
     } else {
-        if let Some(mut path) = dirs::config_dir() {
-            path.push("bookstore/settings.toml");
-            (
-                Settings::open(&path).unwrap_or_default().split(),
-                Some(path),
-            )
-        } else {
-            (Settings::default().split(), None)
-        }
+        (Settings::default().split(), None)
     };
 
     if let Some(path) = database {
