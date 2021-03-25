@@ -483,6 +483,19 @@ impl SQLiteDatabase {
             let merged_from = u64::from(merged_from) as i64;
 
             sqlx::query!(
+                "UPDATE OR IGNORE multimap_tags SET book_id = ? WHERE book_id = ?",
+                merged_into,
+                merged_from
+            )
+            .execute(&mut tx)
+            .await?;
+
+            // NOTE: Deletes orphan multimap tags.
+            sqlx::query!("DELETE FROM multimap_tags WHERE book_id = ?", merged_from)
+                .execute(&mut tx)
+                .await?;
+
+            sqlx::query!(
                 "UPDATE named_tags SET book_id = ? WHERE book_id = ?",
                 merged_into,
                 merged_from
@@ -500,14 +513,6 @@ impl SQLiteDatabase {
 
             sqlx::query!(
                 "UPDATE variants SET book_id = ? WHERE book_id = ?",
-                merged_into,
-                merged_from
-            )
-            .execute(&mut tx)
-            .await?;
-
-            sqlx::query!(
-                "UPDATE multimap_tags SET book_id = ? WHERE book_id = ?",
                 merged_into,
                 merged_from
             )
