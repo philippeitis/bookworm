@@ -21,6 +21,52 @@ pub enum BookIndex {
     ID(BookID),
 }
 
+#[derive(Debug)]
+pub enum CommandError {
+    UnknownCommand,
+    InsufficientArguments,
+    InvalidCommand,
+}
+
+enum CommandRoot {
+    Delete,
+    Edit,
+    AddBooks,
+    ModifyColumns,
+    SortColumns,
+    OpenBook,
+    MergeBooks,
+    Quit,
+    Write,
+    WriteQuit,
+    FindMatches,
+    JumpTo,
+    Help,
+}
+
+impl FromStr for CommandRoot {
+    type Err = CommandError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            ":d" => CommandRoot::Delete,
+            ":e" => CommandRoot::Edit,
+            ":a" => CommandRoot::AddBooks,
+            ":c" => CommandRoot::ModifyColumns,
+            ":s" => CommandRoot::SortColumns,
+            ":o" => CommandRoot::OpenBook,
+            ":m" => CommandRoot::MergeBooks,
+            ":q" => CommandRoot::Quit,
+            ":w" => CommandRoot::Write,
+            ":wq" => CommandRoot::WriteQuit,
+            ":f" => CommandRoot::FindMatches,
+            ":j" => CommandRoot::JumpTo,
+            ":h" => CommandRoot::Help,
+            _ => return Err(CommandError::UnknownCommand),
+        })
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Command {
     DeleteBook(BookIndex),
@@ -50,13 +96,6 @@ pub enum Command {
     //      Allow adding multiple books or directories at once?
 }
 
-#[derive(Debug)]
-pub enum CommandError {
-    UnknownCommand,
-    InsufficientArguments,
-    InvalidCommand,
-}
-
 impl Command {
     pub fn requires_ui(&self) -> bool {
         use Command::*;
@@ -67,6 +106,25 @@ impl Command {
             AddColumn(_) | RemoveColumn(_) | SortColumns(_) | FindMatches(_) => true,
             _ => false,
         }
+    }
+}
+
+trait CommandParser: Sized + Into<Command> {
+    fn from_args(args: Vec<Flag>) -> Result<Self, CommandError>;
+}
+
+fn insuf() -> CommandError {
+    CommandError::InsufficientArguments
+}
+
+fn remove_string_quotes(mut s: String) -> String {
+    match (s.chars().next(), s.chars().last()) {
+        (Some('"'), Some('"')) | (Some('\''), Some('\'')) => {
+            s.pop();
+            s.remove(0);
+            s
+        }
+        _ => s,
     }
 }
 
@@ -128,17 +186,6 @@ fn read_flags(args: Vec<String>) -> Vec<Flag> {
     flags
 }
 
-fn remove_string_quotes(mut s: String) -> String {
-    match (s.chars().next(), s.chars().last()) {
-        (Some('"'), Some('"')) | (Some('\''), Some('\'')) => {
-            s.pop();
-            s.remove(0);
-            s
-        }
-        _ => s,
-    }
-}
-
 #[allow(dead_code)]
 /// Parses `s` into a command, using shell-style string splitting.
 ///
@@ -169,369 +216,551 @@ pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
         return Err(CommandError::InsufficientArguments);
     };
 
-    let insuf = || CommandError::InsufficientArguments;
+    CommandRoot::from_str(&c)?.into_command(read_flags(args))
+}
 
-    let flags = read_flags(args);
-    match c.as_str() {
-        ":q" => Ok(Command::Quit),
-        ":w" => Ok(Command::Write),
-        ":wq" => Ok(Command::WriteAndQuit),
-        ":a" => {
-            let mut d = false;
-            let mut depth = 1;
-            let mut path_exists = false;
-            let mut path = PathBuf::new();
+impl CommandRoot {
+    pub fn into_command(self, args: Vec<Flag>) -> Result<Command, CommandError> {
+        Ok(match self {
+            CommandRoot::Delete => Delete::from_args(args)?.into(),
+            CommandRoot::Edit => EditBook::from_args(args)?.into(),
+            CommandRoot::AddBooks => AddBooks::from_args(args)?.into(),
+            CommandRoot::ModifyColumns => ModifyColumns::from_args(args)?.into(),
+            CommandRoot::SortColumns => SortColumns::from_args(args)?.into(),
+            CommandRoot::OpenBook => OpenBook::from_args(args)?.into(),
+            CommandRoot::MergeBooks => Merge::from_args(args)?.into(),
+            CommandRoot::Quit => Quit::from_args(args)?.into(),
+            CommandRoot::Write => Write::from_args(args)?.into(),
+            CommandRoot::WriteQuit => WriteQuit::from_args(args)?.into(),
+            CommandRoot::FindMatches => Find::from_args(args)?.into(),
+            CommandRoot::JumpTo => Jump::from_args(args)?.into(),
+            CommandRoot::Help => Help::from_args(args)?.into(),
+        })
+    }
+}
 
-            for flag in flags {
-                match flag {
-                    Flag::Flag(c) => match c.as_str() {
-                        "r" => {
-                            depth = 255;
-                        }
-                        "d" => {
-                            d = true;
-                        }
-                        _ => {}
-                    },
-                    Flag::FlagWithArgument(c, args) => match c.as_str() {
-                        "r" => match u8::from_str(&args[0]) {
-                            Ok(i) => depth = i,
-                            Err(_) => return Err(CommandError::InvalidCommand),
-                        },
-                        "d" => {
-                            d = true;
-                            path_exists = true;
-                            path = PathBuf::from(&args[0]);
-                        }
-                        _ => {}
-                    },
-                    Flag::StartingArguments(args) => {
-                        path_exists = true;
-                        path = PathBuf::from(&args[0]);
-                    }
-                };
-            }
-            if path_exists {
-                Ok(if d {
-                    Command::AddBooksFromDir(path, depth)
-                } else {
-                    Command::AddBookFromFile(path)
-                })
-            } else {
-                Err(CommandError::InsufficientArguments)
-            }
+enum Delete {
+    Book(BookIndex),
+    All,
+}
+
+impl Into<Command> for Delete {
+    fn into(self) -> Command {
+        match self {
+            Delete::Book(bi) => Command::DeleteBook(bi),
+            Delete::All => Command::DeleteAll,
         }
-        ":d" => {
-            if let Some(flag) = flags.first() {
-                match flag {
-                    Flag::Flag(a) => {
-                        if a == "a" {
-                            Ok(Command::DeleteAll)
-                        } else {
-                            Err(CommandError::InvalidCommand)
-                        }
+    }
+}
+
+impl CommandParser for Delete {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        if let Some(flag) = flags.first() {
+            match flag {
+                Flag::Flag(a) => {
+                    if a == "a" {
+                        Ok(Delete::All)
+                    } else {
+                        Err(CommandError::InvalidCommand)
                     }
-                    Flag::StartingArguments(args) => {
-                        if let Ok(i) = BookID::from_str(args[0].as_str()) {
-                            Ok(Command::DeleteBook(BookIndex::ID(i)))
-                        } else {
-                            Err(CommandError::InvalidCommand)
-                        }
-                    }
-                    _ => Err(CommandError::InvalidCommand),
                 }
-            } else {
-                Ok(Command::DeleteBook(BookIndex::Selected))
+                Flag::StartingArguments(args) => {
+                    if let Ok(i) = BookID::from_str(args[0].as_str()) {
+                        Ok(Delete::Book(BookIndex::ID(i)))
+                    } else {
+                        Err(CommandError::InvalidCommand)
+                    }
+                }
+                _ => Err(CommandError::InvalidCommand),
             }
+        } else {
+            Ok(Delete::Book(BookIndex::Selected))
         }
-        // ":e" => match flags.into_iter().next() {
-        //     Some(Flag::StartingArguments(args)) => {
-        //         let mut chunks = Vec::with_capacity(args.len() / 2);
-        //         let (id, mut args) = if args.len() % 2 == 1 {
-        //             let mut args = args.into_iter();
-        //             (
-        //                 Some(
-        //                     BookID::from_str(&args.next().ok_or_else(insuf)?)
-        //                         .map_err(|_| CommandError::InvalidCommand)?,
-        //                 ),
-        //                 args,
-        //             )
-        //         } else {
-        //             (None, args.into_iter())
-        //         };
-        //         while let Some(field) = args.next() {
-        //             let value = args.next().ok_or_else(insuf)?;
-        //             chunks.push((ColumnIdentifier::from(field), value));
-        //         }
-        //
-        //         if chunks.is_empty() {
-        //             return Err(CommandError::InsufficientArguments);
-        //         }
-        //
-        //         if let Some(id) = id {
-        //             Ok(Command::EditBook(
-        //                 BookIndex::ID(id),
-        //                 chunks.into_boxed_slice(),
-        //             ))
-        //         } else {
-        //             Ok(Command::EditBook(
-        //                 BookIndex::Selected,
-        //                 chunks.into_boxed_slice(),
-        //             ))
-        //         }
-        //     }
-        //     _ => Err(CommandError::InvalidCommand),
-        // },
-        ":m" => match flags.first() {
+    }
+}
+
+enum Merge {
+    All,
+}
+
+impl Into<Command> for Merge {
+    fn into(self) -> Command {
+        match self {
+            Merge::All => Command::TryMergeAllBooks,
+        }
+    }
+}
+
+impl CommandParser for Merge {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        match flags.first() {
             Some(Flag::Flag(a)) => {
                 if a == "a" {
-                    Ok(Command::TryMergeAllBooks)
+                    Ok(Merge::All)
                 } else {
                     Err(CommandError::InvalidCommand)
                 }
             }
             _ => Err(CommandError::InvalidCommand),
-        },
-        ":e" => {
-            let mut edits = Vec::new();
-            let mut id = None;
-            for flag in flags.into_iter() {
-                match flag {
-                    Flag::FlagWithArgument(f, args) => {
-                        let mut args = args.into_iter();
-                        let edit = match f.as_str() {
-                            "d" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
-                                ColumnIdentifier::Tags => match args.next() {
-                                    None => (ColumnIdentifier::Tags, Edit::Delete),
-                                    Some(tag) => (ColumnIdentifier::ExactTag(tag), Edit::Delete),
-                                },
-                                column => (column, Edit::Delete),
-                            },
-                            "a" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
-                                ColumnIdentifier::Tags => match (args.next(), args.next()) {
-                                    (Some(value), None) => {
-                                        (ColumnIdentifier::Tags, Edit::Append(value))
-                                    }
-                                    (Some(tag), Some(value)) => {
-                                        (ColumnIdentifier::ExactTag(tag), Edit::Append(value))
-                                    }
-                                    _ => return Err(CommandError::InsufficientArguments),
-                                },
-                                column => (column, Edit::Append(args.next().ok_or_else(insuf)?)),
-                            },
-                            "r" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
-                                ColumnIdentifier::Tags => match (args.next(), args.next()) {
-                                    (Some(value), None) => {
-                                        (ColumnIdentifier::Tags, Edit::Replace(value))
-                                    }
-                                    (Some(tag), Some(value)) => {
-                                        (ColumnIdentifier::ExactTag(tag), Edit::Replace(value))
-                                    }
-                                    _ => return Err(CommandError::InsufficientArguments),
-                                },
-                                column => (column, Edit::Replace(args.next().ok_or_else(insuf)?)),
-                            },
-                            _ => return Err(CommandError::InvalidCommand),
-                        };
+        }
+    }
+}
 
-                        edits.push(edit);
+struct Quit;
 
-                        while let Some(col) = args.next() {
-                            edits.push((
-                                ColumnIdentifier::from(col),
-                                Edit::Replace(args.next().ok_or_else(insuf)?),
-                            ));
-                        }
+impl Into<Command> for Quit {
+    fn into(self) -> Command {
+        Command::Quit
+    }
+}
+
+impl CommandParser for Quit {
+    fn from_args(_flags: Vec<Flag>) -> Result<Self, CommandError> {
+        Ok(Quit)
+    }
+}
+
+struct Write;
+
+impl Into<Command> for Write {
+    fn into(self) -> Command {
+        Command::Write
+    }
+}
+
+impl CommandParser for Write {
+    fn from_args(_flags: Vec<Flag>) -> Result<Self, CommandError> {
+        Ok(Write)
+    }
+}
+
+struct WriteQuit;
+
+impl Into<Command> for WriteQuit {
+    fn into(self) -> Command {
+        Command::WriteAndQuit
+    }
+}
+
+impl CommandParser for WriteQuit {
+    fn from_args(_flags: Vec<Flag>) -> Result<Self, CommandError> {
+        Ok(WriteQuit)
+    }
+}
+
+enum AddBooks {
+    FromFile(PathBuf),
+    FromDir(PathBuf, u8),
+}
+
+impl Into<Command> for AddBooks {
+    fn into(self) -> Command {
+        match self {
+            AddBooks::FromFile(path) => Command::AddBookFromFile(path),
+            AddBooks::FromDir(path, depth) => Command::AddBooksFromDir(path, depth),
+        }
+    }
+}
+
+impl CommandParser for AddBooks {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        let mut from_dir = false;
+        let mut depth = 1;
+        let mut path = None;
+
+        for flag in flags.into_iter() {
+            match flag {
+                Flag::Flag(c) => match c.as_str() {
+                    "r" => {
+                        depth = 255;
                     }
-                    Flag::StartingArguments(args) => {
-                        let mut args = if args.len() % 2 == 1 {
-                            let mut args = args.into_iter();
-                            id = Some(
-                                BookID::from_str(&args.next().ok_or_else(insuf)?)
-                                    .map_err(|_| CommandError::InvalidCommand)?,
-                            );
-                            args
-                        } else {
-                            args.into_iter()
-                        };
-                        while let Some(col) = args.next() {
-                            edits.push((
-                                ColumnIdentifier::from(col),
-                                Edit::Replace(args.next().ok_or_else(insuf)?),
-                            ));
-                        }
+                    "d" => {
+                        from_dir = true;
                     }
                     _ => return Err(CommandError::InvalidCommand),
-                };
-            }
-
-            if edits.is_empty() {
-                Err(CommandError::InsufficientArguments)
-            } else {
-                Ok(Command::EditBook(
-                    id.map(|b| BookIndex::ID(b)).unwrap_or(BookIndex::Selected),
-                    edits.into_boxed_slice(),
-                ))
-            }
-        }
-        ":s" => {
-            let mut sort_cols = Vec::new();
-
-            for flag in flags.into_iter() {
-                match flag {
-                    Flag::FlagWithArgument(f, args) => {
-                        if f != "d" {
-                            return Err(CommandError::InvalidCommand);
-                        }
-                        let mut args = args.into_iter();
-                        sort_cols.push((
-                            ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
-                            ColumnOrder::Descending,
-                        ));
-                        sort_cols.extend(
-                            args.map(|s| (ColumnIdentifier::from(s), ColumnOrder::Ascending)),
-                        );
-                    }
-                    Flag::StartingArguments(args) => {
-                        sort_cols.extend(
-                            args.into_iter()
-                                .map(|s| (ColumnIdentifier::from(s), ColumnOrder::Ascending)),
-                        );
-                    }
-                    _ => {
-                        return Err(CommandError::InvalidCommand);
-                    }
-                };
-            }
-
-            if sort_cols.is_empty() {
-                Err(CommandError::InsufficientArguments)
-            } else {
-                Ok(Command::SortColumns(sort_cols.into_boxed_slice()))
-            }
-        }
-        ":c" => match flags.into_iter().next() {
-            Some(Flag::StartingArguments(args)) => Ok(Command::AddColumn(
-                args.into_iter().next().ok_or_else(insuf)?,
-            )),
-            Some(Flag::Flag(arg)) => Ok(Command::RemoveColumn(arg)),
-            _ => Err(CommandError::InvalidCommand),
-        },
-        x @ ":f" | x @ ":j" => {
-            let mut matches = vec![];
-            for flag in flags.into_iter() {
-                let (mode, args) = match flag {
-                    Flag::StartingArguments(args) => Ok((SearchMode::Default, args)),
-                    Flag::FlagWithArgument(flag, args) => match flag.as_str() {
-                        "r" => Ok((SearchMode::Regex, args)),
-                        "e" => Ok((SearchMode::ExactSubstring, args)),
-                        "x" => Ok((SearchMode::ExactString, args)),
-                        _ => Err(CommandError::InvalidCommand),
+                },
+                Flag::FlagWithArgument(c, args) => match c.as_str() {
+                    "r" => match u8::from_str(&args[0]) {
+                        Ok(i) => depth = i,
+                        Err(_) => return Err(CommandError::InvalidCommand),
                     },
-                    _ => Err(CommandError::InvalidCommand),
-                }?;
-                let mut args = args.into_iter();
-                matches.push(Search {
-                    mode,
-                    column: ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
-                    search: remove_string_quotes(args.next().ok_or_else(insuf)?),
-                });
-                while let Some(col) = args.next() {
-                    let search = args.next().ok_or_else(insuf)?;
-                    matches.push(Search {
-                        mode: SearchMode::Default,
-                        column: ColumnIdentifier::from(col),
-                        search: remove_string_quotes(search),
-                    });
+                    "d" => {
+                        from_dir = true;
+                        path = Some(PathBuf::from(&args[0]));
+                    }
+                    _ => return Err(CommandError::InvalidCommand),
+                },
+                Flag::StartingArguments(args) => {
+                    path = Some(PathBuf::from(&args[0]));
                 }
-            }
-
-            if matches.is_empty() {
-                Err(CommandError::InsufficientArguments)
-            } else if x == ":f" {
-                Ok(Command::FindMatches(matches.into_boxed_slice()))
-            } else if x == ":j" {
-                Ok(Command::JumpTo(matches.into_boxed_slice()))
-            } else {
-                unreachable!("x can only be one of :f, :j (is {})", x);
-            }
+            };
         }
-        ":o" => {
-            let mut f = false;
-            let mut loc_exists = false;
-            let mut loc = String::new();
-            let mut index_exists = false;
-            let mut index = String::new();
-            for flag in flags {
-                match flag {
-                    Flag::Flag(c) => {
-                        f |= c == "f";
-                    }
-                    Flag::FlagWithArgument(c, args) => {
-                        if c == "f" {
-                            if let Some(ind_book) = args.get(0) {
-                                if let Ok(bi) = BookID::from_str(ind_book.as_str()) {
-                                    if let Some(ind_var) = args.get(1) {
-                                        if let Ok(vi) = usize::from_str(ind_var.as_str()) {
-                                            return Ok(Command::OpenBookInExplorer(
-                                                BookIndex::ID(bi),
-                                                vi,
-                                            ));
-                                        }
-                                    }
-                                    return Ok(Command::OpenBookInExplorer(BookIndex::ID(bi), 0));
-                                }
-                            }
-                        }
-                        return Err(CommandError::InvalidCommand);
-                    }
-                    Flag::StartingArguments(args) => {
-                        let mut args = args.into_iter();
-
-                        if let Some(l) = args.next() {
-                            loc_exists = true;
-                            loc = l;
-                        }
-
-                        if let Some(i) = args.next() {
-                            index_exists = true;
-                            index = i;
-                        }
-                    }
-                }
-            }
-            if loc_exists {
-                if let Ok(loc) = BookID::from_str(loc.as_str()) {
-                    if index_exists {
-                        if let Ok(index) = usize::from_str(index.as_str()) {
-                            return Ok(if f {
-                                Command::OpenBookInExplorer(BookIndex::ID(loc), index)
-                            } else {
-                                Command::OpenBookInApp(BookIndex::ID(loc), index)
-                            });
-                        }
-                    } else if f {
-                        return Ok(Command::OpenBookInExplorer(BookIndex::ID(loc), 0));
-                    } else {
-                        return Ok(Command::OpenBookInApp(BookIndex::ID(loc), 0));
-                    }
-                }
-            }
-            Ok(if f {
-                Command::OpenBookInExplorer(BookIndex::Selected, 0)
+        if let Some(path) = path {
+            Ok(if from_dir {
+                AddBooks::FromDir(path, depth)
             } else {
-                Command::OpenBookInApp(BookIndex::Selected, 0)
+                AddBooks::FromFile(path)
+            })
+        } else {
+            Err(CommandError::InsufficientArguments)
+        }
+    }
+}
+
+struct EditBook {
+    index: BookIndex,
+    edits: Box<[(ColumnIdentifier, Edit)]>,
+}
+
+impl Into<Command> for EditBook {
+    fn into(self) -> Command {
+        Command::EditBook(self.index, self.edits)
+    }
+}
+
+impl CommandParser for EditBook {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        let mut edits = Vec::new();
+        let mut id = None;
+        for flag in flags.into_iter() {
+            match flag {
+                Flag::FlagWithArgument(f, args) => {
+                    let mut args = args.into_iter();
+                    let edit = match f.as_str() {
+                        "d" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
+                            ColumnIdentifier::Tags => match args.next() {
+                                None => (ColumnIdentifier::Tags, Edit::Delete),
+                                Some(tag) => (ColumnIdentifier::ExactTag(tag), Edit::Delete),
+                            },
+                            column => (column, Edit::Delete),
+                        },
+                        "a" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
+                            ColumnIdentifier::Tags => match (args.next(), args.next()) {
+                                (Some(value), None) => {
+                                    (ColumnIdentifier::Tags, Edit::Append(value))
+                                }
+                                (Some(tag), Some(value)) => {
+                                    (ColumnIdentifier::ExactTag(tag), Edit::Append(value))
+                                }
+                                _ => return Err(CommandError::InsufficientArguments),
+                            },
+                            column => (column, Edit::Append(args.next().ok_or_else(insuf)?)),
+                        },
+                        "r" => match ColumnIdentifier::from(args.next().ok_or_else(insuf)?) {
+                            ColumnIdentifier::Tags => match (args.next(), args.next()) {
+                                (Some(value), None) => {
+                                    (ColumnIdentifier::Tags, Edit::Replace(value))
+                                }
+                                (Some(tag), Some(value)) => {
+                                    (ColumnIdentifier::ExactTag(tag), Edit::Replace(value))
+                                }
+                                _ => return Err(CommandError::InsufficientArguments),
+                            },
+                            column => (column, Edit::Replace(args.next().ok_or_else(insuf)?)),
+                        },
+                        _ => return Err(CommandError::InvalidCommand),
+                    };
+
+                    edits.push(edit);
+
+                    while let Some(col) = args.next() {
+                        edits.push((
+                            ColumnIdentifier::from(col),
+                            Edit::Replace(args.next().ok_or_else(insuf)?),
+                        ));
+                    }
+                }
+                Flag::StartingArguments(args) => {
+                    let mut args = if args.len() % 2 == 1 {
+                        let mut args = args.into_iter();
+                        id = Some(
+                            BookID::from_str(&args.next().ok_or_else(insuf)?)
+                                .map_err(|_| CommandError::InvalidCommand)?,
+                        );
+                        args
+                    } else {
+                        args.into_iter()
+                    };
+                    while let Some(col) = args.next() {
+                        edits.push((
+                            ColumnIdentifier::from(col),
+                            Edit::Replace(args.next().ok_or_else(insuf)?),
+                        ));
+                    }
+                }
+                _ => return Err(CommandError::InvalidCommand),
+            };
+        }
+
+        if edits.is_empty() {
+            Err(CommandError::InsufficientArguments)
+        } else {
+            Ok(EditBook {
+                index: id.map(|b| BookIndex::ID(b)).unwrap_or(BookIndex::Selected),
+                edits: edits.into_boxed_slice(),
             })
         }
-        ":h" => Ok(match flags.into_iter().next() {
-            Some(Flag::StartingArguments(args)) => Command::Help(
-                args.into_iter()
-                    .next()
-                    .ok_or(CommandError::InsufficientArguments)?,
-            ),
-            _ => Command::GeneralHelp,
-        }),
-        _ => Err(CommandError::UnknownCommand),
+    }
+}
+
+struct SortColumns {
+    sorts: Box<[(ColumnIdentifier, ColumnOrder)]>,
+}
+
+impl Into<Command> for SortColumns {
+    fn into(self) -> Command {
+        Command::SortColumns(self.sorts)
+    }
+}
+
+impl CommandParser for SortColumns {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        let mut sort_cols = Vec::new();
+
+        for flag in flags.into_iter() {
+            match flag {
+                Flag::FlagWithArgument(f, args) => {
+                    if f != "d" {
+                        return Err(CommandError::InvalidCommand);
+                    }
+                    let mut args = args.into_iter();
+                    sort_cols.push((
+                        ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
+                        ColumnOrder::Descending,
+                    ));
+                    sort_cols
+                        .extend(args.map(|s| (ColumnIdentifier::from(s), ColumnOrder::Ascending)));
+                }
+                Flag::StartingArguments(args) => {
+                    sort_cols.extend(
+                        args.into_iter()
+                            .map(|s| (ColumnIdentifier::from(s), ColumnOrder::Ascending)),
+                    );
+                }
+                _ => {
+                    return Err(CommandError::InvalidCommand);
+                }
+            };
+        }
+
+        if sort_cols.is_empty() {
+            Err(CommandError::InsufficientArguments)
+        } else {
+            Ok(SortColumns {
+                sorts: sort_cols.into_boxed_slice(),
+            })
+        }
+    }
+}
+
+enum ModifyColumns {
+    Remove(String),
+    Add(String),
+}
+
+impl Into<Command> for ModifyColumns {
+    fn into(self) -> Command {
+        match self {
+            ModifyColumns::Remove(column) => Command::RemoveColumn(column),
+            ModifyColumns::Add(column) => Command::AddColumn(column),
+        }
+    }
+}
+
+impl CommandParser for ModifyColumns {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        match flags.into_iter().next() {
+            Some(Flag::StartingArguments(args)) => Ok(ModifyColumns::Add(
+                args.into_iter().next().ok_or_else(insuf)?,
+            )),
+            Some(Flag::Flag(arg)) => Ok(ModifyColumns::Remove(arg)),
+            _ => Err(CommandError::InvalidCommand),
+        }
+    }
+}
+
+struct Matches {
+    matches: Box<[Search]>,
+}
+
+impl Matches {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        let mut matches = vec![];
+        for flag in flags.into_iter() {
+            let (mode, args) = match flag {
+                Flag::StartingArguments(args) => Ok((SearchMode::Default, args)),
+                Flag::FlagWithArgument(flag, args) => match flag.as_str() {
+                    "r" => Ok((SearchMode::Regex, args)),
+                    "e" => Ok((SearchMode::ExactSubstring, args)),
+                    "x" => Ok((SearchMode::ExactString, args)),
+                    _ => Err(CommandError::InvalidCommand),
+                },
+                _ => Err(CommandError::InvalidCommand),
+            }?;
+            let mut args = args.into_iter();
+            matches.push(Search {
+                mode,
+                column: ColumnIdentifier::from(args.next().ok_or_else(insuf)?),
+                search: remove_string_quotes(args.next().ok_or_else(insuf)?),
+            });
+            while let Some(col) = args.next() {
+                let search = args.next().ok_or_else(insuf)?;
+                matches.push(Search {
+                    mode: SearchMode::Default,
+                    column: ColumnIdentifier::from(col),
+                    search: remove_string_quotes(search),
+                });
+            }
+        }
+
+        if matches.is_empty() {
+            Err(CommandError::InsufficientArguments)
+        } else {
+            Ok(Matches {
+                matches: matches.into_boxed_slice(),
+            })
+        }
+    }
+}
+
+struct Jump {
+    matches: Matches,
+}
+
+impl Into<Command> for Jump {
+    fn into(self) -> Command {
+        Command::JumpTo(self.matches.matches)
+    }
+}
+
+impl CommandParser for Jump {
+    fn from_args(args: Vec<Flag>) -> Result<Self, CommandError> {
+        Ok(Jump {
+            matches: Matches::from_args(args)?,
+        })
+    }
+}
+
+struct Find {
+    matches: Matches,
+}
+
+impl Into<Command> for Find {
+    fn into(self) -> Command {
+        Command::FindMatches(self.matches.matches)
+    }
+}
+
+impl CommandParser for Find {
+    fn from_args(args: Vec<Flag>) -> Result<Self, CommandError> {
+        Ok(Find {
+            matches: Matches::from_args(args)?,
+        })
+    }
+}
+
+struct Help {
+    term: Option<String>,
+}
+
+impl Into<Command> for Help {
+    fn into(self) -> Command {
+        match self.term {
+            None => Command::GeneralHelp,
+            Some(term) => Command::Help(term),
+        }
+    }
+}
+
+impl CommandParser for Help {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        Ok(Help {
+            term: match flags.into_iter().next() {
+                Some(Flag::StartingArguments(args)) => Some(
+                    args.into_iter()
+                        .next()
+                        .ok_or(CommandError::InsufficientArguments)?,
+                ),
+                _ => None,
+            },
+        })
+    }
+}
+
+enum Target {
+    App,
+    FileManager,
+}
+
+struct OpenBook {
+    target: Target,
+    book_index: BookIndex,
+    variant_index: usize,
+}
+
+impl Into<Command> for OpenBook {
+    fn into(self) -> Command {
+        match self.target {
+            Target::App => Command::OpenBookInApp(self.book_index, self.variant_index),
+            Target::FileManager => Command::OpenBookInExplorer(self.book_index, self.variant_index),
+        }
+    }
+}
+
+impl CommandParser for OpenBook {
+    fn from_args(flags: Vec<Flag>) -> Result<Self, CommandError> {
+        let mut target = Target::App;
+        let mut book_index = BookIndex::Selected;
+        let mut variant_index = 0;
+        for flag in flags {
+            match flag {
+                Flag::Flag(c) => {
+                    if c == "f" {
+                        target = Target::FileManager;
+                    }
+                }
+                Flag::FlagWithArgument(c, args) => {
+                    if c != "f" {
+                        return Err(CommandError::InvalidCommand);
+                    }
+                    target = Target::FileManager;
+                    let mut args = args.into_iter();
+                    if let Some(ind_book) = args.next() {
+                        if let Ok(bi) = BookID::from_str(ind_book.as_str()) {
+                            let vi = args
+                                .next()
+                                .as_deref()
+                                .map_or(Ok(0), usize::from_str)
+                                .unwrap_or(0);
+                            book_index = BookIndex::ID(bi);
+                            variant_index = vi;
+                            break;
+                        }
+                    } else {
+                        return Err(CommandError::InvalidCommand);
+                    }
+                }
+                Flag::StartingArguments(args) => {
+                    let mut args = args.into_iter();
+
+                    if let Some(l) = args.next() {
+                        book_index = BookID::from_str(&l)
+                            .map(BookIndex::ID)
+                            .unwrap_or(BookIndex::Selected);
+                    }
+
+                    if let Some(i) = args.next() {
+                        variant_index = usize::from_str(&i).unwrap_or(0);
+                    }
+                }
+            }
+        }
+
+        Ok(OpenBook {
+            target,
+            book_index,
+            variant_index,
+        })
     }
 }
 
@@ -556,8 +785,8 @@ mod test {
                 Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
             ),
             (
-                vec![":a", "-r", "1", "-d", "hello world"],
-                Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
+                vec![":a", "-r", "22", "-d", "hello world"],
+                Command::AddBooksFromDir(PathBuf::from("hello world"), 22),
             ),
             (
                 vec![":a", "-d", "hello world", "-r"],

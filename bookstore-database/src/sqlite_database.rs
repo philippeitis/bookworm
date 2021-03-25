@@ -657,7 +657,7 @@ impl SQLiteDatabase {
                     ColumnIdentifier::ExactTag(tag) => {
                         sqlx::query!(
                             "DELETE FROM free_tags WHERE value = ? AND book_id = ?; INSERT into free_tags (value, book_id) VALUES(?, ?)",
-                            value,
+                            tag,
                             book_id,
                             value,
                             book_id
