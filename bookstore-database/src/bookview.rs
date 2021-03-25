@@ -209,6 +209,8 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
                 }
             }
         }
+
+        self.refresh_db_size();
     }
 
     fn remove_books(&mut self, ids: &HashSet<BookID>) {
@@ -222,6 +224,8 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
                 }
             }
         }
+
+        self.refresh_db_size();
     }
 
     fn get_selected_book(&self) -> Result<Arc<RwLock<Book>>, BookViewError<D::Error>> {
@@ -268,7 +272,7 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
 
     fn clear(&mut self) {
         self.scopes.clear();
-        self.root_cursor.refresh_height(0);
+        self.refresh_db_size();
     }
 
     fn window_size(&self) -> usize {
