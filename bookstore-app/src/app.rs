@@ -267,7 +267,6 @@ impl<D: IndexableDatabase> App<D> {
             BookViewIndex::ID(id) => self.write(|db| db.remove_book(id))?,
             BookViewIndex::Index(index) => {
                 self.write(|db| db.remove_book_indexed(index))?;
-                book_view.refresh_db_size();
             }
         }
         Ok(())
@@ -324,11 +323,13 @@ impl<D: IndexableDatabase> App<D> {
                     let book = BookVariant::from_path(&f)?;
                     db.insert_book(book).map_err(ApplicationError::Database)
                 })?;
+                book_view.refresh_db_size();
                 self.sort_settings.is_sorted = false;
             }
             Command::AddBooksFromDir(dir, depth) => {
                 // TODO: Handle failed reads.
                 self.write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
+                book_view.refresh_db_size();
                 self.sort_settings.is_sorted = false;
             }
             Command::AddColumn(column) => {
@@ -355,7 +356,7 @@ impl<D: IndexableDatabase> App<D> {
                     open_book_in_dir(&book!(b), index)?;
                 }
             }
-            Command::FindMatches(searches) => {
+            Command::FilterMatches(searches) => {
                 book_view.push_scope(&searches)?;
                 self.register_update();
             }
@@ -388,7 +389,6 @@ impl<D: IndexableDatabase> App<D> {
             #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
             _ => return Ok(true),
         }
-        book_view.refresh_db_size();
         Ok(true)
     }
 
