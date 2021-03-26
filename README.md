@@ -3,11 +3,11 @@ bookstore is a fast (hopefully) terminal based library management system (like C
 # Current Features
 - Adding single books and books from directories
 - Command based interaction (`[id]?` - if no id is provided, the selected item is used.)
-  - Edit: `:e [id]? ([column] [new_value])+`
-  - Delete (a specific book, or all books): `:d [id]?`, `:d -a`
+  - Edit: `:e [id]? ((-a|-r|-d)? [column] [new_value])+`
+  - Delete books matching predicates, all books, or selected book: `:d ((-r|-e|-x)? [column] [search_str])+`, `:d -a`, `:d`
   - Sort ascending/descending: `:s ([column] -d?)*`
-  - Add/Remove column: `:c -?[column]`
-  - Add book(s): `:a path\to\book.ext` | `:a -d path\to\books`
+  - Add/Remove columns: `:c (-?[column])+`
+  - Add a single book, multiple books, or books matching a glob: `:a -r? ((-d|-p|-g)? path+ -r?)+`
   - Quit: `:q` | CTRL + Q
   - Write: `:w` | CTRL + S
   - Write and quit: `:wq`

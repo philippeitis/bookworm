@@ -2,12 +2,16 @@ pub const ADD_BOOKS_HELP_STRING: &str = r#"USAGE:
 :a: Add books from a specified path.
 
 FLAGS:
--d: Specifies that the path is a directory
+-d: Specifies that the following strings are directory paths
     -r: The given directory should be recursively navigated.
+-g: Specifies that the following strings are globs
+-p: Specifies that the following strings are path
 
 ARGUMENTS:
--d: A relative path to the location of interest.
--r <depth>: (Optional) The maximum depth from which books will be retrieved. If not specified, only files in directory root will be read. If specified without a depth, depth is set to 255.
+-r: (Optional, only applies if -d selected): The maximum depth from which books will be retrieved. If not specified, only files in directory root will be read. If specified without a depth, depth is set to 255.
+(FLAG? <string>+)+:
+
+<string>+: A string to fetch books from, according to the flag. If no flag set, treats the string as a file.
 "#;
 
 pub const WRITE_FILE_HELP_STRING: &str = r#"USAGE:
@@ -27,9 +31,16 @@ pub const DELETE_HELP_STRING: &str = r#"USAGE:
 
 FLAGS:
 -a: Specifies that everything should be deleted.
+-r: Uses <match> as a regular expression.
+-e: Uses <match> as an exact substring.
+-x: Uses <match> as an exact string.
 
 ARGUMENTS:
-<id>: (Optional) The numeric ID of the book to delete. If not specified, deletes the selected item.
+If arguments provided, books matching predicates will be deleted.
+(FLAG? <column> <match>)+:
+FLAG: A flag describing how to use <match>. If none is provided, uses fuzzy search.
+<column>: The column to match
+<match>: The value to match on
 "#;
 
 pub const EDIT_HELP_STRING: &str = r#"USAGE:
@@ -61,7 +72,7 @@ pub const COLUMN_HELP_STRING: &str = r#"USAGE:
 :c: Add or remove columns from the UI.
 
 ARGUMENTS:
--?<column>: The column of interest.
+(-?<column>)+: The column of interest.
 If in the form -<column>, column will be removed.
 If in the form <column>, column will be added.
 "#;
@@ -101,7 +112,7 @@ FLAGS:
 -x: Uses <match> as an exact string.
 
 ARGUMENTS:
-(FLAG? <column> <match>):
+(FLAG? <column> <match>)+:
 FLAG: A flag describing how to use <match>. If none is provided, uses fuzzy search.
 <column>: The column to match
 <match>: The value to match on
