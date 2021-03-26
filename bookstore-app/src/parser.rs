@@ -18,7 +18,9 @@ pub enum BookIndex {
 pub enum CommandError {
     UnknownCommand,
     InsufficientArguments,
-    InvalidCommand,
+    UnknownFlag,
+    UnexpectedArguments,
+    ConflictingArguments,
 }
 
 enum CommandRoot {
@@ -60,17 +62,16 @@ impl FromStr for CommandRoot {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug)]
 pub enum Command {
-    DeleteBook(BookIndex),
+    // TODO: Add field=val notation for matches?
+    DeleteSelected,
+    DeleteMatching(Box<[Search]>),
     DeleteAll,
-    // TODO: Add + syntax for appending to existing text
-    // TODO: Add deletion of fields and tags.
     EditBook(BookIndex, Box<[(ColumnIdentifier, Edit)]>),
-    AddBookFromFile(PathBuf),
-    AddBooksFromDir(PathBuf, u8),
-    AddColumn(String),
-    RemoveColumn(String),
+    AddBooks(Box<[Source]>),
+    ModifyColumns(Box<[ModifyColumn]>),
     SortColumns(Box<[(ColumnIdentifier, ColumnOrder)]>),
     OpenBookInApp(BookIndex, usize),
     OpenBookInExplorer(BookIndex, usize),
@@ -86,20 +87,17 @@ pub enum Command {
     //  eg. :m 1 2 -> merge 2 into 1
     //      Add MergeBooks with criteria?
     //  eg. :m -c (Search)*
-    //      Allow adding multiple books or directories at once?
-    //  add books matching patterns
-    //  delete books by criteria
-    //  Allow adding and removing multiple columns
+    //  filter books based on other features - like a preemptive delete?
 }
 
 impl Command {
     pub fn requires_ui(&self) -> bool {
         use Command::*;
         match self {
-            DeleteBook(b) | EditBook(b, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
+            EditBook(b, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
                 b == &BookIndex::Selected
             }
-            AddColumn(_) | RemoveColumn(_) | SortColumns(_) | FilterMatches(_) => true,
+            DeleteSelected | ModifyColumns(_) | SortColumns(_) | FilterMatches(_) => true,
             _ => false,
         }
     }
@@ -157,21 +155,6 @@ fn read_args(args: Vec<String>) -> (Vec<String>, Vec<(String, Vec<String>)>) {
     (start_args, trailing_args)
 }
 
-#[allow(dead_code)]
-/// Parses `s` into a command, using shell-style string splitting.
-///
-/// # Arguments
-/// * ` s ` - The command in string format.
-///
-/// # Errors
-/// Returns an error if the string does not have a matching command, or is a malformed command.
-pub fn parse_command_string<S: AsRef<str>>(s: S) -> Result<Command, CommandError> {
-    match shellwords::split(s.as_ref()) {
-        Ok(vec) => parse_args(vec),
-        Err(_) => Err(CommandError::InvalidCommand),
-    }
-}
-
 /// Reads `args` and returns the corresponding command. If no corresponding command exists,
 /// an error is returned.
 ///
@@ -217,15 +200,18 @@ impl CommandRoot {
 }
 
 enum Delete {
-    Book(BookIndex),
+    // TODO: Rename Search to Match
+    Matching(Box<[Search]>),
+    Selected,
     All,
 }
 
 impl Into<Command> for Delete {
     fn into(self) -> Command {
         match self {
-            Delete::Book(bi) => Command::DeleteBook(bi),
+            Delete::Selected => Command::DeleteSelected,
             Delete::All => Command::DeleteAll,
+            Delete::Matching(matches) => Command::DeleteMatching(matches),
         }
     }
 }
@@ -235,26 +221,28 @@ impl CommandParser for Delete {
         start_args: Vec<String>,
         trailing_args: Vec<(String, Vec<String>)>,
     ) -> Result<Self, CommandError> {
-        let index = start_args
-            .into_iter()
-            .next()
-            .as_deref()
-            .map(BookID::from_str)
-            .transpose()
-            .map_err(|_| CommandError::InvalidCommand)?;
+        // First arg can be one of three things:
+        //  -a: Delete all
+        //  index: Some non-zero index.
+        //  field value -r?
 
-        let mut trailing_args: HashMap<_, _> = trailing_args.into_iter().collect();
-        match (index, trailing_args.remove("-a")) {
-            (Some(id), None) => Ok(Delete::Book(BookIndex::ID(id))),
-            (None, Some(a_args)) => {
-                if !a_args.is_empty() || !trailing_args.is_empty() {
-                    Err(CommandError::InvalidCommand)
+        match (start_args.is_empty(), trailing_args.first()) {
+            (false, None) => {
+                return Ok(Delete::Selected);
+            }
+            (true, Some((a, args))) if a == "-a" => {
+                return if !args.is_empty() || trailing_args.len() > 1 {
+                    Err(CommandError::UnexpectedArguments)
                 } else {
                     Ok(Delete::All)
-                }
+                };
             }
-            _ => Err(CommandError::InvalidCommand),
+            _ => {}
         }
+
+        let matches = Matches::from_args(start_args, trailing_args)?;
+
+        Ok(Delete::Matching(matches.matches))
     }
 }
 
@@ -279,12 +267,12 @@ impl CommandParser for Merge {
         match (start_args.is_empty(), trailing_args.remove("-a")) {
             (true, Some(a_args)) => {
                 if !a_args.is_empty() || !trailing_args.is_empty() {
-                    Err(CommandError::InvalidCommand)
+                    Err(CommandError::UnexpectedArguments)
                 } else {
                     Ok(Merge::All)
                 }
             }
-            _ => Err(CommandError::InvalidCommand),
+            _ => Err(CommandError::ConflictingArguments),
         }
     }
 }
@@ -331,17 +319,23 @@ impl CommandParser for WriteQuit {
     }
 }
 
-enum AddBooks {
-    FromFile(PathBuf),
-    FromDir(PathBuf, u8),
+#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug)]
+pub enum Source {
+    File(PathBuf),
+    Dir(PathBuf, u8),
+    Glob(String),
+}
+
+#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug)]
+struct AddBooks {
+    sources: Box<[Source]>,
 }
 
 impl Into<Command> for AddBooks {
     fn into(self) -> Command {
-        match self {
-            AddBooks::FromFile(path) => Command::AddBookFromFile(path),
-            AddBooks::FromDir(path, depth) => Command::AddBooksFromDir(path, depth),
-        }
+        Command::AddBooks(self.sources)
     }
 }
 
@@ -350,45 +344,72 @@ impl CommandParser for AddBooks {
         start_args: Vec<String>,
         trailing_args: Vec<(String, Vec<String>)>,
     ) -> Result<Self, CommandError> {
-        let mut path = start_args.into_iter().next().map(PathBuf::from);
-        let mut trailing_args: HashMap<_, _> = trailing_args.into_iter().collect();
+        let mut sources: Vec<_> = start_args
+            .into_iter()
+            .map(PathBuf::from)
+            .map(Source::File)
+            .collect();
+        let mut prev_ind = sources.len();
 
-        let depth = match trailing_args.remove("-r") {
-            None => Ok(1),
-            Some(trailing) => match trailing.first() {
-                None => Ok(255),
-                Some(val) => u8::from_str(val),
-            },
-        }
-        .map_err(|_| CommandError::InvalidCommand)?;
-
-        let from_dir = match trailing_args.remove("-d") {
-            None => false,
-            Some(d_args) => match d_args.first() {
-                None => true,
-                Some(new_path) => {
-                    if path.is_some() {
-                        return Err(CommandError::InvalidCommand);
+        let global_recursion = trailing_args
+            .first()
+            .map(|(r, a)| {
+                if r == "-r" {
+                    match a.first() {
+                        None => 255,
+                        Some(s) => u8::from_str(s).unwrap_or(255),
                     }
-                    path = Some(PathBuf::from(new_path));
-                    true
+                } else {
+                    1
                 }
-            },
-        };
-
-        if !trailing_args.is_empty() {
-            return Err(CommandError::InvalidCommand);
-        }
-
-        if let Some(path) = path {
-            Ok(if from_dir {
-                AddBooks::FromDir(path, depth)
-            } else {
-                AddBooks::FromFile(path)
             })
-        } else {
-            Err(CommandError::InsufficientArguments)
+            .unwrap_or(1);
+
+        for (flag, args) in trailing_args {
+            match flag.as_str() {
+                "-g" => {
+                    sources.extend(args.into_iter().map(Source::Glob));
+                    prev_ind = sources.len();
+                }
+                "-d" => {
+                    prev_ind = sources.len();
+                    for path in args {
+                        sources.push(Source::Dir(PathBuf::from(path), global_recursion));
+                    }
+                }
+                "-r" => {
+                    if prev_ind >= sources.len() {
+                        debug_assert!(prev_ind == sources.len());
+                        continue;
+                    }
+
+                    let local_depth = args.first().map(|s| u8::from_str(s).unwrap_or(255));
+
+                    for source in &mut sources[prev_ind..] {
+                        if let Source::Dir(_, depth) = source {
+                            *depth = local_depth.unwrap_or(255);
+                        }
+                    }
+
+                    let mut args = args.into_iter();
+                    if local_depth.is_some() {
+                        args.next();
+                    }
+
+                    sources.extend(args.map(PathBuf::from).map(Source::File));
+                    prev_ind = sources.len();
+                }
+                "-p" => {
+                    sources.extend(args.into_iter().map(PathBuf::from).map(Source::File));
+                    prev_ind = sources.len();
+                }
+                _ => return Err(CommandError::UnknownFlag),
+            }
         }
+
+        Ok(AddBooks {
+            sources: sources.into_boxed_slice(),
+        })
     }
 }
 
@@ -412,7 +433,7 @@ impl CommandParser for EditBook {
             let mut args = start_args.into_iter();
             let id = Some(
                 BookID::from_str(&args.next().ok_or_else(insuf)?)
-                    .map_err(|_| CommandError::InvalidCommand)?,
+                    .map_err(|_| CommandError::UnexpectedArguments)?,
             );
             (id, args)
         } else {
@@ -457,7 +478,7 @@ impl CommandParser for EditBook {
                     },
                     column => (column, Edit::Replace(args.next().ok_or_else(insuf)?)),
                 },
-                _ => return Err(CommandError::InvalidCommand),
+                _ => return Err(CommandError::UnknownFlag),
             };
 
             edits.push(edit);
@@ -503,7 +524,7 @@ impl CommandParser for SortColumns {
 
         for (flag, args) in trailing_args.into_iter() {
             if flag != "d" {
-                return Err(CommandError::InvalidCommand);
+                return Err(CommandError::UnknownFlag);
             }
             let mut args = args.into_iter();
             sort_cols.push((
@@ -523,17 +544,20 @@ impl CommandParser for SortColumns {
     }
 }
 
-enum ModifyColumns {
+#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug)]
+pub enum ModifyColumn {
     Remove(String),
     Add(String),
 }
 
+struct ModifyColumns {
+    columns: Box<[ModifyColumn]>,
+}
+
 impl Into<Command> for ModifyColumns {
     fn into(self) -> Command {
-        match self {
-            ModifyColumns::Remove(column) => Command::RemoveColumn(column),
-            ModifyColumns::Add(column) => Command::AddColumn(column),
-        }
+        Command::ModifyColumns(self.columns)
     }
 }
 
@@ -542,19 +566,21 @@ impl CommandParser for ModifyColumns {
         start_args: Vec<String>,
         trailing_args: Vec<(String, Vec<String>)>,
     ) -> Result<Self, CommandError> {
-        match start_args.into_iter().next() {
-            Some(col) => return Ok(ModifyColumns::Add(col)),
-            _ => {}
-        }
+        let mut columns: Vec<_> = start_args.into_iter().map(ModifyColumn::Add).collect();
 
-        match trailing_args.into_iter().next() {
-            None => Err(CommandError::InvalidCommand),
-            Some((col, _)) => Ok(ModifyColumns::Remove(
-                col.strip_prefix('-')
+        for (remove_col, add_cols) in trailing_args.into_iter() {
+            columns.push(ModifyColumn::Remove(
+                remove_col
+                    .strip_prefix('-')
                     .expect("col starts with '-' if it ends up in trailing_args")
                     .to_string(),
-            )),
+            ));
+            columns.extend(add_cols.into_iter().map(ModifyColumn::Add));
         }
+
+        Ok(ModifyColumns {
+            columns: columns.into_boxed_slice(),
+        })
     }
 }
 
@@ -584,7 +610,7 @@ impl Matches {
                 "-r" => Ok(SearchMode::Regex),
                 "-e" => Ok(SearchMode::ExactSubstring),
                 "-x" => Ok(SearchMode::ExactString),
-                _ => Err(CommandError::InvalidCommand),
+                _ => Err(CommandError::UnknownFlag),
             }?;
 
             let mut args = args.into_iter();
@@ -726,12 +752,12 @@ impl CommandParser for OpenBook {
             if flag == "-f" {
                 target = Target::FileManager;
             } else {
-                return Err(CommandError::InvalidCommand);
+                return Err(CommandError::UnknownFlag);
             }
             let mut args = args.into_iter();
             if let Some(ind_book) = args.next() {
                 if book_index != BookIndex::Selected {
-                    return Err(CommandError::InvalidCommand);
+                    return Err(CommandError::ConflictingArguments);
                 }
 
                 if let Ok(bi) = BookID::from_str(ind_book.as_str()) {
@@ -764,31 +790,45 @@ mod test {
         let args = vec![
             (
                 vec![":a", "hello world", "-d"],
-                Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
+                Command::AddBooks(
+                    vec![Source::File(PathBuf::from("hello world"))].into_boxed_slice(),
+                ),
             ),
             (
                 vec![":a", "-d", "hello world"],
-                Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
+                Command::AddBooks(
+                    vec![Source::Dir(PathBuf::from("hello world"), 1)].into_boxed_slice(),
+                ),
             ),
             (
                 vec![":a", "-d", "hello world", "-r", "1"],
-                Command::AddBooksFromDir(PathBuf::from("hello world"), 1),
+                Command::AddBooks(
+                    vec![Source::Dir(PathBuf::from("hello world"), 1)].into_boxed_slice(),
+                ),
             ),
             (
                 vec![":a", "-r", "22", "-d", "hello world"],
-                Command::AddBooksFromDir(PathBuf::from("hello world"), 22),
+                Command::AddBooks(
+                    vec![Source::Dir(PathBuf::from("hello world"), 22)].into_boxed_slice(),
+                ),
             ),
             (
                 vec![":a", "-d", "hello world", "-r"],
-                Command::AddBooksFromDir(PathBuf::from("hello world"), 255),
+                Command::AddBooks(
+                    vec![Source::Dir(PathBuf::from("hello world"), 255)].into_boxed_slice(),
+                ),
             ),
             (
                 vec![":a", "-r", "-d", "hello world"],
-                Command::AddBooksFromDir(PathBuf::from("hello world"), 255),
+                Command::AddBooks(
+                    vec![Source::Dir(PathBuf::from("hello world"), 255)].into_boxed_slice(),
+                ),
             ),
             (
                 vec![":a", "hello world"],
-                Command::AddBookFromFile(PathBuf::from("hello world")),
+                Command::AddBooks(
+                    vec![Source::File(PathBuf::from("hello world"))].into_boxed_slice(),
+                ),
             ),
         ];
 

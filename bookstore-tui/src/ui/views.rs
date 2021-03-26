@@ -29,6 +29,8 @@ use crate::ui::terminal_ui::UIState;
 use crate::ui::widgets::{
     char_chunks_to_styled_text, BookWidget, CommandWidget, StyleRules, Widget,
 };
+
+use bookstore_app::parser::Source;
 use bookstore_records::Edit;
 
 macro_rules! state_mut {
@@ -524,8 +526,15 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                         curr_command.refresh_autofill()?;
                         match parse_args(curr_command.get_values().map(|(_, s)| s).collect()) {
                             Ok(command) => match command {
-                                Command::AddBookFromFile(_) => curr_command.auto_fill(false),
-                                Command::AddBooksFromDir(_, _) => curr_command.auto_fill(true),
+                                Command::AddBooks(sources) => match sources.last() {
+                                    Some(Source::File(_)) => {
+                                        curr_command.auto_fill(false);
+                                    }
+                                    Some(Source::Dir(_, _)) => {
+                                        curr_command.auto_fill(true);
+                                    }
+                                    _ => {}
+                                },
                                 _ => {}
                             },
                             Err(_) => {}

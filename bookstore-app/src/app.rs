@@ -1,11 +1,12 @@
 use std::cell::RefCell;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Command as ProcessCommand;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
+use glob::PatternError;
 use rayon::prelude::*;
 use unicase::UniCase;
 
@@ -17,9 +18,10 @@ use bookstore_database::{
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant, ColumnOrder, Edit};
 
+use crate::autocomplete::AutoCompleteError;
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser;
-use crate::parser::{BookIndex, Command};
+use crate::parser::{BookIndex, Command, ModifyColumn, Source};
 use crate::settings::SortSettings;
 use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
@@ -50,7 +52,8 @@ pub enum ApplicationError<DBError> {
     Database(DatabaseError<DBError>),
     BookView(BookViewError<DBError>),
     NoBookSelected,
-    UserInput(CommandStringError),
+    BadGlob(glob::PatternError),
+    Unknown(&'static str),
 }
 
 impl<DBError> From<std::io::Error> for ApplicationError<DBError> {
@@ -91,7 +94,17 @@ impl<DBError> From<BookViewError<DBError>> for ApplicationError<DBError> {
 
 impl<DBError> From<CommandStringError> for ApplicationError<DBError> {
     fn from(e: CommandStringError) -> Self {
-        ApplicationError::UserInput(e)
+        match e {
+            CommandStringError::AutoComplete(ac) => match ac {
+                AutoCompleteError::Glob(glob_err) => ApplicationError::BadGlob(glob_err),
+            },
+        }
+    }
+}
+
+impl<DBError> From<PatternError> for ApplicationError<DBError> {
+    fn from(e: PatternError) -> Self {
+        ApplicationError::BadGlob(e)
     }
 }
 
@@ -106,6 +119,21 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<BookVariant>, s
         .filter_map(|res| res.map(|e| e.path()).ok())
         .collect::<Vec<_>>()
         .par_iter()
+        .filter_map(|path| BookVariant::from_path(path).ok())
+        .collect::<Vec<_>>())
+}
+
+fn books_globbed<S: AsRef<str>>(glob: S) -> Result<Vec<BookVariant>, glob::PatternError> {
+    // TODO: Handle reads erroring out due to filesystem issues somehow.
+    // TODO: Measure how well this performs - solutions for std::fs::canonicalize?
+    // TODO: Create a new, better glob that does stuff like take AsRef<str> and AsRef<OsStr>
+    //  and does parallelism like jwalk.
+    Ok(glob::glob(glob.as_ref())?
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>()
+        .par_iter()
+        .filter_map(|path| std::fs::canonicalize(path).ok())
         .filter_map(|path| BookVariant::from_path(path).ok())
         .collect::<Vec<_>>())
 }
@@ -301,11 +329,17 @@ impl<D: IndexableDatabase> App<D> {
         book_view: &mut SearchableBookView<D>,
     ) -> Result<bool, ApplicationError<D::Error>> {
         match command {
-            Command::DeleteBook(b) => {
-                match b {
-                    BookIndex::Selected => self.remove_selected_book(book_view)?,
-                    BookIndex::ID(id) => self.remove_book(id, book_view)?,
-                };
+            Command::DeleteSelected => {
+                self.remove_selected_book(book_view)?;
+            }
+            Command::DeleteMatching(matches) => {
+                let targets = self.write(|db| db.find_matches(&matches))?;
+                let ids = targets
+                    .into_iter()
+                    .map(|target| target.deref().read().unwrap().id.unwrap())
+                    .collect();
+                self.write(|db| db.remove_books(&ids))?;
+                book_view.remove_books(&ids);
             }
             Command::DeleteAll => {
                 self.write(|db| db.clear())?;
@@ -318,28 +352,46 @@ impl<D: IndexableDatabase> App<D> {
                 };
                 self.sort_settings.is_sorted = false;
             }
-            Command::AddBookFromFile(f) => {
-                self.write(move |db| {
-                    let book = BookVariant::from_path(&f)?;
-                    db.insert_book(book).map_err(ApplicationError::Database)
-                })?;
-                book_view.refresh_db_size();
-                self.sort_settings.is_sorted = false;
-            }
-            Command::AddBooksFromDir(dir, depth) => {
+            Command::AddBooks(sources) => {
                 // TODO: Handle failed reads.
-                self.write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
+                for source in sources.into_vec() {
+                    match source {
+                        Source::File(f) => {
+                            self.write(move |db| {
+                                let book = BookVariant::from_path(&f)?;
+                                db.insert_book(book).map_err(ApplicationError::Database)
+                            })?;
+                        }
+                        Source::Dir(dir, depth) => {
+                            self.write(|db| db.insert_books(books_in_dir(&dir, depth)?))?;
+                        }
+                        Source::Glob(glob) => {
+                            self.write(|db| -> Result<(), ApplicationError<D::Error>> {
+                                let books = books_globbed(&glob)?;
+                                db.insert_books(books)?;
+                                Ok(())
+                            })?;
+                        }
+                    }
+                }
+
                 book_view.refresh_db_size();
                 self.sort_settings.is_sorted = false;
             }
-            Command::AddColumn(column) => {
-                let column = UniCase::new(column);
-                if book_view.has_column(&column)? {
-                    table.add_column(column);
+            Command::ModifyColumns(columns) => {
+                for column in columns.into_vec() {
+                    match column {
+                        ModifyColumn::Add(column) => {
+                            let column = UniCase::new(column);
+                            if book_view.has_column(&column)? {
+                                table.add_column(column);
+                            }
+                        }
+                        ModifyColumn::Remove(column) => {
+                            table.remove_column(&UniCase::new(column));
+                        }
+                    }
                 }
-            }
-            Command::RemoveColumn(column) => {
-                table.remove_column(&UniCase::new(column));
             }
             Command::SortColumns(sort_cols) => {
                 self.update_selected_columns(sort_cols);

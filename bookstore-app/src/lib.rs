@@ -10,5 +10,5 @@ pub mod user_input;
 pub use app::{App, ApplicationError};
 pub use autocomplete::AutoCompleter;
 #[allow(unused_imports)]
-pub use parser::{parse_args, parse_command_string, BookIndex, Command};
+pub use parser::{parse_args, BookIndex, Command};
 pub use settings::Settings;
