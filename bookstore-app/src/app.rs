@@ -209,7 +209,7 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
 
         // TODO: Find a way to do this entirely in Rust
         ProcessCommand::new("python")
-            .args(&[open_book_path, path])
+            .args(&[open_book_path.as_path(), path])
             .spawn()?;
     }
     #[cfg(target_os = "linux")]
