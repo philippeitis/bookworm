@@ -30,7 +30,7 @@ struct Opts {
 }
 
 fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
-    let (opts, command) = {
+    let (opts, commands) = {
         let args: Vec<_> = env::args().collect();
         if args.is_empty() {
             (Opts::parse_from(Vec::<String>::new()), vec![])
@@ -70,8 +70,8 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
     let mut app = App::new(db, app_settings.sort_settings);
     let mut placeholder_table_view = TableView::default();
     let mut book_view = app.new_book_view();
-    if !command.is_empty() {
-        for command in command.split(|v| v == "--") {
+    if !commands.is_empty() {
+        for command in commands.split(|v| v == "--") {
             if let Ok(command) = parse_args(command.to_owned()) {
                 if command.requires_ui() {
                     println!(
