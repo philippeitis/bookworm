@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::ffi::OsString;
+use std::fmt::Formatter;
 use std::num::NonZeroU64;
 use std::ops::{Bound, RangeBounds};
 #[cfg(unix)]
@@ -175,13 +176,33 @@ fn v16_to_v8(a: Vec<u16>) -> Vec<u8> {
     v
 }
 
-impl From<BookData> for Book {
-    fn from(bd: BookData) -> Self {
-        Book {
-            id: Some(
-                NonZeroU64::try_from(bd.book_id as u64)
-                    .expect("SQLite database returned NULL primary ID."),
-            ),
+#[derive(Debug)]
+enum DataError {
+    NullPrimaryID,
+    Serialize(String),
+}
+
+impl std::error::Error for DataError {}
+
+impl std::fmt::Display for DataError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataError::NullPrimaryID => f.write_str("id was null - SQLite database corrupted?"),
+            DataError::Serialize(reason) => f.write_str(reason),
+        }
+    }
+}
+
+impl TryFrom<BookData> for Book {
+    type Error = DataError;
+
+    fn try_from(bd: BookData) -> Result<Self, Self::Error> {
+        Ok(Book {
+            id: if let Ok(id) = NonZeroU64::try_from(bd.book_id as u64) {
+                Some(id)
+            } else {
+                return Err(DataError::NullPrimaryID);
+            },
             title: bd.title.clone(),
             series: {
                 let series_id = bd.series_id;
@@ -191,14 +212,18 @@ impl From<BookData> for Book {
                 })
             },
             ..Default::default()
-        }
+        })
     }
 }
 
-impl From<VariantData> for BookVariant {
-    fn from(vd: VariantData) -> Self {
-        BookVariant {
-            book_type: ron::from_str(&vd.book_type).unwrap(),
+impl TryFrom<VariantData> for BookVariant {
+    type Error = DataError;
+
+    fn try_from(vd: VariantData) -> Result<Self, Self::Error> {
+        Ok(BookVariant {
+            book_type: ron::from_str(&vd.book_type).map_err(|_| {
+                DataError::Serialize(format!("Failed to parse book type: {}", vd.book_type))
+            })?,
             #[cfg(unix)]
             path: PathBuf::from(OsString::from_vec(vd.path)),
             #[cfg(windows)]
@@ -214,11 +239,16 @@ impl From<VariantData> for BookVariant {
             translators: None,
             description: vd.description,
             id: vd.id.map(|id| u32::try_from(id).unwrap()),
-            hash: vd.hash.try_into().expect("Provided hash is too long."),
+            hash: {
+                let len = vd.hash.len();
+                vd.hash.try_into().map_err(|_| {
+                    DataError::Serialize(format!("Got {} byte hash, expected 32 byte hash", len))
+                })?
+            },
             file_size: vd.file_size as u64,
             free_tags: HashSet::new(),
             named_tags: HashMap::new(),
-        }
+        })
     }
 }
 
@@ -239,20 +269,29 @@ impl SQLiteDatabase {
 
         let mut books: HashMap<_, _> = raw_books
             .into_iter()
-            .map(|book| {
-                let book: Book = book.into();
-                (book.id(), book)
+            .filter_map(|book_data: BookData| match Book::try_from(book_data) {
+                Ok(book) => Some((book.id(), book)),
+                Err(e) => {
+                    eprintln!("Failed to read book from SQLite database: {}", e);
+                    None
+                }
             })
             .collect();
 
         for variant in raw_variants.into_iter() {
             let id = NonZeroU64::try_from(variant.book_id as u64).unwrap();
-            let variant: BookVariant = variant.into();
+            let variant = match BookVariant::try_from(variant) {
+                Ok(variant) => variant,
+                Err(e) => {
+                    eprintln!("Failed to read book variant from SQLite database: {}", e);
+                    continue;
+                }
+            };
             if let Some(book) = books.get_mut(&id) {
                 book.push_variant(variant);
             } else {
                 // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                panic!(
+                eprintln!(
                     "SQLite database may be corrupted. Found orphan variant for {}.",
                     id
                 );
@@ -270,8 +309,8 @@ impl SQLiteDatabase {
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    panic!(
-                        "SQLite database may be corrupted. Found orphan tag for {}.",
+                    eprintln!(
+                        "SQLite database may be corrupted. Found orphan variant for {}.",
                         id
                     );
                 }
@@ -291,8 +330,8 @@ impl SQLiteDatabase {
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    panic!(
-                        "SQLite database may be corrupted. Found orphan tag for {}.",
+                    eprintln!(
+                        "SQLite database may be corrupted. Found orphan variant for {}.",
                         id
                     );
                 }
@@ -308,8 +347,8 @@ impl SQLiteDatabase {
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    panic!(
-                        "SQLite database may be corrupted. Found orphan tag for {}.",
+                    eprintln!(
+                        "SQLite database may be corrupted. Found orphan variant for {}.",
                         id
                     );
                 }
