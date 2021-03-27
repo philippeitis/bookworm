@@ -15,7 +15,6 @@ use tui::Terminal;
 use bookstore_app::table_view::TableView;
 use bookstore_app::{parse_args, App, Settings};
 use bookstore_database::AppDatabase;
-#[cfg(feature = "sqlite")]
 use bookstore_database::SQLiteDatabase as Database;
 
 use crate::ui::{AppInterface, TuiError};
