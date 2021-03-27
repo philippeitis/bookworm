@@ -247,16 +247,19 @@ impl<D: IndexableDatabase> App<D> {
         &self.sort_settings
     }
 
+    /// Returns a BookView, allowing reads of all available books.
     pub fn new_book_view(&self) -> SearchableBookView<D> {
         SearchableBookView::new(self.db.clone())
     }
 
-    /// Gets the book specified by the `BookIndex`,
-    /// or None if the particular book does not exist.
+    /// Gets the book specified by the `BookIndex` from the BookView.
     ///
     /// # Arguments
     ///
     /// * ` b ` - A `BookIndex` to get a book by ID or by current selection.
+    ///
+    /// # Errors
+    /// If the database fails for any reason, an error will be returned.
     pub fn get_book(
         b: BookIndex,
         bv: &SearchableBookView<D>,
@@ -267,6 +270,11 @@ impl<D: IndexableDatabase> App<D> {
         }
     }
 
+    /// Applies the specified edits to the provided book in the internal
+    /// database.
+    ///
+    /// # Errors
+    /// If no book is selected, or if editing the book fails, an error will be returned.
     pub fn edit_selected_book(
         &mut self,
         edits: &[(ColumnIdentifier, Edit)],
@@ -313,7 +321,6 @@ impl<D: IndexableDatabase> App<D> {
         v
     }
 
-    // Used in main.rs, ColumnWidget::handle_input
     /// Runs the command currently in the current command string. On success, returns a bool
     /// indicating whether to continue or not.
     ///
@@ -442,6 +449,11 @@ impl<D: IndexableDatabase> App<D> {
         Ok(true)
     }
 
+    /// Saves the internal database to disk. Note that with SQLite, all operations are saved
+    /// immediately.
+    ///
+    /// # Errors
+    /// If saving the database fails, an error will be returned.
     pub fn save(&mut self) -> Result<(), DatabaseError<D::Error>> {
         self.write(|db| db.save())
     }
@@ -453,10 +465,6 @@ impl<D: IndexableDatabase> App<D> {
     /// * ` word ` - The column to sort the table on.
     /// * ` reverse ` - Whether to reverse the sort.
     fn update_selected_columns(&mut self, cols: Box<[(ColumnIdentifier, ColumnOrder)]>) {
-        // let word = UniCase::new(match word.to_ascii_lowercase().as_str() {
-        //     "author" => String::from("authors"),
-        //     _ => word,
-        // });
         self.sort_settings.columns = cols;
         self.sort_settings.is_sorted = false;
     }

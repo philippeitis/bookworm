@@ -120,14 +120,14 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
 }
 
 // TODO:
-//  Live search & search by tags? meillisearch?
+//  Live search, fuzzy text search? meillisearch?
 //  Cloud sync support (eg. upload database to Google Drive / read from Google Drive)
 //  File conversion (mainly using calibre?)
 //  Help menu
 //  Splash screen
 //  New database button / screen
 //  Copy books to central directory: -c flag && set dir in settings.toml
-//  Duplicate detection - use blake3 to hash first 4kb or something?
+//  Duplicate detection on import
 //  Add automatic date column?
 //  Convert format to media, convert book to something else
 //  Infinite undo redo (:u, :r)
