@@ -613,7 +613,7 @@ impl SQLiteDatabase {
                         ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
                         continue;
                     }
-                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => unimplemented!(),
+                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => unimplemented!("Deleting multimap tags not supported."),
                     ColumnIdentifier::Tags => {
                         sqlx::query!(
                             "DELETE FROM free_tags where book_id = ?;", book_id,
@@ -711,7 +711,7 @@ impl SQLiteDatabase {
                         .map_err(DatabaseError::Backend)?;
                     }
                     ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
-                        unimplemented!()
+                        unimplemented!("Replacing multimap tags not supported.")
                     }
                 },
                 Edit::Append(value) => match column {
@@ -794,7 +794,7 @@ impl SQLiteDatabase {
                         .map_err(DatabaseError::Backend)?;
                     }
                     ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
-                        unimplemented!()
+                        unimplemented!("Appending to multimap tags not supported.")
                     }
                 },
             }
@@ -993,7 +993,7 @@ impl AppDatabase for SQLiteDatabase {
         &mut self,
         _books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
-        unimplemented!()
+        unimplemented!("bookstore does not currently support updating book paths.")
     }
 }
 

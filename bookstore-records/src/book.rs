@@ -249,7 +249,7 @@ impl Book {
                 self.free_tags.insert(value.to_owned());
             }
             ColumnIdentifier::MultiMap(_mm) | ColumnIdentifier::MultiMapExact(_mm, _) => {
-                unimplemented!()
+                unimplemented!("Can not set multimap columns.")
             }
         }
         Ok(())
@@ -308,7 +308,7 @@ impl Book {
                     self.free_tags.insert(tag.to_owned() + value);
                 }
             }
-            _ => unimplemented!(),
+            _ => unimplemented!("Can not extend multimap columns."),
         }
         Ok(())
     }
@@ -331,7 +331,7 @@ impl Book {
             ColumnIdentifier::ExactTag(t) => {
                 self.free_tags.remove(t);
             }
-            _ => unimplemented!(),
+            _ => unimplemented!("Can not delete multimap columns."),
         }
         Ok(())
     }
