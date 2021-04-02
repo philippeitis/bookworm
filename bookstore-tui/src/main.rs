@@ -108,7 +108,8 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
         EnableMouseCapture,
         cursor::Hide
     )?;
-    let r = app.run(&mut terminal);
+
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.run(&mut terminal)));
     execute!(
         &stdout,
         cursor::Show,
@@ -116,7 +117,26 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
         LeaveAlternateScreen
     )?;
     crossterm::terminal::disable_raw_mode()?;
-    r
+
+    match r {
+        Ok(res) => res,
+        Err(e) => match e.downcast_ref::<&'static str>() {
+            Some(s) => {
+                println!("Error occurred during execution: {}", s);
+                Ok(())
+            }
+            None => match e.downcast_ref::<String>() {
+                Some(s) => {
+                    println!("Error occurred during execution: {}", s);
+                    Ok(())
+                }
+                None => {
+                    println!("Unknown error occurred during execution.");
+                    Ok(())
+                }
+            },
+        },
+    }
 }
 
 // TODO:
