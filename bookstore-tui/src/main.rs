@@ -3,6 +3,7 @@ mod ui;
 use std::env;
 use std::io::stdout;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{cursor, event::DisableMouseCapture, event::EnableMouseCapture, execute};
@@ -17,6 +18,7 @@ use bookstore_app::{parse_args, App, Settings};
 use bookstore_database::AppDatabase;
 use bookstore_database::SQLiteDatabase as Database;
 
+use crate::ui::terminal_ui::AppEvent;
 use crate::ui::{AppInterface, TuiError};
 
 #[derive(Clap)]
@@ -98,6 +100,13 @@ fn main() -> Result<(), TuiError<<Database as AppDatabase>::Error>> {
         settings_path,
         app,
     );
+
+    let s = app.create_sender();
+    std::thread::spawn(move || loop {
+        if let Ok(true) = crossterm::event::poll(Duration::from_millis(500)) {
+            let _ = s.send(AppEvent::UserInput(crossterm::event::read().unwrap()));
+        }
+    });
 
     let backend = CrosstermBackend::new(&stdout);
     let mut terminal = Terminal::new(backend)?;

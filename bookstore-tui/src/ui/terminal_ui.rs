@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 use crossterm::event::{poll, read, Event, KeyCode, KeyEvent, KeyModifiers};
@@ -32,6 +33,10 @@ pub(crate) enum TuiError<DBError> {
     Database(DatabaseError<DBError>),
     Io(std::io::Error),
     Terminal(ErrorKind),
+}
+
+pub enum AppEvent {
+    UserInput(Event),
 }
 
 impl<DBError> From<ApplicationError<DBError>> for TuiError<DBError> {
@@ -103,6 +108,8 @@ pub(crate) struct AppInterface<'a, D: 'a + IndexableDatabase, B: Backend> {
     ui_state: Rc<RefCell<UIState<D>>>,
     ui_updated: bool,
     settings_path: Option<PathBuf>,
+    event_receiver: Receiver<AppEvent>,
+    event_sender: Sender<AppEvent>,
 }
 
 impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
@@ -130,6 +137,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             table_view: TableView::from(settings.columns),
             book_view: app.new_book_view(),
         }));
+        let (event_sender, event_receiver) = std::sync::mpsc::channel();
         AppInterface {
             border_widget: BorderWidget::new(name.into(), app.db_path()),
             active_view: Box::new(ColumnWidget {
@@ -141,7 +149,13 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
             ui_state: state,
             app,
             settings_path,
+            event_receiver,
+            event_sender,
         }
+    }
+
+    pub fn create_sender(&self) -> Sender<AppEvent> {
+        self.event_sender.clone()
     }
 
     /// Reads and handles user input. On success, returns a bool
@@ -155,8 +169,10 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
     /// This function may error if executing a particular action fails.
     fn get_input(&mut self) -> Result<bool, TuiError<D::Error>> {
         loop {
-            if poll(Duration::from_millis(500))? {
-                let event = read()?;
+            if let Ok(event) = self.event_receiver.recv_timeout(Duration::from_millis(500)) {
+                let event = match event {
+                    AppEvent::UserInput(e) => e,
+                };
                 match event {
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('q'),
