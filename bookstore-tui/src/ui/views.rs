@@ -563,22 +563,25 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                     KeyCode::Home => self.home(),
                     KeyCode::End => self.end(),
                     KeyCode::Right => {
-                        self.command_widget_selected = true;
-                        if event.modifiers.intersects(KeyModifiers::SHIFT) {
-                            self.state_mut().curr_command.key_shift_right();
-                        } else {
-                            self.state_mut().curr_command.key_right();
+                        if self.state().book_view.selected().is_none() {
+                            self.command_widget_selected = true;
+                            if event.modifiers.intersects(KeyModifiers::SHIFT) {
+                                self.state_mut().curr_command.key_shift_right();
+                            } else {
+                                self.state_mut().curr_command.key_right();
+                            }
                         }
                     }
                     KeyCode::Left => {
-                        self.command_widget_selected = true;
-                        if event.modifiers.intersects(KeyModifiers::SHIFT) {
-                            self.state_mut().curr_command.key_shift_left();
-                        } else {
-                            self.state_mut().curr_command.key_left();
+                        if self.state().book_view.selected().is_none() {
+                            self.command_widget_selected = true;
+                            if event.modifiers.intersects(KeyModifiers::SHIFT) {
+                                self.state_mut().curr_command.key_shift_left();
+                            } else {
+                                self.state_mut().curr_command.key_left();
+                            }
                         }
                     }
-
                     _ => return Ok(ApplicationTask::DoNothing),
                 }
             }
