@@ -26,17 +26,32 @@ use bookstore_records::book::{ColumnIdentifier, RecordError};
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::terminal_ui::UIState;
+use crate::ui::tui_widgets::{ListItemX, MultiSelectList, MultiSelectListState};
 use crate::ui::widgets::{
     char_chunks_to_styled_text, BookWidget, CommandWidget, StyleRules, Widget,
 };
 
 use bookstore_app::parser::Source;
+use bookstore_database::paged_cursor::Selection;
 use bookstore_records::Edit;
 
 macro_rules! state_mut {
     ($self: ident) => {
         $self.state.as_ref().borrow_mut()
     };
+}
+
+fn log(s: impl AsRef<str>) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(true)
+        .open("log.txt")
+    {
+        let _ = f.write_all(s.as_ref().as_bytes());
+        let _ = f.write_all(b"\n");
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -168,9 +183,9 @@ pub(crate) trait InputHandler<D: IndexableDatabase> {
 /// # Arguments
 /// * ` word ` - A string reference.
 /// * ` max_width ` - The maximum width of word in visible characters.
-fn cut_word_to_fit(word: &str, max_width: usize) -> ListItem {
+fn cut_word_to_fit(word: &str, max_width: usize) -> ListItemX {
     // TODO: What should be done if max_width is too small?
-    ListItem::new(Span::from(if word.len() > max_width {
+    ListItemX::new(Span::from(if word.len() > max_width {
         if max_width >= 3 {
             let possible_word = word.unicode_truncate(max_width - 3);
             possible_word.0.to_owned() + "..."
@@ -231,15 +246,15 @@ impl<D: IndexableDatabase> ColumnWidget<D> {
     }
 
     fn refresh_book_widget(&mut self) {
-        let book = self.state().book_view.get_selected_book().ok();
+        let book = self.state().book_view.get_selected_books().ok();
         let should_change = match (&book, &self.book_widget) {
             (Some(_), None) => true,
             (None, Some(_)) => true,
-            (Some(b), Some(bw)) => !Arc::ptr_eq(b, bw.book()),
+            (Some(b), Some(bw)) => !Arc::ptr_eq(&b[0], bw.book()),
             (None, None) => false,
         };
         if should_change {
-            self.book_widget = book.map(|book| BookWidget::new(Rect::default(), book));
+            self.book_widget = book.map(|book| BookWidget::new(Rect::default(), book[0].clone()));
         };
     }
 
@@ -263,43 +278,117 @@ impl<D: IndexableDatabase> ColumnWidget<D> {
         }
     }
 
-    fn page_down(&mut self) {
-        self.state_mut().book_view.page_down();
+    fn page_down(&mut self, modifiers: KeyModifiers) {
+        match (
+            self.command_widget_selected,
+            modifiers.intersects(KeyModifiers::SHIFT),
+        ) {
+            (false, false) => {
+                self.state_mut().book_view.page_down();
+            }
+            (false, true) => {
+                self.state_mut().book_view.select_page_down();
+            }
+            (true, _) => {
+                unimplemented!("Paging down on command widget not supported.");
+            }
+        }
     }
 
-    fn page_up(&mut self) {
-        self.state_mut().book_view.page_up();
+    fn page_up(&mut self, modifiers: KeyModifiers) {
+        match (
+            self.command_widget_selected,
+            modifiers.intersects(KeyModifiers::SHIFT),
+        ) {
+            (false, false) => {
+                self.state_mut().book_view.page_up();
+            }
+            (false, true) => {
+                self.state_mut().book_view.select_page_up();
+            }
+            (true, _) => {
+                unimplemented!("Paging up on command widget not supported.");
+            }
+        }
     }
 
-    fn home(&mut self) {
-        self.state_mut().book_view.home();
+    fn home(&mut self, modifiers: KeyModifiers) {
+        match (
+            self.command_widget_selected,
+            modifiers.intersects(KeyModifiers::SHIFT),
+        ) {
+            (false, false) => {
+                self.state_mut().book_view.home();
+            }
+            (false, true) => {
+                self.state_mut().book_view.select_to_start();
+            }
+            (true, false) => {
+                self.state_mut().curr_command.key_up();
+            }
+            (true, true) => {
+                self.state_mut().curr_command.key_shift_up();
+            }
+        }
     }
 
-    fn end(&mut self) {
-        self.state_mut().book_view.end();
+    fn end(&mut self, modifiers: KeyModifiers) {
+        match (
+            self.command_widget_selected,
+            modifiers.intersects(KeyModifiers::SHIFT),
+        ) {
+            (false, false) => {
+                self.state_mut().book_view.end();
+            }
+            (false, true) => {
+                self.state_mut().book_view.select_to_end();
+            }
+            (true, false) => {
+                self.state_mut().curr_command.key_down();
+            }
+            (true, true) => {
+                self.state_mut().curr_command.key_shift_down();
+            }
+        }
     }
 
     fn select_up(&mut self, modifiers: KeyModifiers) {
-        if self.command_widget_selected {
-            if modifiers.intersects(KeyModifiers::SHIFT) {
-                self.state_mut().curr_command.key_shift_up();
-            } else {
+        match (
+            self.command_widget_selected,
+            modifiers.intersects(KeyModifiers::SHIFT),
+        ) {
+            (false, false) => {
+                self.state_mut().book_view.up();
+            }
+            (false, true) => {
+                self.state_mut().book_view.select_up();
+            }
+            (true, false) => {
                 self.state_mut().curr_command.key_up();
             }
-        } else {
-            self.state_mut().book_view.select_up();
+            (true, true) => {
+                self.state_mut().curr_command.key_shift_up();
+            }
         }
     }
 
     fn select_down(&mut self, modifiers: KeyModifiers) {
-        if self.command_widget_selected {
-            if modifiers.intersects(KeyModifiers::SHIFT) {
-                self.state_mut().curr_command.key_shift_down();
-            } else {
+        match (
+            self.command_widget_selected,
+            modifiers.intersects(KeyModifiers::SHIFT),
+        ) {
+            (false, false) => {
+                self.state_mut().book_view.down();
+            }
+            (false, true) => {
+                self.state_mut().book_view.select_down();
+            }
+            (true, false) => {
                 self.state_mut().curr_command.key_down();
             }
-        } else {
-            self.state_mut().book_view.select_down();
+            (true, true) => {
+                self.state_mut().curr_command.key_shift_down();
+            }
         }
     }
 }
@@ -357,15 +446,36 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for ColumnWidge
             .zip(hchunks.iter())
         {
             let width = usize::from(chunk.width).saturating_sub(1);
-            let list = List::new(
+            let list = MultiSelectList::new(
                 data.iter()
                     .map(|word| cut_word_to_fit(word, width))
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))
             .highlight_style(select_style);
-            let mut selected_row = ListState::default();
-            selected_row.select(self.state().book_view.selected());
+            let mut selected_row = MultiSelectListState::default();
+            let top = self.state().book_view.top_index();
+
+            fn min_sub(a: usize, b: usize) -> usize {
+                a.checked_sub(b).unwrap_or(a)
+            }
+
+            match self.state().book_view.selected() {
+                None => {}
+                Some(Selection::Single(x)) => {
+                    selected_row.select(min_sub(*x, top));
+                }
+                Some(Selection::Range(start, end, _)) => {
+                    for i in start.saturating_sub(top)..end.saturating_sub(top) {
+                        selected_row.select(i);
+                    }
+                }
+                Some(Selection::Multi(tree, _)) => {
+                    tree.iter()
+                        .copied()
+                        .for_each(|i| selected_row.select(min_sub(i, top)));
+                }
+            }
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
 
@@ -471,7 +581,7 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                                     self.command_widget_selected = false;
                                     let mut state = self.state_mut();
                                     state.curr_command.deselect();
-                                    state.book_view.deselect();
+                                    state.book_view.deselect_all();
                                 }
                                 ('a', _) => {
                                     self.state_mut().curr_command.select_all();
@@ -543,25 +653,26 @@ impl<D: IndexableDatabase> InputHandler<D> for ColumnWidget<D> {
                     KeyCode::Esc => {
                         self.command_widget_selected = false;
                         let mut state = self.state_mut();
-                        state.modify_bv(|bv| bv.deselect());
+                        state.modify_bv(|bv| bv.deselect_all());
                         state.curr_command.clear();
                         state.modify_bv(|bv| bv.pop_scope());
                     }
                     KeyCode::Delete => {
-                        let no_command = { self.state().curr_command.is_empty() };
-                        if no_command {
-                            app.remove_selected_book(&mut self.state_mut().book_view)?;
+                        let mut state = self.state_mut();
+                        if state.curr_command.is_empty() {
+                            log("User pressed delete.");
+                            app.remove_selected_books(&mut state.book_view)?;
                         } else {
-                            self.state_mut().curr_command.del();
+                            state.curr_command.del();
                         }
                     }
                     // Scrolling
                     KeyCode::Up => self.select_up(event.modifiers),
                     KeyCode::Down => self.select_down(event.modifiers),
-                    KeyCode::PageDown => self.page_down(),
-                    KeyCode::PageUp => self.page_up(),
-                    KeyCode::Home => self.home(),
-                    KeyCode::End => self.end(),
+                    KeyCode::PageDown => self.page_down(event.modifiers),
+                    KeyCode::PageUp => self.page_up(event.modifiers),
+                    KeyCode::Home => self.home(event.modifiers),
+                    KeyCode::End => self.end(event.modifiers),
                     KeyCode::Right => {
                         if self.state().book_view.selected().is_none() {
                             self.command_widget_selected = true;
@@ -633,7 +744,7 @@ impl<D: IndexableDatabase> EditWidget<D> {
         let value = self
             .state()
             .selected_table_value()
-            .expect("Selected value should exist when in edit mode.")
+            .expect("Selected value should exist when in edit mode.")[0]
             .to_owned();
         self.edit = EditState::new(value);
     }
@@ -663,9 +774,13 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
 
         let edit_style = state.style.edit_style();
         let select_style = state.style.select_style();
-        let selected = state
+        let selected = match state
             .selected()
-            .expect("EditWidget should only exist when items are selected");
+            .expect("EditWidget should only exist when items are selected")
+        {
+            (i, Selection::Single(s)) => (i, *s),
+            _ => unimplemented!("Editing multiple selections not implemented."),
+        };
 
         let style_rules = StyleRules {
             cursor: state.style.cursor_style(),
@@ -673,8 +788,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
             default: edit_style,
         };
 
-        for (col, ((title, data), &chunk)) in self
-            .state()
+        for (col, ((title, data), &chunk)) in state
             .table_view
             .header_col_iter()
             .zip(hchunks.iter())
@@ -690,15 +804,15 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
                         let styled =
                             char_chunks_to_styled_text(self.edit.char_chunks(), style_rules);
                         //Span::from(self.edit.value_to_string().unicode_truncate_start(width).0.to_string())
-                        ListItem::new(styled)
+                        ListItemX::new(styled)
                     } else {
-                        ListItem::new(Span::from(word.unicode_truncate(width).0))
+                        ListItemX::new(Span::from(word.unicode_truncate(width).0))
                     }
                 })
                 .collect::<Vec<_>>();
 
-            let mut list =
-                List::new(items).block(Block::default().title(Span::from(title.to_string())));
+            let mut list = MultiSelectList::new(items)
+                .block(Block::default().title(Span::from(title.to_string())));
             if !self.focused {
                 list = list.highlight_style(if col == selected.0 {
                     edit_style
@@ -707,8 +821,8 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
                 });
             }
 
-            let mut selected_row = ListState::default();
-            selected_row.select(Some(selected.1));
+            let mut selected_row = MultiSelectListState::default();
+            selected_row.select(selected.1);
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
         CommandWidget::new(&state.curr_command).render_into_frame(f, vchunks[1]);
@@ -820,7 +934,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                             }
                         } else {
                             self.dump_edit(app)?;
-                            if self.state_mut().book_view.select_down() {
+                            if self.state_mut().book_view.down() {
                                 self.reset_edit();
                             }
                         }
@@ -834,7 +948,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                             }
                         } else {
                             self.dump_edit(app)?;
-                            if self.state_mut().book_view.select_up() {
+                            if self.state_mut().book_view.up() {
                                 self.reset_edit();
                             }
                         }

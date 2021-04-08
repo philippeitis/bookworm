@@ -10,7 +10,6 @@ use glob::PatternError;
 use rayon::prelude::*;
 use unicase::UniCase;
 
-use bookstore_database::bookview::BookViewIndex;
 use bookstore_database::{
     bookview::BookViewError, AppDatabase, Book, BookView, DatabaseError, IndexableDatabase,
     NestedBookView, ScrollableBookView, SearchableBookView,
@@ -25,6 +24,20 @@ use crate::parser::{BookIndex, Command, ModifyColumn, Source};
 use crate::settings::SortSettings;
 use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
+
+fn log(s: impl AsRef<str>) {
+    use std::io::Write;
+
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(true)
+        .open("log.txt")
+    {
+        let _ = f.write_all(s.as_ref().as_bytes());
+        let _ = f.write_all(b"\n");
+    }
+}
 
 #[cfg(target_os = "windows")]
 const OPEN_BOOK_IN_DIR_PY: &str = r#"import sys
@@ -263,10 +276,10 @@ impl<D: IndexableDatabase> App<D> {
     pub fn get_book(
         b: BookIndex,
         bv: &SearchableBookView<D>,
-    ) -> Result<Arc<RwLock<Book>>, ApplicationError<D::Error>> {
+    ) -> Result<Vec<Arc<RwLock<Book>>>, ApplicationError<D::Error>> {
         match b {
-            BookIndex::Selected => Ok(bv.get_selected_book()?),
-            BookIndex::ID(id) => Ok(bv.get_book(id)?),
+            BookIndex::Selected => Ok(bv.get_selected_books()?),
+            BookIndex::ID(id) => Ok(vec![bv.get_book(id)?]),
         }
     }
 
@@ -280,9 +293,10 @@ impl<D: IndexableDatabase> App<D> {
         edits: &[(ColumnIdentifier, Edit)],
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
-        let book = book_view.get_selected_book()?;
-        let id = book!(book).id();
-        self.edit_book_with_id(id, edits)
+        for book in book_view.get_selected_books()? {
+            self.edit_book_with_id(book!(book).id(), edits)?;
+        }
+        Ok(())
     }
 
     pub fn edit_book_with_id(
@@ -293,16 +307,18 @@ impl<D: IndexableDatabase> App<D> {
         Ok(self.write(|db| db.edit_book_with_id(id, edits))?)
     }
 
-    pub fn remove_selected_book(
+    pub fn remove_selected_books(
         &mut self,
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
-        match book_view.remove_selected_book()? {
-            BookViewIndex::ID(id) => self.write(|db| db.remove_book(id))?,
-            BookViewIndex::Index(index) => {
-                self.write(|db| db.remove_book_indexed(index))?;
-            }
-        }
+        log(format!(
+            "Removing selected books: have {} books now.",
+            self.db.deref().borrow().size()
+        ));
+
+        let books = book_view.remove_selected_books()?;
+        self.write(|db| db.remove_books(&books))?;
+        book_view.refresh_db_size();
         Ok(())
     }
 
@@ -312,7 +328,9 @@ impl<D: IndexableDatabase> App<D> {
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         book_view.remove_book(id);
-        Ok(self.write(|db| db.remove_book(id))?)
+        self.write(|db| db.remove_book(id))?;
+        book_view.refresh_db_size();
+        Ok(())
     }
 
     fn write<B>(&mut self, f: impl Fn(&mut D) -> B) -> B {
@@ -335,7 +353,7 @@ impl<D: IndexableDatabase> App<D> {
     ) -> Result<bool, ApplicationError<D::Error>> {
         match command {
             Command::DeleteSelected => {
-                self.remove_selected_book(book_view)?;
+                self.remove_selected_books(book_view)?;
             }
             Command::DeleteMatching(matches) => {
                 let targets = self.write(|db| db.find_matches(&matches))?;
@@ -343,8 +361,10 @@ impl<D: IndexableDatabase> App<D> {
                     .into_iter()
                     .map(|target| target.deref().read().unwrap().id.unwrap())
                     .collect();
-                self.write(|db| db.remove_books(&ids))?;
+
                 book_view.remove_books(&ids);
+                self.write(|db| db.remove_books(&ids))?;
+                book_view.refresh_db_size();
             }
             Command::DeleteAll => {
                 self.write(|db| db.clear())?;
@@ -404,12 +424,14 @@ impl<D: IndexableDatabase> App<D> {
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             Command::OpenBookInApp(b, index) => {
                 if let Ok(b) = Self::get_book(b, book_view) {
+                    let b = &b[0];
                     open_book(&book!(b), index)?;
                 }
             }
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             Command::OpenBookInExplorer(b, index) => {
                 if let Ok(b) = Self::get_book(b, book_view) {
+                    let b = &b[0];
                     open_book_in_dir(&book!(b), index)?;
                 }
             }
@@ -432,6 +454,7 @@ impl<D: IndexableDatabase> App<D> {
             Command::TryMergeAllBooks => {
                 let ids = self.write(|db| db.merge_similar())?;
                 book_view.remove_books(&ids);
+                book_view.refresh_db_size();
             }
             Command::Help(flag) => {
                 if let Some(s) = help_strings(&flag) {

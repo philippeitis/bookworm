@@ -1,7 +1,6 @@
 pub use bookstore_records::book::Book;
 pub use bookview::{BookView, NestedBookView, ScrollableBookView, SearchableBookView};
 pub use database::{AppDatabase, DatabaseError, IndexableDatabase};
-pub use paged_cursor::PageCursor;
 #[cfg(feature = "sqlite")]
 pub use sqlite_database::SQLiteDatabase;
 

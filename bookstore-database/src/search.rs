@@ -6,6 +6,8 @@ use sublime_fuzzy::best_match;
 use bookstore_records::book::ColumnIdentifier;
 use bookstore_records::Book;
 
+// TODO: If search is too expensive, could sort searches by relative cost
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum SearchMode {
     Regex,

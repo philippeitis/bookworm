@@ -4,9 +4,6 @@ version = "0.1.0"
 authors = ["philippeitis <33013301+philippeitis@users.noreply.github.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-
 [dependencies]
 bookstore-app = { version = "0.1.0", path = "../bookstore-app/" }
 bookstore-database = { version = "0.1.0", path = "../bookstore-database" }
@@ -19,6 +16,7 @@ unicode-truncate = "0.2.0"
 crossterm = "0.19.0"
 html2text = "0.2.1"
 clipboard = { version = "0.5.0", optional = true }
+unicode-width = "0.1.8"
 
 [features]
 copypaste = ["clipboard"]

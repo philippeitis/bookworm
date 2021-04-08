@@ -27,6 +27,8 @@ use crate::ui::views::{
 };
 use crate::ui::widgets::{BorderWidget, Widget};
 
+use bookstore_database::paged_cursor::Selection;
+
 #[derive(Debug)]
 pub(crate) enum TuiError<DBError> {
     Application(ApplicationError<DBError>),
@@ -82,15 +84,20 @@ impl<D: IndexableDatabase> UIState<D> {
         self.table_view.regenerate_columns(&self.book_view)
     }
 
-    pub(crate) fn selected_table_value(&self) -> Option<&str> {
-        Some(&self.table_view.get_column(self.selected_column)[self.book_view.selected()?])
+    pub(crate) fn selected_table_value(&self) -> Option<Vec<&str>> {
+        match self.book_view.selected()? {
+            Selection::Single(s) => {
+                Some(vec![&self.table_view.get_column(self.selected_column)[*s]])
+            }
+            _ => unimplemented!("Editing multiple selections not supported."),
+        }
     }
 
     pub(crate) fn num_cols(&self) -> usize {
         self.table_view.selected_cols().len()
     }
 
-    pub(crate) fn selected(&self) -> Option<(usize, usize)> {
+    pub(crate) fn selected(&self) -> Option<(usize, &Selection)> {
         Some((self.selected_column, self.book_view.selected()?))
     }
 }
@@ -101,6 +108,8 @@ impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for ColumnWidget<D> {}
 impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for EditWidget<D> {}
 impl<D: IndexableDatabase, B: Backend> ViewHandler<D, B> for HelpWidget<D> {}
 
+// TODO: Use channels to allow CTRL+Q when application freezes
+//          Also, allow text input / waiting animation
 pub(crate) struct AppInterface<'a, D: 'a + IndexableDatabase, B: Backend> {
     app: App<D>,
     border_widget: BorderWidget,
@@ -203,7 +212,7 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                                 let state = self.ui_state.deref().borrow();
                                 if let Some(selected_str) = state.selected_table_value() {
                                     self.active_view = Box::new(EditWidget {
-                                        edit: EditState::new(selected_str),
+                                        edit: EditState::new(selected_str[0]),
                                         focused: false,
                                         state: self.ui_state.clone(),
                                     });
