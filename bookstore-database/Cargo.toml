@@ -18,6 +18,7 @@ serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 sqlx = { version = "0.5.1", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
 futures = { version = "0.3.13", features = ["executor"], optional = true }
 ron = { version = "0.6.4", optional = true }
+itertools = "0.10.0"
 
 [features]
 sqlite = ["sqlx", "futures", "ron"]
@@ -26,3 +27,4 @@ default = ["sqlite"]
 [dev-dependencies]
 tempfile = "3.1.0"
 rand = "0.8.3"
+

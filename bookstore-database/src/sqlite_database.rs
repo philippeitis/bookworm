@@ -13,6 +13,7 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 use futures::executor::block_on;
+use itertools::Itertools;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use unicase::UniCase;
@@ -258,6 +259,10 @@ pub struct SQLiteDatabase {
     path: PathBuf,
 }
 
+// TODO:
+//  Start up is slow with lots of books - at 1M, 20S to open (+1s per 50k) - fix through lazy loading
+//  Deletion of many book ids is very slow for large numbers - fix through lazy loading, using SQL queries?
+//
 impl SQLiteDatabase {
     fn load_books(&mut self) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
         // TODO: Benchmark this for large databases with complex books.
@@ -513,6 +518,32 @@ impl SQLiteDatabase {
         sqlx::query!("DELETE FROM books").execute(&mut tx).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn remove_books_async<I: IntoIterator<Item = BookID>>(
+        &mut self,
+        merges: I,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.backend.begin().await?;
+        let merges = merges.into_iter();
+        let size = {
+            let (low, high) = merges.size_hint();
+            high.unwrap_or(low)
+        };
+        sqlx::query(&format!("PRAGMA cache_size = {}", size))
+            .execute(&mut tx)
+            .await?;
+        let s = merges
+            .map(u64::from)
+            .map(|x| (x as i64).to_string())
+            .join(", ");
+        sqlx::query(&format!("DELETE FROM books where book_id in ({})", s))
+            .execute(&mut tx)
+            .await?;
+        sqlx::query!("PRAGMA cache_size = 2000")
+            .execute(&mut tx)
+            .await?;
+        tx.commit().await
     }
 
     async fn merge_by_ids(&mut self, merges: &[(BookID, BookID)]) -> Result<(), sqlx::Error> {
@@ -889,15 +920,7 @@ impl AppDatabase for SQLiteDatabase {
     fn remove_books(&mut self, ids: &HashSet<BookID>) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books WHERE book_id IN ({ids})"
         self.local_cache.remove_books(ids);
-
-        let ids = ids
-            .iter()
-            .map(|&id| (u64::from(id) as i64).to_string())
-            .collect::<Vec<_>>();
-
-        let query = format!("DELETE FROM books WHERE book_id IN ({})", ids.join(", "));
-        execute_query_str!(self, query)?;
-        Ok(())
+        block_on(self.remove_books_async(ids.iter().cloned())).map_err(DatabaseError::Backend)
     }
 
     fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
