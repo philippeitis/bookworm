@@ -206,9 +206,9 @@ enum Delete {
     All,
 }
 
-impl Into<Command> for Delete {
-    fn into(self) -> Command {
-        match self {
+impl From<Delete> for Command {
+    fn from(d: Delete) -> Self {
+        match d {
             Delete::Selected => Command::DeleteSelected,
             Delete::All => Command::DeleteAll,
             Delete::Matching(matches) => Command::DeleteMatching(matches),
@@ -250,9 +250,9 @@ enum Merge {
     All,
 }
 
-impl Into<Command> for Merge {
-    fn into(self) -> Command {
-        match self {
+impl From<Merge> for Command {
+    fn from(m: Merge) -> Self {
+        match m {
             Merge::All => Command::TryMergeAllBooks,
         }
     }
@@ -279,8 +279,8 @@ impl CommandParser for Merge {
 
 struct Quit;
 
-impl Into<Command> for Quit {
-    fn into(self) -> Command {
+impl From<Quit> for Command {
+    fn from(_q: Quit) -> Command {
         Command::Quit
     }
 }
@@ -293,8 +293,8 @@ impl CommandParser for Quit {
 
 struct Write;
 
-impl Into<Command> for Write {
-    fn into(self) -> Command {
+impl From<Write> for Command {
+    fn from(_w: Write) -> Self {
         Command::Write
     }
 }
@@ -307,8 +307,8 @@ impl CommandParser for Write {
 
 struct WriteQuit;
 
-impl Into<Command> for WriteQuit {
-    fn into(self) -> Command {
+impl From<WriteQuit> for Command {
+    fn from(_wq: WriteQuit) -> Self {
         Command::WriteAndQuit
     }
 }
@@ -333,9 +333,9 @@ struct AddBooks {
     sources: Box<[Source]>,
 }
 
-impl Into<Command> for AddBooks {
-    fn into(self) -> Command {
-        Command::AddBooks(self.sources)
+impl From<AddBooks> for Command {
+    fn from(ab: AddBooks) -> Self {
+        Command::AddBooks(ab.sources)
     }
 }
 
@@ -418,9 +418,9 @@ struct EditBook {
     edits: Box<[(ColumnIdentifier, Edit)]>,
 }
 
-impl Into<Command> for EditBook {
-    fn into(self) -> Command {
-        Command::EditBook(self.index, self.edits)
+impl From<EditBook> for Command {
+    fn from(eb: EditBook) -> Self {
+        Command::EditBook(eb.index, eb.edits)
     }
 }
 
@@ -506,9 +506,9 @@ struct SortColumns {
     sorts: Box<[(ColumnIdentifier, ColumnOrder)]>,
 }
 
-impl Into<Command> for SortColumns {
-    fn into(self) -> Command {
-        Command::SortColumns(self.sorts)
+impl From<SortColumns> for Command {
+    fn from(sc: SortColumns) -> Self {
+        Command::SortColumns(sc.sorts)
     }
 }
 
@@ -555,9 +555,9 @@ struct ModifyColumns {
     columns: Box<[ModifyColumn]>,
 }
 
-impl Into<Command> for ModifyColumns {
-    fn into(self) -> Command {
-        Command::ModifyColumns(self.columns)
+impl From<ModifyColumns> for Command {
+    fn from(mc: ModifyColumns) -> Self {
+        Command::ModifyColumns(mc.columns)
     }
 }
 
@@ -643,9 +643,9 @@ struct Jump {
     matches: Matches,
 }
 
-impl Into<Command> for Jump {
-    fn into(self) -> Command {
-        Command::JumpTo(self.matches.matches)
+impl From<Jump> for Command {
+    fn from(j: Jump) -> Self {
+        Command::JumpTo(j.matches.matches)
     }
 }
 
@@ -664,9 +664,9 @@ struct Filter {
     matches: Matches,
 }
 
-impl Into<Command> for Filter {
-    fn into(self) -> Command {
-        Command::FilterMatches(self.matches.matches)
+impl From<Filter> for Command {
+    fn from(f: Filter) -> Self {
+        Command::FilterMatches(f.matches.matches)
     }
 }
 
@@ -685,9 +685,9 @@ struct Help {
     term: Option<String>,
 }
 
-impl Into<Command> for Help {
-    fn into(self) -> Command {
-        match self.term {
+impl From<Help> for Command {
+    fn from(h: Help) -> Self {
+        match h.term {
             None => Command::GeneralHelp,
             Some(term) => Command::Help(term),
         }
@@ -716,11 +716,11 @@ struct OpenBook {
     variant_index: usize,
 }
 
-impl Into<Command> for OpenBook {
-    fn into(self) -> Command {
-        match self.target {
-            Target::App => Command::OpenBookInApp(self.book_index, self.variant_index),
-            Target::FileManager => Command::OpenBookInExplorer(self.book_index, self.variant_index),
+impl From<OpenBook> for Command {
+    fn from(ob: OpenBook) -> Self {
+        match ob.target {
+            Target::App => Command::OpenBookInApp(ob.book_index, ob.variant_index),
+            Target::FileManager => Command::OpenBookInExplorer(ob.book_index, ob.variant_index),
         }
     }
 }
