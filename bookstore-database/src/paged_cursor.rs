@@ -336,25 +336,8 @@ impl PageCursorMultiple {
 
         match &mut self.selected {
             x @ None => {
-                if inc == 1 {
-                    *x = Some(Selection::Single(self.window.top_index));
-                    true
-                } else {
-                    let bottom = (self.window.top_index + inc).min(self.height);
-                    if bottom == self.height {
-                        *x = Some(Selection::Single(self.height.saturating_sub(1)));
-                    } else {
-                        *x = Some(Selection::Range(
-                            self.window.top_index,
-                            bottom,
-                            Direction::Down,
-                        ));
-                        if inc > self.window.size {
-                            self.window.scroll_down(inc - self.window.size);
-                        }
-                    }
-                    true
-                }
+                *x = Some(Selection::Single(self.window.top_index));
+                true
             }
             x @ Some(Selection::Single(_)) => {
                 let s = x.unwrap_single();
@@ -578,19 +561,8 @@ impl PageCursorMultiple {
 
         match &mut self.selected {
             x @ None => {
-                if inc == 1 {
-                    *x = Some(Selection::Single(self.window.top_index));
-                    true
-                } else {
-                    let top = self.window.top_index.saturating_sub(inc);
-                    *x = Some(Selection::Range(
-                        top,
-                        self.window.top_index + 1,
-                        Direction::Up,
-                    ));
-                    self.window.top_index = top;
-                    true
-                }
+                *x = Some(Selection::Single(self.window.top_index));
+                true
             }
             Some(Selection::Single(0)) => false,
             x @ Some(Selection::Single(_)) => {
