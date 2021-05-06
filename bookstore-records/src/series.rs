@@ -21,20 +21,15 @@ impl FromStr for Series {
     /// the entire string is returned as `SeriesName`, with no associated `SeriesIndex`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.ends_with(']') {
-            // TODO: Replace with rsplit_once when stable (1.52).
-            let mut words = s.rsplitn(2, char::is_whitespace);
-            match (words.next(), words.next()) {
-                (Some(id), Some(name)) => {
-                    if id.starts_with('[') {
-                        if let Ok(id) = f32::from_str(&id[1..id.len() - 1]) {
-                            return Ok(Self {
-                                name: name.to_owned(),
-                                index: Some(id),
-                            });
-                        }
+            if let Some((id, name)) = s.rsplit_once(char::is_whitespace) {
+                if id.starts_with('[') {
+                    if let Ok(id) = f32::from_str(&id[1..id.len() - 1]) {
+                        return Ok(Self {
+                            name: name.to_owned(),
+                            index: Some(id),
+                        });
                     }
                 }
-                _ => {}
             }
         }
 
@@ -57,7 +52,7 @@ impl Display for Series {
 
 impl std::cmp::PartialEq for Series {
     fn eq(&self, other: &Self) -> bool {
-        self.name.eq(&other.name) && self.index.eq(&other.index)
+        self.partial_cmp(other) == Some(Ordering::Equal)
     }
 }
 
@@ -90,5 +85,44 @@ impl std::cmp::Ord for Series {
             },
             ord => ord,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_series_ordering() {
+        let a = Series::from_str("Hello World").unwrap();
+        let b = Series::from_str("Hello World [1]").unwrap();
+        let c = Series::from_str("Hello World [2]").unwrap();
+        let d = Series::from_str("World, Hello").unwrap();
+        let e = Series::from_str("Hello World").unwrap();
+        let f = Series {
+            name: "Hello World".to_string(),
+            index: Some(f32::NAN),
+        };
+
+        // Test no-index / no-index
+        assert!(d > a);
+        assert!(a < d);
+        assert_eq!(a, e);
+
+        // Test no-index / index
+        assert!(a < b);
+        assert!(b > a);
+        assert!(d > b);
+        assert_ne!(a, b);
+
+        // Test index / index (non-nan)
+        assert!(b < c);
+        assert!(c > b);
+        assert_eq!(b, b.clone());
+
+        // Test index / index (nan)
+        assert!(b > f);
+        assert!(f < b);
+        assert_eq!(f, f.clone());
     }
 }
