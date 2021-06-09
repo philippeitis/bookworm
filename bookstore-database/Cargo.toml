@@ -11,12 +11,12 @@ unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.gi
 
 sublime_fuzzy = "0.7.0"
 indexmap = { version = "1.6.2", default-features = false, features = ["std", "serde-1", "rayon"] }
-regex = "1.4.5"
+regex = "1.5.4"
 serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 
 # SQLx dependencies
-sqlx = { version = "0.5.1", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
-futures = { version = "0.3.13", features = ["executor"], optional = true }
+sqlx = { version = "0.5.2", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
+futures = { version = "0.3.15", features = ["executor"], optional = true }
 ron = { version = "0.6.4", optional = true }
 itertools = "0.10.0"
 

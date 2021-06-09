@@ -17,6 +17,6 @@ toml = "0.5.7"
 unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.git", branch = "serde" }
 
 itertools = "0.10.0"
-rayon = "1.5.0"
+rayon = "1.5.1"
 jwalk = "0.6.0"
-dirs = "3.0.1"
+dirs = "3.0.2"
