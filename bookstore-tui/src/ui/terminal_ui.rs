@@ -59,12 +59,6 @@ impl<DBError> From<std::io::Error> for TuiError<DBError> {
     }
 }
 
-impl<DBError> From<ErrorKind> for TuiError<DBError> {
-    fn from(e: ErrorKind) -> Self {
-        TuiError::Terminal(e)
-    }
-}
-
 pub(crate) struct UIState<D: IndexableDatabase> {
     pub(crate) style: InterfaceStyle,
     pub(crate) nav_settings: NavigationSettings,
