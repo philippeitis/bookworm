@@ -372,7 +372,12 @@ impl<D: IndexableDatabase> App<D> {
             }
             Command::EditBook(b, edits) => {
                 match b {
-                    BookIndex::Selected => self.edit_selected_book(&edits, book_view)?,
+                    BookIndex::Selected => {
+                        if book_view.make_selection_visible() {
+                            table.regenerate_columns(book_view)?;
+                        }
+                        self.edit_selected_book(&edits, book_view)?
+                    }
                     BookIndex::ID(id) => self.edit_book_with_id(id, &edits)?,
                 };
                 self.sort_settings.is_sorted = false;

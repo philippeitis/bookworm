@@ -68,6 +68,7 @@ struct Window {
     size: usize,
     height: usize,
 }
+
 // Has a window, and has selected items
 pub struct PageCursorMultiple {
     window: Window,
@@ -149,6 +150,38 @@ impl<T: PartialEq> ReplaceAndEqual for T {
     }
 }
 
+pub struct RelativeSelection<'a> {
+    selection: &'a Selection,
+    window: &'a Window,
+}
+
+impl<'a> RelativeSelection<'a> {
+    pub fn iter(&self) -> Box<dyn Iterator<Item = usize> + 'a> {
+        let top_index = self.window.top_index;
+        let size = self.window.size;
+        match self.selection {
+            Selection::Single(i) => Box::new(i.checked_sub(top_index).into_iter()),
+            Selection::Range(start, end, _) => {
+                if *end <= top_index || *start > top_index {
+                    Box::new(std::iter::empty())
+                } else {
+                    Box::new(
+                        (start.checked_sub(top_index).unwrap_or(0)..(end - top_index).max(size))
+                            .into_iter(),
+                    )
+                }
+            }
+            Selection::Multi(indices, _) => Box::new(
+                indices
+                    .iter()
+                    .cloned()
+                    .filter_map(move |x| x.checked_sub(top_index))
+                    .filter(move |x| *x < top_index),
+            ),
+        }
+    }
+}
+
 impl PageCursorMultiple {
     /// Creates a new Cursor at location 0, with no selection active.
     pub(crate) fn new(height: usize, window_size: usize) -> Self {
@@ -161,6 +194,13 @@ impl PageCursorMultiple {
             height,
             selected: None,
         }
+    }
+
+    pub fn relative_selections(&self) -> Option<RelativeSelection> {
+        self.selected().map(|selection| RelativeSelection {
+            selection,
+            window: &self.window,
+        })
     }
 
     pub fn top_index(&self) -> usize {
@@ -224,7 +264,10 @@ impl PageCursorMultiple {
 
     /// Selects the value at index, and adjusts the window so that the value is visible.
     pub(crate) fn select_index_and_make_visible(&mut self, index: usize) -> bool {
-        log(format!("Called select_index_and_make_visible with {}.", index));
+        log(format!(
+            "Called select_index_and_make_visible with {}.",
+            index
+        ));
         self.assert_invariants();
         if self.height == 0 {
             return std::mem::take(&mut self.selected).is_some();
@@ -234,28 +277,72 @@ impl PageCursorMultiple {
             index < self.height,
             "Attempted to select index that does not exist."
         );
+
+        self.selected
+            .replace_and_equal(Some(Selection::Single(index)))
+            | self.make_selected_visible()
+    }
+
+    pub(crate) fn selection_is_visible(&self) -> bool {
+        match &self.selected {
+            None => true,
+            Some(Selection::Single(x)) => {
+                *x >= self.window.top_index && *x < self.window.top_index + self.window.size
+            }
+            Some(Selection::Range(start, end, _)) => {
+                //  if end <= self.window.top_index, start is too,
+                // and if start >= self.window.top_index, end is too.
+                !((*end <= self.window.top_index) || (*start >= self.window.top_index))
+            }
+            Some(Selection::Multi(multi, _)) => multi.iter().any(|x| {
+                *x >= self.window.top_index && *x < self.window.top_index + self.window.size
+            }),
+        }
+    }
+
+    /// If selection is visible, or no selection exists, no changes occur. If selection is not visible,
+    /// makes top selection visible.
+    pub(crate) fn make_selected_visible(&mut self) -> bool {
+        log(format!("Called make_selected_visible"));
+        self.assert_invariants();
+
+        if self.selection_is_visible() {
+            return true;
+        }
+
+        let index = match &self.selected {
+            None => return false,
+            Some(Selection::Single(x)) => *x,
+            Some(Selection::Range(start, _end, _dir)) => *start,
+            Some(Selection::Multi(selections, _dir)) => *selections.iter().next().unwrap(),
+        };
+
         let top_index = if index < self.window.size {
-            log(format!("hit index < self.window.size case ({} < {}).", index, self.window.size));
+            log(format!(
+                "hit index < self.window.size case ({} < {}).",
+                index, self.window.size
+            ));
             0
         } else if index + self.window.size > self.height {
-            log(format!("hit index + self.window.size > self.height case ({} + {} > {}).", index, self.window.size, self.height));
+            log(format!(
+                "hit index + self.window.size > self.height case ({} + {} > {}).",
+                index, self.window.size, self.height
+            ));
             self.height - self.window.size
-        } else if index >= self.window.top_index && index < self.window.top_index + self.window.size {
+        } else if index >= self.window.top_index && index < self.window.top_index + self.window.size
+        {
             log(format!("hit index >= self.window.top_index && index < self.window.top_index + self.window.size case ({} >= {} && {} < {} + {}).",
                         index, self.window.top_index, index, self.window.top_index, self.window.size, ));
-            return self.selected.replace_and_equal(Some(Selection::Single(index)));
+            return false;
         } else {
-            log(
-                format!(
-                    "default case: index = {}, top_index = {}, size = {}",
-                    index, self.window.top_index, self.window.size
-                )
-            );
+            log(format!(
+                "default case: index = {}, top_index = {}, size = {}",
+                index, self.window.top_index, self.window.size
+            ));
             index
         };
-        self.selected = Some(Selection::Single(index));
-        self.window.top_index = top_index;
 
+        self.window.top_index = top_index;
         true
     }
 

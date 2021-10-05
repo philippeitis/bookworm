@@ -9,7 +9,7 @@ use unicase::UniCase;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, ColumnOrder};
 
-use crate::paged_cursor::{PageCursorMultiple, Selection};
+use crate::paged_cursor::{PageCursorMultiple, RelativeSelection, Selection};
 use crate::search::{Error as SearchError, Search};
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
@@ -107,6 +107,10 @@ pub trait BookView<D: AppDatabase> {
     // fn select(&mut self, item: usize) -> bool;
 
     fn selected(&self) -> Option<&Selection>;
+
+    fn make_selection_visible(&mut self) -> bool;
+
+    fn relative_selections(&self) -> Option<RelativeSelection>;
 
     fn deselect_all(&mut self) -> bool;
 
@@ -330,6 +334,20 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         match self.scopes.last() {
             None => self.root_cursor.selected(),
             Some((cursor, _)) => cursor.selected(),
+        }
+    }
+
+    fn make_selection_visible(&mut self) -> bool {
+        match self.scopes.last_mut() {
+            None => self.root_cursor.make_selected_visible(),
+            Some((cursor, _)) => cursor.make_selected_visible(),
+        }
+    }
+
+    fn relative_selections(&self) -> Option<RelativeSelection> {
+        match self.scopes.last() {
+            None => self.root_cursor.relative_selections(),
+            Some((cursor, _)) => cursor.relative_selections(),
         }
     }
 

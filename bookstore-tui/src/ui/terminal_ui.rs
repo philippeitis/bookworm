@@ -27,7 +27,7 @@ use crate::ui::views::{
 };
 use crate::ui::widgets::{BorderWidget, Widget};
 
-use bookstore_database::paged_cursor::Selection;
+use bookstore_database::paged_cursor::{RelativeSelection, Selection};
 
 #[derive(Debug)]
 pub(crate) enum TuiError<DBError> {
@@ -79,20 +79,29 @@ impl<D: IndexableDatabase> UIState<D> {
     }
 
     pub(crate) fn selected_table_value(&self) -> Option<Vec<&str>> {
-        match self.book_view.selected()? {
-            Selection::Single(s) => {
-                Some(vec![&self.table_view.get_column(self.selected_column)[*s]])
-            }
-            _ => unimplemented!("Editing multiple selections not supported."),
-        }
+        let selected_column = self.table_view.get_column(self.selected_column);
+        Some(
+            self.book_view
+                .relative_selections()?
+                .iter()
+                .map(|x| selected_column[x].as_str())
+                .collect(),
+        )
     }
 
     pub(crate) fn num_cols(&self) -> usize {
         self.table_view.selected_cols().len()
     }
 
-    pub(crate) fn selected(&self) -> Option<(usize, &Selection)> {
-        Some((self.selected_column, self.book_view.selected()?))
+    pub(crate) fn selected(&self) -> Option<(usize, RelativeSelection)> {
+        Some((self.selected_column, self.book_view.relative_selections()?))
+    }
+
+    pub(crate) fn make_selection_visible(&mut self) -> Result<(), BookViewError<D::Error>> {
+        if self.book_view.make_selection_visible() {
+            self.table_view.regenerate_columns(&self.book_view)?;
+        }
+        Ok(())
     }
 }
 
@@ -203,11 +212,16 @@ impl<'a, D: 'a + IndexableDatabase, B: Backend> AppInterface<'a, D, B> {
                                 })
                             }
                             AppView::Edit => {
+                                {
+                                    let _ =
+                                        self.ui_state.deref().borrow_mut().make_selection_visible();
+                                }
+
                                 let state = self.ui_state.deref().borrow();
                                 if let Some(selected_str) = state.selected_table_value() {
                                     self.active_view = Box::new(EditWidget {
                                         edit: EditState::new(selected_str[0]),
-                                        focused: false,
+                                        focused: true,
                                         state: self.ui_state.clone(),
                                     });
                                 }

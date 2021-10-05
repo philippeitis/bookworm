@@ -1,4 +1,5 @@
 use std::cell::{Ref, RefCell, RefMut};
+use std::collections::HashSet;
 use std::ops::DerefMut;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -774,14 +775,10 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
 
         let edit_style = state.style.edit_style();
         let select_style = state.style.select_style();
-        let selected = match state
+        let (scol, srows_) = state
             .selected()
-            .expect("EditWidget should only exist when items are selected")
-        {
-            (i, Selection::Single(s)) => (i, *s),
-            _ => unimplemented!("Editing multiple selections not implemented."),
-        };
-
+            .expect("EditWidget should only exist when items are selected");
+        let srows: HashSet<_> = srows_.iter().collect();
         let style_rules = StyleRules {
             cursor: state.style.cursor_style(),
             selected: select_style,
@@ -799,7 +796,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
                 .iter()
                 .enumerate()
                 .map(|(row, word)| {
-                    if selected == (col, row) {
+                    if col == scol && srows.contains(&row) {
                         // TODO: Force text around cursor to be visible.
                         let styled =
                             char_chunks_to_styled_text(self.edit.char_chunks(), style_rules);
@@ -814,7 +811,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
             let mut list = MultiSelectList::new(items)
                 .block(Block::default().title(Span::from(title.to_string())));
             if !self.focused {
-                list = list.highlight_style(if col == selected.0 {
+                list = list.highlight_style(if col == scol {
                     edit_style
                 } else {
                     select_style
@@ -822,7 +819,7 @@ impl<'b, D: IndexableDatabase, B: Backend> ResizableWidget<D, B> for EditWidget<
             }
 
             let mut selected_row = MultiSelectListState::default();
-            selected_row.select(selected.1);
+            selected_row.select(srows_.iter().next().unwrap());
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
         CommandWidget::new(&state.curr_command).render_into_frame(f, vchunks[1]);
@@ -912,7 +909,7 @@ impl<D: IndexableDatabase> InputHandler<D> for EditWidget<D> {
                         if !self.focused {
                             self.focused = true;
                         } else {
-                            self.dump_edit(app)?;
+                            self.dump_edit(app);
                             return Ok(ApplicationTask::SwitchView(AppView::Columns));
                         }
                     }
