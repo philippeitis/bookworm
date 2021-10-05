@@ -1,8 +1,9 @@
-use std::cell::{Ref, RefCell};
 use std::collections::HashSet;
-use std::rc::Rc;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
+use tokio::sync::RwLock;
+
+use async_trait::async_trait;
 use indexmap::map::IndexMap;
 use unicase::UniCase;
 
@@ -25,12 +26,6 @@ fn log(s: impl AsRef<str>) {
         let _ = f.write_all(s.as_ref().as_bytes());
         let _ = f.write_all(b"\n");
     }
-}
-
-macro_rules! book {
-    ($book: ident) => {
-        $book.as_ref().read().unwrap()
-    };
 }
 
 #[derive(Debug)]
@@ -64,23 +59,18 @@ impl<DBError> From<RecordError> for BookViewError<DBError> {
     }
 }
 
-pub trait BookView<D: AppDatabase> {
-    fn new(db: Rc<RefCell<D>>) -> Self;
+#[async_trait]
+pub trait BookView<D: AppDatabase + Send + Sync> {
+    async fn new(db: Arc<RwLock<D>>) -> Self;
 
-    fn get_books_cursored(&self) -> Result<Vec<Arc<RwLock<Book>>>, BookViewError<D::Error>>;
+    async fn get_books_cursored(&self) -> Result<Vec<Book>, BookViewError<D::Error>>;
 
-    fn sort_by_column(
-        &mut self,
-        col: ColumnIdentifier,
-        reverse: ColumnOrder,
-    ) -> Result<(), DatabaseError<D::Error>>;
-
-    fn sort_by_columns(
+    async fn sort_by_columns(
         &mut self,
         cols: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>>;
 
-    fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError<D::Error>>;
+    async fn get_book(&self, id: BookID) -> Result<Book, DatabaseError<D::Error>>;
 
     /// Removes the specified book from the upper scopes. Note that this does not affect the root
     /// scope, which depends on the database, and must be refreshed with a call to `refresh_db_size()`.
@@ -91,16 +81,16 @@ pub trait BookView<D: AppDatabase> {
     /// scope, which depends on the database, and must be refreshed with a call to `refresh_db_size()`
     fn remove_books(&mut self, ids: &HashSet<BookID>);
 
-    fn get_selected_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, BookViewError<D::Error>>;
+    async fn get_selected_books(&self) -> Result<Vec<Book>, BookViewError<D::Error>>;
 
     /// Removes the books selected in the last scope, except if the last scope is the database, in
     /// which case, the user must delete the books from the database and manually refresh the root
     /// cursor with a call to `refresh_db_size()`.
-    fn remove_selected_books(&mut self) -> Result<HashSet<BookID>, BookViewError<D::Error>>;
+    async fn remove_selected_books(&mut self) -> Result<HashSet<BookID>, BookViewError<D::Error>>;
 
     fn refresh_window_size(&mut self, size: usize) -> bool;
 
-    fn clear(&mut self);
+    async fn clear(&mut self);
 
     fn window_size(&self) -> usize;
 
@@ -114,13 +104,14 @@ pub trait BookView<D: AppDatabase> {
 
     fn deselect_all(&mut self) -> bool;
 
-    fn refresh_db_size(&mut self);
+    async fn refresh_db_size(&mut self);
 
-    fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>>;
+    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>>;
 }
 
-pub trait ScrollableBookView<D: AppDatabase>: BookView<D> {
-    fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>>;
+#[async_trait]
+pub trait ScrollableBookView<D: AppDatabase + Send + Sync>: BookView<D> {
+    async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>>;
 
     fn top_index(&self) -> usize;
 
@@ -153,17 +144,18 @@ pub trait ScrollableBookView<D: AppDatabase>: BookView<D> {
     fn select_to_end(&mut self) -> bool;
 }
 
-pub trait NestedBookView<D: AppDatabase>: BookView<D> {
-    fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>>;
+#[async_trait]
+pub trait NestedBookView<D: AppDatabase + Send + Sync>: BookView<D> {
+    async fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>>;
 
     fn pop_scope(&mut self) -> bool;
 }
 
 pub struct SearchableBookView<D: AppDatabase> {
-    scopes: Vec<(PageCursorMultiple, IndexMap<BookID, Arc<RwLock<Book>>>)>,
+    scopes: Vec<(PageCursorMultiple, IndexMap<BookID, Book>)>,
     // The "root" scope.
     root_cursor: PageCursorMultiple,
-    db: Rc<RefCell<D>>,
+    db: Arc<RwLock<D>>,
 }
 
 impl<D: AppDatabase> SearchableBookView<D> {
@@ -173,15 +165,12 @@ impl<D: AppDatabase> SearchableBookView<D> {
             Some((cursor, _)) => cursor,
         }
     }
-
-    fn db(&self) -> Ref<D> {
-        self.db.as_ref().borrow()
-    }
 }
 
-impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
-    fn new(db: Rc<RefCell<D>>) -> Self {
-        let size = db.as_ref().borrow().size();
+#[async_trait]
+impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
+    async fn new(db: Arc<RwLock<D>>) -> Self {
+        let size = db.read().await.size().await;
         Self {
             scopes: vec![],
             root_cursor: PageCursorMultiple::new(size, 0),
@@ -189,11 +178,14 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    fn get_books_cursored(&self) -> Result<Vec<Arc<RwLock<Book>>>, BookViewError<D::Error>> {
+    async fn get_books_cursored(&self) -> Result<Vec<Book>, BookViewError<D::Error>> {
         match self.scopes.last() {
             None => Ok(self
-                .db()
-                .get_books_indexed(self.root_cursor.window_range())?),
+                .db
+                .read()
+                .await
+                .get_books_indexed(self.root_cursor.window_range())
+                .await?),
             Some((cursor, books)) => Ok(cursor
                 .window_range()
                 .filter_map(|i| books.get_index(i))
@@ -202,37 +194,19 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    fn sort_by_column(
-        &mut self,
-        col: ColumnIdentifier,
-        column_order: ColumnOrder,
-    ) -> Result<(), DatabaseError<D::Error>> {
-        if column_order == ColumnOrder::Descending {
-            self.scopes.iter_mut().for_each(|(_, scope)| {
-                scope.sort_by(|_, a, _, b| book!(b).cmp_column(&book!(a), &col))
-            });
-        } else {
-            self.scopes.iter_mut().for_each(|(_, scope)| {
-                scope.sort_by(|_, a, _, b| book!(a).cmp_column(&book!(b), &col))
-            });
-        }
-
-        Ok(())
-    }
-
-    fn sort_by_columns(
+    async fn sort_by_columns(
         &mut self,
         cols: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>> {
-        self.scopes.iter_mut().for_each(|(_, scope)| {
-            scope.sort_by(|_, a, _, b| book!(b).cmp_columns(&book!(a), &cols))
-        });
+        self.scopes
+            .iter_mut()
+            .for_each(|(_, scope)| scope.sort_by(|_, a, _, b| b.cmp_columns(a, &cols)));
 
         Ok(())
     }
 
-    fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError<D::Error>> {
-        self.db().get_book(id)
+    async fn get_book(&self, id: BookID) -> Result<Book, DatabaseError<D::Error>> {
+        self.db.read().await.get_book(id).await
     }
 
     fn remove_book(&mut self, id: BookID) {
@@ -271,19 +245,24 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    fn get_selected_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, BookViewError<D::Error>> {
+    async fn get_selected_books(&self) -> Result<Vec<Book>, BookViewError<D::Error>> {
         match self.scopes.last() {
             None => match self.root_cursor.selected() {
                 None => Err(BookViewError::NoBookSelected),
-                Some(Selection::Single(i)) => Ok(vec![self.db().get_book_indexed(*i)?]),
-                Some(Selection::Range(start, end, _)) => {
-                    Ok(self.db().get_books_indexed(*start..*end)?)
+                Some(Selection::Single(i)) => {
+                    Ok(vec![self.db.read().await.get_book_indexed(*i).await?])
                 }
-                Some(Selection::Multi(multi, _)) => Ok(multi
-                    .iter()
-                    .copied()
-                    .map(|i| self.db().get_book_indexed(i))
-                    .collect::<Result<_, _>>()?),
+                Some(Selection::Range(start, end, _)) => {
+                    Ok(self.db.read().await.get_books_indexed(*start..*end).await?)
+                }
+                Some(Selection::Multi(multi, _)) => {
+                    let mut results = Vec::with_capacity(multi.len());
+                    let db = self.db.read().await;
+                    for i in multi.iter().copied() {
+                        results.push(db.get_book_indexed(i).await?);
+                    }
+                    Ok(results)
+                }
             },
             Some((cursor, books)) => match cursor.selected() {
                 None => Err(BookViewError::NoBookSelected),
@@ -302,12 +281,11 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    fn remove_selected_books(&mut self) -> Result<HashSet<BookID>, BookViewError<D::Error>> {
-        let selected_books = self
-            .get_selected_books()?
-            .into_iter()
-            .map(|b| book!(b).id())
-            .collect();
+    async fn remove_selected_books(&mut self) -> Result<HashSet<BookID>, BookViewError<D::Error>> {
+        let mut selected_books = HashSet::new();
+        for book in self.get_selected_books().await? {
+            selected_books.insert(book.id());
+        }
         self.remove_books(&selected_books);
         Ok(selected_books)
     }
@@ -321,9 +299,9 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
             .fold(false, |a, b| a | b)
     }
 
-    fn clear(&mut self) {
+    async fn clear(&mut self) {
         self.scopes.clear();
-        self.refresh_db_size();
+        self.refresh_db_size().await;
     }
 
     fn window_size(&self) -> usize {
@@ -358,9 +336,9 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    fn refresh_db_size(&mut self) {
+    async fn refresh_db_size(&mut self) {
         log("refreshing db size.");
-        let db_size = self.db().size();
+        let db_size = self.db.read().await.size().await;
         log(format!("size is {}.", db_size));
         log(format!("selection is {:?}.", self.root_cursor.selected()));
         self.root_cursor.refresh_height(db_size);
@@ -395,35 +373,33 @@ impl<D: IndexableDatabase> BookView<D> for SearchableBookView<D> {
         // };
     }
 
-    fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>> {
-        self.db().has_column(col)
+    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>> {
+        self.db.read().await.has_column(col).await
     }
 }
 
-impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
-    fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>> {
+#[async_trait]
+impl<D: IndexableDatabase + Send + Sync> NestedBookView<D> for SearchableBookView<D> {
+    async fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>> {
         let results: IndexMap<_, _> = match self.scopes.last() {
             None => self
-                .db()
-                .find_matches(searches)?
+                .db
+                .read()
+                .await
+                .find_matches(searches)
+                .await?
                 .into_iter()
-                .map(|book| {
-                    let id = book!(book).id();
-                    (id, book)
-                })
+                .map(|book| (book.id(), book))
                 .collect(),
 
             Some((_, books)) => {
                 let mut results: Vec<_> = books.values().cloned().collect();
                 for search in searches {
                     let matcher = search.clone().into_matcher()?;
-                    results.retain(|book| matcher.is_match(&book!(book)));
+                    results.retain(|book| matcher.is_match(book));
                 }
 
-                results
-                    .into_iter()
-                    .map(|b| (book!(b).id(), b.clone()))
-                    .collect()
+                results.into_iter().map(|b| (b.id(), b)).collect()
             }
         };
 
@@ -440,19 +416,20 @@ impl<D: IndexableDatabase> NestedBookView<D> for SearchableBookView<D> {
     }
 }
 
-impl<D: IndexableDatabase> ScrollableBookView<D> for SearchableBookView<D> {
-    fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
+#[async_trait]
+impl<D: IndexableDatabase + Send + Sync> ScrollableBookView<D> for SearchableBookView<D> {
+    async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
         let target_book = match self.scopes.last() {
-            None => self.db().find_book_index(searches)?,
+            None => self.db.read().await.find_book_index(searches).await?,
             Some((_, books)) => {
                 let mut results: Vec<_> = books.values().cloned().collect();
                 for search in searches {
                     let matcher = search.clone().into_matcher()?;
-                    results.retain(|book| matcher.is_match(&book!(book)));
+                    results.retain(|book| matcher.is_match(&book));
                 }
                 results.first().cloned().map(|b| {
                     books
-                        .get_index_of(&book!(b).id())
+                        .get_index_of(&b.id())
                         .expect("Reference to existing book was invalidated during search.")
                 })
             }

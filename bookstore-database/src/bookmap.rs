@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
 
 use indexmap::map::IndexMap;
 #[cfg(feature = "serde")]
@@ -11,31 +10,13 @@ use bookstore_records::{Book, ColumnOrder, Edit};
 
 use crate::search::{Error, Search};
 
-macro_rules! book {
-    ($book: ident) => {
-        $book
-            .as_ref()
-            .read()
-            .expect("Failed to acquire read-only lock on book.")
-    };
-}
-
-macro_rules! book_mut {
-    ($book: ident) => {
-        $book
-            .as_ref()
-            .write()
-            .expect("Failed to acquire read-write lock on book.")
-    };
-}
-
 /// `BookCache` acts as an intermediate caching layer between the backend database
 /// and the front-end UI - allowing books that are already in memory to be provided
 /// without going through the database.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct BookCache {
-    books: IndexMap<BookID, Arc<RwLock<Book>>>,
+    books: IndexMap<BookID, Book>,
     cols: HashSet<UniCase<String>>,
 }
 
@@ -55,14 +36,14 @@ impl Default for BookCache {
 impl BookCache {
     #[allow(dead_code)]
     pub(crate) fn from_values_unchecked(
-        books: IndexMap<BookID, Arc<RwLock<Book>>>,
+        books: IndexMap<BookID, Book>,
         cols: HashSet<UniCase<String>>,
     ) -> Self {
         BookCache { books, cols }
     }
 
     pub(crate) fn insert_book(&mut self, book: Book) {
-        self.books.insert(book.id(), Arc::new(RwLock::new(book)));
+        self.books.insert(book.id(), book);
     }
 
     pub fn len(&self) -> usize {
@@ -85,15 +66,15 @@ impl BookCache {
         self.books.clear();
     }
 
-    pub fn get_book(&self, id: BookID) -> Option<Arc<RwLock<Book>>> {
+    pub fn get_book(&self, id: BookID) -> Option<Book> {
         self.books.get(&id).cloned()
     }
 
-    pub fn get_book_indexed(&self, index: usize) -> Option<Arc<RwLock<Book>>> {
+    pub fn get_book_indexed(&self, index: usize) -> Option<Book> {
         self.books.get_index(index).map(|(_, book)| book.clone())
     }
 
-    pub fn get_all_books(&self) -> Vec<Arc<RwLock<Book>>> {
+    pub fn get_all_books(&self) -> Vec<Book> {
         self.books.values().cloned().collect()
     }
 
@@ -104,8 +85,7 @@ impl BookCache {
     ) -> Result<bool, RecordError> {
         match self.books.get_mut(&id) {
             None => Ok(false),
-            Some(book_ref) => {
-                let mut book = book_mut!(book_ref);
+            Some(book) => {
                 for (column, edit) in edits {
                     book.edit_column(&column, edit)?;
                     match column {
@@ -127,8 +107,7 @@ impl BookCache {
     ) -> Result<bool, RecordError> {
         match self.books.get_index_mut(index) {
             None => Ok(false),
-            Some((_, book_ref)) => {
-                let mut book = book_mut!(book_ref);
+            Some((_, book)) => {
                 for (column, edit) in edits {
                     book.edit_column(&column, edit)?;
                     match column {
@@ -151,7 +130,6 @@ impl BookCache {
         let mut ref_map: HashMap<(String, String), BookID> = HashMap::new();
         let mut merges = vec![];
         for book in self.books.values() {
-            let book = book!(book);
             if let Some(title) = book.title() {
                 if let Some(authors) = book.authors() {
                     let a: String = authors.join(", ").to_ascii_lowercase();
@@ -165,7 +143,7 @@ impl BookCache {
             }
         }
 
-        let placeholder = Arc::new(RwLock::new(Book::placeholder()));
+        let placeholder = Book::placeholder();
         for (b1, b2_id) in merges.iter() {
             // Dummy allows for O(n) time book removal while maintaining sort
             // and getting owned copy of book.
@@ -174,19 +152,19 @@ impl BookCache {
             // a b1, and never a b2, and a b1 never merges into b2, since b1 comes first.
             if let Some(b1) = self.books.get_mut(b1) {
                 if let Some(b2) = b2 {
-                    book_mut!(b1).merge_mut(&book!(b2));
+                    b1.merge_mut(&b2);
                 }
             }
         }
-        self.books.retain(|_, book| !book!(book).is_placeholder());
+        self.books.retain(|_, book| book.is_placeholder());
         merges
     }
 
-    pub fn find_matches(&self, searches: &[Search]) -> Result<Vec<Arc<RwLock<Book>>>, Error> {
+    pub fn find_matches(&self, searches: &[Search]) -> Result<Vec<Book>, Error> {
         let mut results: Vec<_> = self.books.values().cloned().collect();
         for search in searches {
             let matcher = search.clone().into_matcher()?;
-            results.retain(|book| matcher.is_match(&book!(book)));
+            results.retain(|book| matcher.is_match(book));
         }
         Ok(results)
     }
@@ -195,13 +173,13 @@ impl BookCache {
         let mut results: Vec<_> = self.books.values().cloned().collect();
         for search in searches {
             let matcher = search.clone().into_matcher()?;
-            results.retain(|book| matcher.is_match(&book!(book)));
+            results.retain(|book| matcher.is_match(book));
         }
 
         // get_index_of should not fail - book ID is immutable, and books should not be changed.
-        Ok(results.first().map(|b| {
+        Ok(results.first().map(|book| {
             self.books
-                .get_index_of(&book!(b).id())
+                .get_index_of(&book.id())
                 .expect("Reference to existing book was invalidated during search.")
         }))
     }
@@ -210,11 +188,10 @@ impl BookCache {
         // Use some heuristic to sort in parallel when it would offer speedup -
         // parallel threads are slower for small sorts.
         if self.books.len() < 2500 {
-            self.books
-                .sort_by(|_, a, _, b| book!(a).cmp_columns(&book!(b), &cols))
+            self.books.sort_by(|_, a, _, b| a.cmp_columns(&b, &cols))
         } else {
             self.books
-                .par_sort_by(|_, a, _, b| book!(a).cmp_columns(&book!(b), &cols))
+                .par_sort_by(|_, a, _, b| a.cmp_columns(&b, &cols))
         }
     }
 

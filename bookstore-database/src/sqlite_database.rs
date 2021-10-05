@@ -10,12 +10,11 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
 
-use futures::executor::block_on;
+use async_trait::async_trait;
 use itertools::Itertools;
-use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::{ConnectOptions, Connection, SqliteConnection};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::SqlitePool;
 use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier};
@@ -78,57 +77,6 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
     ON DELETE CASCADE
 );"#;
-
-macro_rules! execute_query {
-    ($self:ident, $query_str:expr) => ({
-        {
-            block_on(async {
-                sqlx::query!($query_str).execute(&mut $self.backend).await
-            }).map_err(DatabaseError::Backend)
-        }
-    });
-    ($self:ident, $query_str:expr, $($args:tt),*) => ({
-        {
-            block_on(async {
-                sqlx::query!($query_str, $($args),*).execute(&mut $self.backend).await
-            }).map_err(DatabaseError::Backend)
-        }
-    })
-}
-
-macro_rules! execute_query_str {
-    ($self: ident, $query_str: expr) => {{
-        block_on(async {
-            sqlx::query($query_str.as_ref())
-                .execute(&mut $self.backend)
-                .await
-        })
-        .map_err(DatabaseError::Backend)
-    }};
-}
-
-macro_rules! run_query_as {
-    ($self:ident, $out_struct:path, $query_str:expr) => ({
-        {
-            block_on(async {
-                sqlx::query_as!($out_struct, $query_str).fetch_all(&mut $self.backend).await
-            }).map_err(DatabaseError::Backend)
-        }
-    });
-    ($self:ident, $out_struct:path, $query_str:expr, $($args:tt),*) => ({
-        {
-            block_on(async {
-                sqlx::query!($out_struct, $query_str, $($args),*).fetch_all(&mut $self.backend).await
-            }).map_err(DatabaseError::Backend)
-        }
-    })
-}
-
-macro_rules! book {
-    ($book: ident) => {
-        $book.as_ref().read().unwrap()
-    };
-}
 
 struct BookData {
     book_id: i64,
@@ -254,7 +202,7 @@ impl TryFrom<VariantData> for BookVariant {
 }
 
 pub struct SQLiteDatabase {
-    backend: SqliteConnection,
+    backend: SqlitePool,
     local_cache: BookCache,
     path: PathBuf,
 }
@@ -264,13 +212,30 @@ pub struct SQLiteDatabase {
 //  Deletion of many book ids is very slow for large numbers - fix through lazy loading, using SQL queries?
 //
 impl SQLiteDatabase {
-    fn load_books(&mut self) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
+    async fn load_books(
+        &mut self,
+    ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
         // TODO: Benchmark this for large databases with complex books.
-        let raw_books = run_query_as!(self, BookData, "SELECT * FROM books")?;
-        let raw_variants = run_query_as!(self, VariantData, "SELECT * FROM variants")?;
-        let raw_named_tags = run_query_as!(self, NamedTagData, "SELECT * FROM named_tags")?;
-        let raw_free_tags = run_query_as!(self, FreeTagData, "SELECT * FROM free_tags")?;
-        let raw_multimap_tags = run_query_as!(self, NamedTagData, "SELECT * FROM multimap_tags")?;
+        let raw_books = sqlx::query_as!(BookData, "SELECT * FROM books")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let raw_variants = sqlx::query_as!(VariantData, "SELECT * FROM variants")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let raw_named_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM named_tags")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let raw_free_tags = sqlx::query_as!(FreeTagData, "SELECT * FROM free_tags")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let raw_multimap_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM multimap_tags")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
 
         let mut books: HashMap<_, _> = raw_books
             .into_iter()
@@ -292,6 +257,7 @@ impl SQLiteDatabase {
                     continue;
                 }
             };
+
             if let Some(book) = books.get_mut(&id) {
                 book.push_variant(variant);
             } else {
@@ -376,10 +342,7 @@ impl SQLiteDatabase {
         }
 
         self.local_cache = BookCache::from_values_unchecked(
-            books
-                .into_iter()
-                .map(|(a, b)| (a, Arc::new(RwLock::new(b))))
-                .collect(),
+            books.into_iter().map(|(a, b)| (a, b)).collect(),
             prime_cols.into_iter().map(UniCase::new).collect(),
         );
         Ok(())
@@ -387,15 +350,60 @@ impl SQLiteDatabase {
 }
 
 impl SQLiteDatabase {
+    pub async fn async_open<P>(file_path: P) -> Result<Self, DatabaseError<sqlx::Error>>
+    where
+        P: AsRef<Path> + Send + Sync,
+        Self: Sized,
+    {
+        let db_exists = file_path.as_ref().exists();
+        if !db_exists {
+            if let Some(path) = file_path.as_ref().parent() {
+                std::fs::create_dir_all(path)?;
+            }
+        }
+        let database = SqlitePoolOptions::new()
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&file_path)
+                    .create_if_missing(true),
+            )
+            .await
+            .map_err(DatabaseError::Backend)?;
+
+        let mut db = Self {
+            backend: database,
+            local_cache: BookCache::default(),
+            path: file_path.as_ref().to_path_buf(),
+        };
+
+        for query in [
+            CREATE_BOOKS,
+            CREATE_FREE_TAGS,
+            CREATE_NAMED_TAGS,
+            CREATE_MULTIMAP_TAGS,
+            CREATE_VARIANTS,
+        ] {
+            sqlx::query(query)
+                .execute(&db.backend)
+                .await
+                .map_err(DatabaseError::Backend)?;
+        }
+
+        if db_exists {
+            db.load_books().await?;
+        }
+        Ok(db)
+    }
+
     async fn insert_book_async(
         &mut self,
         book: BookVariant,
     ) -> Result<BookID, <Self as AppDatabase>::Error> {
-        let ids = self.insert_books_async(vec![book], 1).await?;
+        let ids = self.insert_books_async(std::iter::once(book), 1).await?;
         Ok(ids[0])
     }
 
-    async fn insert_books_async<I: IntoIterator<Item = BookVariant>>(
+    async fn insert_books_async<I: Iterator<Item = BookVariant> + Send>(
         &mut self,
         books: I,
         transaction_size: usize,
@@ -427,7 +435,7 @@ impl SQLiteDatabase {
                 // .await?
                 // .last_insert_rowid();
 
-                let id = sqlx::query!("INSERT into books (title) VALUES(?)", title,)
+                let id = sqlx::query!("INSERT into books (title) VALUES(?)", title)
                     .execute(&mut tx)
                     .await?
                     .last_insert_rowid();
@@ -520,12 +528,11 @@ impl SQLiteDatabase {
         Ok(())
     }
 
-    async fn remove_books_async<I: IntoIterator<Item = BookID>>(
+    async fn remove_books_async<I: Iterator<Item = BookID> + Send>(
         &mut self,
         merges: I,
     ) -> Result<(), sqlx::Error> {
         let mut tx = self.backend.begin().await?;
-        let merges = merges.into_iter();
         let size = {
             let (low, high) = merges.size_hint();
             high.unwrap_or(low)
@@ -607,49 +614,49 @@ impl SQLiteDatabase {
             match edit {
                 Edit::Delete => {
                     match column {
-                    ColumnIdentifier::Title => {
-                        sqlx::query!("UPDATE books SET title = null WHERE book_id = ?;", book_id)
-                    }
-                    ColumnIdentifier::Author => sqlx::query!(
+                        ColumnIdentifier::Title => {
+                            sqlx::query!("UPDATE books SET title = null WHERE book_id = ?;", book_id)
+                        }
+                        ColumnIdentifier::Author => sqlx::query!(
                         "DELETE FROM multimap_tags where book_id = ? AND name = 'author';",
                         book_id
                     ),
-                    ColumnIdentifier::ID => {
-                        unreachable!("Updating local cache should have errored before this could be reached.")
-                    }
-                    ColumnIdentifier::Series => sqlx::query!(
+                        ColumnIdentifier::ID => {
+                            unreachable!("Updating local cache should have errored before this could be reached.")
+                        }
+                        ColumnIdentifier::Series => sqlx::query!(
                         "UPDATE books SET series_name = null, series_id = null WHERE book_id = ?;",
                         book_id
                     ),
-                    ColumnIdentifier::Variants => {
-                        unreachable!("Updating local cache should have errored before this could be reached.")
-                    }
-                    ColumnIdentifier::Description => sqlx::query!(
+                        ColumnIdentifier::Variants => {
+                            unreachable!("Updating local cache should have errored before this could be reached.")
+                        }
+                        ColumnIdentifier::Description => sqlx::query!(
                         "UPDATE variants SET description = null WHERE book_id = ?;",
                         book_id
                     ),
-                    ColumnIdentifier::NamedTag(column) => {
+                        ColumnIdentifier::NamedTag(column) => {
                             sqlx::query!(
                             "DELETE FROM named_tags where book_id = ? and name = ?;",
                             book_id,
                             column
                         ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
-                        continue;
-                    },
-                    ColumnIdentifier::ExactTag(tag) => {
-                        sqlx::query!(
+                            continue;
+                        }
+                        ColumnIdentifier::ExactTag(tag) => {
+                            sqlx::query!(
                         "DELETE FROM free_tags where book_id = ? AND value = ?;",
                         book_id,
                         tag
                         ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
-                        continue;
-                    }
-                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => unimplemented!("Deleting multimap tags not supported."),
-                    ColumnIdentifier::Tags => {
-                        sqlx::query!(
+                            continue;
+                        }
+                        ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => unimplemented!("Deleting multimap tags not supported."),
+                        ColumnIdentifier::Tags => {
+                            sqlx::query!(
                             "DELETE FROM free_tags where book_id = ?;", book_id,
                         )
-                    }
+                        }
                     }.execute(&mut tx).await.map_err(DatabaseError::Backend)?;
                 }
                 Edit::Replace(value) => match column {
@@ -669,9 +676,9 @@ impl SQLiteDatabase {
                             value,
                             book_id
                         )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
                     }
                     ColumnIdentifier::Series => {
                         let series = Series::from_str(value).ok();
@@ -737,9 +744,9 @@ impl SQLiteDatabase {
                             value,
                             book_id
                         )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
                     }
                     ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
                         unimplemented!("Replacing multimap tags not supported.")
@@ -762,9 +769,9 @@ impl SQLiteDatabase {
                             value,
                             book_id
                         )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
                     }
                     ColumnIdentifier::Series => {
                         unreachable!("book should reject concatenating to series");
@@ -807,9 +814,9 @@ impl SQLiteDatabase {
                             value,
                             book_id
                         )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
                     }
                     ColumnIdentifier::ExactTag(tag) => {
                         let new_tag = tag.to_owned() + value;
@@ -820,9 +827,9 @@ impl SQLiteDatabase {
                             new_tag,
                             book_id
                         )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
                     }
                     ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
                         unimplemented!("Appending to multimap tags not supported.")
@@ -833,7 +840,7 @@ impl SQLiteDatabase {
         tx.commit().await.map_err(DatabaseError::Backend)
     }
 
-    async fn update_books_async<I: IntoIterator<Item = BookVariant>>(
+    async fn update_books_async<I: Iterator<Item = BookVariant> + Send>(
         &mut self,
         _books: I,
         _transaction_size: usize,
@@ -850,100 +857,89 @@ impl SQLiteDatabase {
 //  DELETE_ALL should clear queue, since everything will be deleted.
 //  DELETE_BOOK_ID should clear anything that overwrites given book, except when
 //  an ordering is enforced in previous command.
+#[async_trait]
 impl AppDatabase for SQLiteDatabase {
     type Error = sqlx::Error;
 
-    fn open<P>(file_path: P) -> Result<Self, DatabaseError<Self::Error>>
+    async fn open<P>(file_path: P) -> Result<Self, DatabaseError<Self::Error>>
     where
-        P: AsRef<Path>,
+        P: AsRef<Path> + Send + Sync,
         Self: Sized,
     {
-        let db_exists = file_path.as_ref().exists();
-        if !db_exists {
-            if let Some(path) = file_path.as_ref().parent() {
-                std::fs::create_dir_all(path)?;
-            }
-        }
-        let database = block_on(async {
-            SqliteConnectOptions::new()
-                .filename(&file_path)
-                .create_if_missing(true)
-                .connect()
-                .await
-        })
-        .map_err(DatabaseError::Backend)?;
-
-        let mut db = Self {
-            backend: database,
-            local_cache: BookCache::default(),
-            path: file_path.as_ref().to_path_buf(),
-        };
-
-        execute_query_str!(db, CREATE_BOOKS)?;
-        execute_query_str!(db, CREATE_FREE_TAGS)?;
-        execute_query_str!(db, CREATE_NAMED_TAGS)?;
-        execute_query_str!(db, CREATE_MULTIMAP_TAGS)?;
-        execute_query_str!(db, CREATE_VARIANTS)?;
-        if db_exists {
-            db.load_books()?;
-        }
-        Ok(db)
+        Self::async_open(file_path).await
     }
 
     fn path(&self) -> &Path {
         self.path.as_path()
     }
 
-    fn save(&mut self) -> Result<(), DatabaseError<Self::Error>> {
+    async fn save(&mut self) -> Result<(), DatabaseError<Self::Error>> {
         Ok(())
     }
 
-    fn insert_book(&mut self, book: BookVariant) -> Result<BookID, DatabaseError<Self::Error>> {
-        block_on(self.insert_book_async(book)).map_err(DatabaseError::Backend)
+    async fn insert_book(
+        &mut self,
+        book: BookVariant,
+    ) -> Result<BookID, DatabaseError<Self::Error>> {
+        self.insert_book_async(book)
+            .await
+            .map_err(DatabaseError::Backend)
     }
 
-    fn insert_books<I: IntoIterator<Item = BookVariant>>(
+    async fn insert_books<I: Iterator<Item = BookVariant> + Send>(
         &mut self,
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
-        block_on(self.insert_books_async(books, 5000)).map_err(DatabaseError::Backend)
+        self.insert_books_async(books, 5000)
+            .await
+            .map_err(DatabaseError::Backend)
     }
 
-    fn remove_book(&mut self, id: BookID) -> Result<(), DatabaseError<Self::Error>> {
+    async fn remove_book(&mut self, id: BookID) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books WHERE book_id = {id}"
         let idx = u64::from(id) as i64;
-        execute_query!(self, "DELETE FROM books WHERE book_id = ?", idx)?;
+        sqlx::query!("DELETE FROM books WHERE book_id = ?", idx)
+            .execute(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
         self.local_cache.remove_book(id);
         Ok(())
     }
 
-    fn remove_books(&mut self, ids: &HashSet<BookID>) -> Result<(), DatabaseError<Self::Error>> {
+    async fn remove_books(
+        &mut self,
+        ids: &HashSet<BookID>,
+    ) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books WHERE book_id IN ({ids})"
         self.local_cache.remove_books(ids);
-        block_on(self.remove_books_async(ids.iter().cloned())).map_err(DatabaseError::Backend)
+        self.remove_books_async(ids.iter().cloned())
+            .await
+            .map_err(DatabaseError::Backend)
     }
 
-    fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
+    async fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books"
         // execute_query!(self, "DELETE FROM extended_tags")?;
         // execute_query!(self, "DELETE FROM variants")?;
         // execute_query!(self, "DELETE FROM books")?;
-        block_on(self.clear_db_async()).map_err(DatabaseError::Backend)?;
+        self.clear_db_async()
+            .await
+            .map_err(DatabaseError::Backend)?;
         self.local_cache.clear();
         Ok(())
     }
 
-    fn get_book(&self, id: BookID) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
+    async fn get_book(&self, id: BookID) -> Result<Book, DatabaseError<Self::Error>> {
         // "SELECT * FROM books WHERE book_id = {id}"
         self.local_cache
             .get_book(id)
             .ok_or(DatabaseError::BookNotFound(id))
     }
 
-    fn get_books<I: IntoIterator<Item = BookID>>(
+    async fn get_books<I: IntoIterator<Item = BookID> + Send>(
         &self,
         ids: I,
-    ) -> Result<Vec<Option<Arc<RwLock<Book>>>>, DatabaseError<Self::Error>> {
+    ) -> Result<Vec<Option<Book>>, DatabaseError<Self::Error>> {
         // SELECT * FROM {} WHERE book_id IN ({}, );
         Ok(ids
             .into_iter()
@@ -951,51 +947,53 @@ impl AppDatabase for SQLiteDatabase {
             .collect())
     }
 
-    fn get_all_books(&self) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
+    async fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM {} ORDER BY {} {};"
         Ok(self.local_cache.get_all_books())
     }
 
-    fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>> {
+    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>> {
         Ok(self.local_cache.has_column(col))
     }
 
-    fn edit_book_with_id(
+    async fn edit_book_with_id(
         &mut self,
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "UPDATE {} SET {} = {} WHERE book_id = {};"
-        block_on(self.edit_book_by_id_async(id, edits))
+        self.edit_book_by_id_async(id, edits).await
     }
 
-    fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
+    async fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
         // SELECT title, book_id FROM books GROUP BY LOWER(title) HAVING COUNT(*) > 1;
         // Then, for authors ??
         let merged = self.local_cache.merge_similar_merge_ids();
-        block_on(self.merge_by_ids(&merged)).map_err(DatabaseError::Backend)?;
+        self.merge_by_ids(&merged)
+            .await
+            .map_err(DatabaseError::Backend)?;
         let to_remove = merged.into_iter().map(|(_, m)| m).collect();
-        self.remove_books(&to_remove)?;
+        self.remove_books(&to_remove).await?;
         Ok(to_remove)
     }
 
-    fn find_matches(
+    async fn find_matches(
         &self,
         searches: &[Search],
-    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
+    ) -> Result<Vec<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM {} WHERE {} REGEXP {};"
         // FIND_MATCHES_* - look at SQLite FTS5.
         Ok(self.local_cache.find_matches(searches)?)
     }
 
-    fn find_book_index(
+    async fn find_book_index(
         &self,
         searches: &[Search],
     ) -> Result<Option<usize>, DatabaseError<Self::Error>> {
         Ok(self.local_cache.find_book_index(searches)?)
     }
 
-    fn sort_books_by_cols(
+    async fn sort_books_by_cols(
         &mut self,
         columns: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<Self::Error>> {
@@ -1003,16 +1001,16 @@ impl AppDatabase for SQLiteDatabase {
         Ok(())
     }
 
-    fn size(&self) -> usize {
+    async fn size(&self) -> usize {
         // "SELECT COUNT(*) FROM books;"
         self.local_cache.len()
     }
 
-    fn saved(&self) -> bool {
+    async fn saved(&self) -> bool {
         true
     }
 
-    fn update<I: IntoIterator<Item = BookVariant>>(
+    async fn update<I: IntoIterator<Item = BookVariant> + Send>(
         &mut self,
         _books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
@@ -1020,28 +1018,30 @@ impl AppDatabase for SQLiteDatabase {
     }
 }
 
+#[async_trait]
 impl IndexableDatabase for SQLiteDatabase {
-    fn get_books_indexed(
+    async fn get_books_indexed<I: RangeBounds<usize> + Send>(
         &self,
-        indices: impl RangeBounds<usize>,
-    ) -> Result<Vec<Arc<RwLock<Book>>>, DatabaseError<Self::Error>> {
+        indices: I,
+    ) -> Result<Vec<Book>, DatabaseError<Self::Error>> {
         // NOTE: The query below would require a paginated search.
         //  Jumping to end is possible with the reverse search pattern,
         //  BUT: for searches, finding all results can be expensive
         // SELECT * FROM books WHERE book_id > last_id ORDER BY {} [} LIMIT {};
+        let size = self.size().await;
         let start = match indices.start_bound() {
             Bound::Included(i) => *i,
             Bound::Excluded(i) => *i + 1,
             Bound::Unbounded => 0,
         }
-        .min(self.size().saturating_sub(1));
+        .min(size.saturating_sub(1));
 
         let end = match indices.end_bound() {
             Bound::Included(i) => *i + 1,
             Bound::Excluded(i) => *i,
             Bound::Unbounded => usize::MAX,
         }
-        .min(self.size());
+        .min(size);
 
         // let offset = start;
         // let len = end.saturating_sub(start);
@@ -1051,17 +1051,17 @@ impl IndexableDatabase for SQLiteDatabase {
             .collect())
     }
 
-    fn get_book_indexed(
-        &self,
-        index: usize,
-    ) -> Result<Arc<RwLock<Book>>, DatabaseError<Self::Error>> {
+    async fn get_book_indexed(&self, index: usize) -> Result<Book, DatabaseError<Self::Error>> {
         // "SELECT * FROM {} ORDER BY {} {} LIMIT 1 OFFSET {};"
         self.local_cache
             .get_book_indexed(index)
             .ok_or(DatabaseError::IndexOutOfBounds(index))
     }
 
-    fn remove_book_indexed(&mut self, index: usize) -> Result<(), DatabaseError<Self::Error>> {
+    async fn remove_book_indexed(
+        &mut self,
+        index: usize,
+    ) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books WHERE book_id > last_id ORDER BY {} {} LIMIT 1"
         // NOTE: remove_book_indexed is for removing a selected book -
         // a book can only be selected if it is already loaded - eg. in cache.
@@ -1071,11 +1071,11 @@ impl IndexableDatabase for SQLiteDatabase {
             .local_cache
             .get_book_indexed(index)
             .ok_or(DatabaseError::IndexOutOfBounds(index))?;
-        let book = book!(book);
-        self.remove_book(book.id())
+        let id = book.id();
+        self.remove_book(id).await
     }
 
-    fn edit_book_indexed(
+    async fn edit_book_indexed(
         &mut self,
         index: usize,
         edits: &[(ColumnIdentifier, Edit)],
@@ -1088,7 +1088,7 @@ impl IndexableDatabase for SQLiteDatabase {
             .local_cache
             .get_book_indexed(index)
             .ok_or(DatabaseError::IndexOutOfBounds(index))?;
-        let book = book!(book);
-        self.edit_book_with_id(book.id(), edits)
+        let id = book.id();
+        self.edit_book_with_id(id, edits).await
     }
 }

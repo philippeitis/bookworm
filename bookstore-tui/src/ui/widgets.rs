@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
 
 use tui::backend::Backend;
 use tui::layout::Rect;
@@ -192,11 +191,11 @@ impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
 pub(crate) struct BookWidget {
     chunk: Rect,
     offset: BlindOffset,
-    book: Arc<RwLock<Book>>,
+    book: Book,
 }
 
 impl BookWidget {
-    pub fn new(chunk: Rect, book: Arc<RwLock<Book>>) -> Self {
+    pub fn new(chunk: Rect, book: Book) -> Self {
         let mut book_widget = BookWidget {
             chunk,
             offset: BlindOffset::new(),
@@ -207,7 +206,7 @@ impl BookWidget {
         book_widget
     }
 
-    pub fn book(&self) -> &Arc<RwLock<Book>> {
+    pub fn book(&self) -> &Book {
         &self.book
     }
 
@@ -227,24 +226,18 @@ impl BookWidget {
         let width = self.chunk.width as usize;
         let field_exists = Style::default().add_modifier(Modifier::BOLD);
         let field_not_provided = Style::default();
-        let book = self
-            .book
-            .as_ref()
-            .read()
-            .expect("Failed to acquire read-only lock on book.");
-        // Can the current directory change? Who knows. Definitely not me.
         let prefix = match std::env::current_dir() {
             Ok(d) => d.canonicalize().ok(),
             Err(_) => None,
         };
 
-        let mut data = if let Some(t) = book.title() {
+        let mut data = if let Some(t) = self.book.title() {
             Text::styled(t.to_string(), field_exists)
         } else {
             Text::styled("No title provided", field_not_provided)
         };
 
-        if let Some(a) = book.authors() {
+        if let Some(a) = self.book.authors() {
             let mut s = String::from("By: ");
             s.push_str(&a.join(", "));
             data.extend(Text::styled(s, field_exists));
@@ -252,13 +245,13 @@ impl BookWidget {
             data.extend(Text::styled("No author provided", field_not_provided));
         }
 
-        if let Some(d) = book.description() {
+        if let Some(d) = self.book.description() {
             data.extend(Text::styled("\n", field_exists));
             // TODO: Make this look nice in the TUI.
             data.extend(Text::raw(html2text::from_read(d.as_bytes(), width)));
         }
 
-        let columns = book.tags();
+        let columns = self.book.tags();
         if !columns.is_empty() {
             data.extend(Text::raw("\nNamed tags provided:"));
             for (key, value) in columns.iter() {
@@ -269,7 +262,7 @@ impl BookWidget {
             }
         }
 
-        let free_tags = book.free_tags();
+        let free_tags = self.book.free_tags();
         if !free_tags.is_empty() {
             data.extend(Text::raw("\nTags provided:"));
             for value in free_tags.iter() {
@@ -277,7 +270,7 @@ impl BookWidget {
             }
         }
 
-        let variants = book.variants();
+        let variants = self.book.variants();
         if !variants.is_empty() {
             data.extend(Text::raw("\nVariant paths:"));
             for variant in variants {

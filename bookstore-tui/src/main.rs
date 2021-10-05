@@ -3,6 +3,7 @@ mod ui;
 use std::env;
 use std::io::stdout;
 use std::path::PathBuf;
+use std::process::exit;
 use std::time::Duration;
 
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
@@ -30,7 +31,8 @@ struct Opts {
     database: Option<PathBuf>,
 }
 
-fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
     let (opts, commands) = {
         let args: Vec<_> = env::args().collect();
         if args.is_empty() {
@@ -66,11 +68,11 @@ fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
         app_settings.database_settings.path = path;
     }
 
-    let db = SQLiteDatabase::open(&app_settings.database_settings.path)?;
+    let db = SQLiteDatabase::open(&app_settings.database_settings.path).await?;
 
     let mut app = App::new(db, app_settings.sort_settings);
     let mut placeholder_table_view = TableView::default();
-    let mut book_view = app.new_book_view();
+    let mut book_view = app.new_book_view().await;
     if !commands.is_empty() {
         for command in commands.split(|v| v == "--") {
             if let Ok(command) = parse_args(command.to_owned()) {
@@ -81,7 +83,10 @@ fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
                     );
                     return Ok(());
                 }
-                if !app.run_command(command, &mut placeholder_table_view, &mut book_view)? {
+                if !app
+                    .run_command(command, &mut placeholder_table_view, &mut book_view)
+                    .await?
+                {
                     return Ok(());
                 }
                 if app.has_help_string() {
@@ -92,14 +97,15 @@ fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
     }
 
     // Goes before due to lifetime issues.
-    let stdout = stdout();
+    let stdout_ = stdout();
 
     let mut app = AppInterface::new(
         "Really Cool Library",
         interface_settings,
         settings_path,
         app,
-    );
+    )
+    .await;
 
     let s = app.create_sender();
     std::thread::spawn(move || loop {
@@ -108,44 +114,57 @@ fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
         }
     });
 
-    let backend = CrosstermBackend::new(&stdout);
+    let backend = CrosstermBackend::new(&stdout_);
     let mut terminal = Terminal::new(backend)?;
     crossterm::terminal::enable_raw_mode()?;
     execute!(
-        &stdout,
+        &stdout_,
         EnterAlternateScreen,
         EnableMouseCapture,
         cursor::Hide
     )?;
+    let default_panic = std::panic::take_hook();
 
-    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.run(&mut terminal)));
+    std::panic::set_hook(Box::new(move |info| {
+        let stdout_ = stdout();
+        let _ = execute!(
+            &stdout_,
+            cursor::Show,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
+        default_panic(info);
+        exit(1)
+    }));
+
+    let r = app.run(&mut terminal).await;
     execute!(
-        &stdout,
+        &stdout_,
         cursor::Show,
         DisableMouseCapture,
         LeaveAlternateScreen
     )?;
     crossterm::terminal::disable_raw_mode()?;
-
-    match r {
-        Ok(res) => res,
-        Err(e) => match e.downcast_ref::<&'static str>() {
-            Some(s) => {
-                println!("Error occurred during execution: {}", s);
-                Ok(())
-            }
-            None => match e.downcast_ref::<String>() {
-                Some(s) => {
-                    println!("Error occurred during execution: {}", s);
-                    Ok(())
-                }
-                None => {
-                    println!("Unknown error occurred during execution.");
-                    Ok(())
-                }
-            },
-        },
-    }
+    r
+    // match r {
+    //     Ok(res) => res,
+    //     Err(e) => match e.downcast_ref::<&'static str>() {
+    //         Some(s) => {
+    //             println!("Error occurred during execution: {}", s);
+    //             Ok(())
+    //         }
+    //         None => match e.downcast_ref::<String>() {
+    //             Some(s) => {
+    //                 println!("Error occurred during execution: {}", s);
+    //                 Ok(())
+    //             }
+    //             None => {
+    //                 println!("Unknown error occurred during execution.");
+    //                 Ok(())
+    //             }
+    //         },
+    //     },
+    // }
 }
 
 // TODO:

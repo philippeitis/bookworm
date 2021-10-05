@@ -6,15 +6,6 @@ use bookstore_database::bookview::BookViewError;
 use bookstore_database::{BookView, IndexableDatabase};
 use bookstore_records::book::ColumnIdentifier;
 
-macro_rules! book {
-    ($book: ident) => {
-        $book
-            .as_ref()
-            .read()
-            .expect("Failed to acquire read-only lock on book.")
-    };
-}
-
 /// TableView acts as a way to avoid errors in the rendering step - by pre-loading all
 /// data before entering the rendering step, the rendering step itself can avoid
 /// BookView::get_books_cursored()'s Result.
@@ -27,7 +18,7 @@ pub struct TableView {
 impl TableView {
     /// Refreshes the table data according to the currently selected columns and the books
     /// in the BookView's cursor.
-    pub fn regenerate_columns<D: IndexableDatabase, S: BookView<D>>(
+    pub async fn regenerate_columns<D: IndexableDatabase + Send + Sync, S: BookView<D>>(
         &mut self,
         bv: &S,
     ) -> Result<(), BookViewError<D::Error>> {
@@ -46,7 +37,7 @@ impl TableView {
             .map(|col| ColumnIdentifier::from(col.as_str()))
             .collect::<Vec<_>>();
 
-        for book in bv.get_books_cursored()?.iter().map(|b| book!(b)) {
+        for book in bv.get_books_cursored().await?.iter() {
             for (col, column) in cols.iter().zip(self.column_data.iter_mut()) {
                 column.push(match book.get_column(&col) {
                     None => String::new(),
