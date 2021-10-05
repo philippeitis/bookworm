@@ -19,6 +19,7 @@ pub enum Direction {
     Down,
 }
 
+/// A Selection contains absolute indices.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
     Single(usize),
@@ -215,8 +216,7 @@ impl PageCursorMultiple {
         }
     }
 
-    /// Selects the value at the index inside the window. If index is greater than the window size or data len,
-    /// selects the largest index that is still visible.
+    /// Removes any selection.
     pub(crate) fn deselect(&mut self) -> bool {
         self.assert_invariants();
         std::mem::take(&mut self.selected).is_some()
@@ -224,10 +224,10 @@ impl PageCursorMultiple {
 
     /// Selects the value at index, and adjusts the window so that the value is visible.
     pub(crate) fn select_index_and_make_visible(&mut self, index: usize) -> bool {
+        log(format!("Called select_index_and_make_visible with {}.", index));
         self.assert_invariants();
         if self.height == 0 {
-            self.selected = None;
-            return true;
+            return std::mem::take(&mut self.selected).is_some();
         }
 
         assert!(
@@ -235,12 +235,23 @@ impl PageCursorMultiple {
             "Attempted to select index that does not exist."
         );
         let top_index = if index < self.window.size {
+            log(format!("hit index < self.window.size case ({} < {}).", index, self.window.size));
             0
         } else if index + self.window.size > self.height {
+            log(format!("hit index + self.window.size > self.height case ({} + {} > {}).", index, self.window.size, self.height));
             self.height - self.window.size
+        } else if index >= self.window.top_index && index < self.window.top_index + self.window.size {
+            log(format!("hit index >= self.window.top_index && index < self.window.top_index + self.window.size case ({} >= {} && {} < {} + {}).",
+                        index, self.window.top_index, index, self.window.top_index, self.window.size, ));
+            return self.selected.replace_and_equal(Some(Selection::Single(index)));
         } else {
-            self.selected = Some(Selection::Single(index));
-            return true;
+            log(
+                format!(
+                    "default case: index = {}, top_index = {}, size = {}",
+                    index, self.window.top_index, self.window.size
+                )
+            );
+            index
         };
         self.selected = Some(Selection::Single(index));
         self.window.top_index = top_index;
@@ -291,6 +302,10 @@ impl PageCursorMultiple {
 
                 // if selection > min, move down by one.
                 // Else, window moves down.
+
+                if s < self.window.top_index || s >= self.window.top_index + self.window.size {
+                    return self.select_index_and_make_visible(s);
+                }
 
                 if s + 1 >= self.height {
                     return false;
@@ -422,13 +437,15 @@ impl PageCursorMultiple {
                 *x = Some(Selection::Single(self.window.top_index));
                 true
             }
-            Some(Selection::Single(0)) => false,
-            Some(Selection::Single(s)) => {
-                if *s > self.window.top_index {
-                    *s -= 1;
+            x @ Some(Selection::Single(_)) => {
+                let s = x.unwrap_single();
+                if s < self.window.top_index || s >= self.window.top_index + self.window.size {
+                    return self.select_index_and_make_visible(s);
+                } else if s > self.window.top_index {
+                    *x = Some(Selection::Single(s - 1));
                     true
                 } else if self.window.top_index > 0 {
-                    *s -= 1;
+                    *x = Some(Selection::Single(s - 1));
                     self.window.top_index -= 1;
                     true
                 } else {
@@ -450,7 +467,7 @@ impl PageCursorMultiple {
 
     fn assert_invariants(&self) {
         // Can not select if nothing exists.
-        debug_assert!(
+        assert!(
             if self.height == 0 {
                 self.selected.is_none()
             } else {
@@ -459,7 +476,7 @@ impl PageCursorMultiple {
             "Selection with height = 0."
         );
         // Can not select values outside of bounds.
-        debug_assert!(
+        assert!(
             match &self.selected {
                 None => true,
                 Some(Selection::Single(x)) => {
@@ -479,7 +496,7 @@ impl PageCursorMultiple {
             "Selection out of bounds."
         );
         // Can not have top index higher than window height, unless window height is 0.
-        debug_assert!(
+        assert!(
             if self.window.top_index >= self.window.height {
                 self.window.top_index == 0
             } else {
@@ -490,7 +507,7 @@ impl PageCursorMultiple {
             self.window.height
         );
         // Can't scroll past end - unless there aren't enough items to fill screen.
-        debug_assert!(
+        assert!(
             if self.window.top_index + self.window.size > self.window.height {
                 self.window.top_index == 0
             } else {
