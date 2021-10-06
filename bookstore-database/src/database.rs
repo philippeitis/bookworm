@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::ops::RangeBounds;
 use std::path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use unicase::UniCase;
@@ -121,7 +122,7 @@ pub trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails or no book is found
     /// with the given ID.
-    async fn get_book(&self, id: BookID) -> Result<Book, DatabaseError<Self::Error>>;
+    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>>;
 
     /// Finds and returns all books with the given IDs. If a book with a given ID does not exist,
     /// None is returned for that particular ID.
@@ -134,14 +135,14 @@ pub trait AppDatabase {
     async fn get_books<I: Iterator<Item = BookID> + Send>(
         &self,
         ids: I,
-    ) -> Result<Vec<Option<Book>>, DatabaseError<Self::Error>>;
+    ) -> Result<Vec<Option<Arc<Book>>>, DatabaseError<Self::Error>>;
 
     /// Returns a reference to every book in the database. If a database error occurs while reading,
     /// the error is returned.
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    async fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError<Self::Error>>;
+    async fn get_all_books(&self) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
 
     /// Returns whether the provided column exists in at least one book in the database.
     ///
@@ -186,7 +187,7 @@ pub trait AppDatabase {
     async fn find_matches(
         &self,
         searches: &[Search],
-    ) -> Result<Vec<Book>, DatabaseError<Self::Error>>;
+    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
 
     /// Finds the first book to match all criteria specified by searches.
     ///
@@ -239,7 +240,7 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     async fn get_books_indexed<I: RangeBounds<usize> + Send>(
         &self,
         indices: I,
-    ) -> Result<Vec<Book>, DatabaseError<Self::Error>>;
+    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
 
     /// Get the book at the current index, respecting the current ordering.
     ///
@@ -249,7 +250,8 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     /// # Errors
     /// This function will return an error if reading the database fails or the given index does not
     /// exist.
-    async fn get_book_indexed(&self, index: usize) -> Result<Book, DatabaseError<Self::Error>>;
+    async fn get_book_indexed(&self, index: usize)
+        -> Result<Arc<Book>, DatabaseError<Self::Error>>;
 
     /// Remove the book at the current index, respecting the current ordering.
     ///

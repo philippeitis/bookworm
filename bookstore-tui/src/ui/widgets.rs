@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tui::backend::Backend;
 use tui::layout::Rect;
@@ -188,14 +189,18 @@ impl<'a, B: Backend> Widget<B> for CommandWidget<'a> {
         f.render_widget(command_widget, chunk);
     }
 }
+
+/// Contains information needed to render a book.
+/// Only guaranteed to reflect the current state of the book if no
+/// EditCommand occurs - should be regenerated during the prepare_render call
 pub(crate) struct BookWidget {
     chunk: Rect,
     offset: BlindOffset,
-    book: Book,
+    book: Arc<Book>,
 }
 
 impl BookWidget {
-    pub fn new(chunk: Rect, book: Book) -> Self {
+    pub fn new(chunk: Rect, book: Arc<Book>) -> Self {
         let mut book_widget = BookWidget {
             chunk,
             offset: BlindOffset::new(),
@@ -204,10 +209,6 @@ impl BookWidget {
         let height = chunk.height as usize;
         book_widget.offset.refresh_window_height(height as usize);
         book_widget
-    }
-
-    pub fn book(&self) -> &Book {
-        &self.book
     }
 
     pub fn set_chunk(&mut self, chunk: Rect) {

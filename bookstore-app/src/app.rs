@@ -279,7 +279,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     async fn get_book(
         b: BookIndex,
         bv: &SearchableBookView<D>,
-    ) -> Result<Vec<Book>, ApplicationError<D::Error>> {
+    ) -> Result<Vec<Arc<Book>>, ApplicationError<D::Error>> {
         match b {
             BookIndex::Selected => Ok(bv.get_selected_books().await?),
             BookIndex::ID(id) => Ok(vec![bv.get_book(id).await?]),
@@ -357,7 +357,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
                 self.remove_selected_books(book_view).await?;
             }
             Command::DeleteMatching(matches) => {
-                let targets = async_write!(self, db, db.find_matches(&matches).await)?;
+                let targets = self.db.read().await.find_matches(&matches).await?;
                 let ids = targets.into_iter().map(|target| target.id()).collect();
 
                 book_view.remove_books(&ids);

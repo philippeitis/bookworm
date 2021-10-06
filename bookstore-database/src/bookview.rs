@@ -63,14 +63,14 @@ impl<DBError> From<RecordError> for BookViewError<DBError> {
 pub trait BookView<D: AppDatabase + Send + Sync> {
     async fn new(db: Arc<RwLock<D>>) -> Self;
 
-    async fn get_books_cursored(&self) -> Result<Vec<Book>, BookViewError<D::Error>>;
+    async fn get_books_cursored(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>>;
 
     async fn sort_by_columns(
         &mut self,
         cols: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>>;
 
-    async fn get_book(&self, id: BookID) -> Result<Book, DatabaseError<D::Error>>;
+    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<D::Error>>;
 
     /// Removes the specified book from the upper scopes. Note that this does not affect the root
     /// scope, which depends on the database, and must be refreshed with a call to `refresh_db_size()`.
@@ -81,7 +81,7 @@ pub trait BookView<D: AppDatabase + Send + Sync> {
     /// scope, which depends on the database, and must be refreshed with a call to `refresh_db_size()`
     fn remove_books(&mut self, ids: &HashSet<BookID>);
 
-    async fn get_selected_books(&self) -> Result<Vec<Book>, BookViewError<D::Error>>;
+    async fn get_selected_books(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>>;
 
     /// Removes the books selected in the last scope, except if the last scope is the database, in
     /// which case, the user must delete the books from the database and manually refresh the root
@@ -152,7 +152,7 @@ pub trait NestedBookView<D: AppDatabase + Send + Sync>: BookView<D> {
 }
 
 pub struct SearchableBookView<D: AppDatabase> {
-    scopes: Vec<(PageCursorMultiple, IndexMap<BookID, Book>)>,
+    scopes: Vec<(PageCursorMultiple, IndexMap<BookID, Arc<Book>>)>,
     // The "root" scope.
     root_cursor: PageCursorMultiple,
     db: Arc<RwLock<D>>,
@@ -178,7 +178,7 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    async fn get_books_cursored(&self) -> Result<Vec<Book>, BookViewError<D::Error>> {
+    async fn get_books_cursored(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>> {
         match self.scopes.last() {
             None => Ok(self
                 .db
@@ -205,7 +205,7 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         Ok(())
     }
 
-    async fn get_book(&self, id: BookID) -> Result<Book, DatabaseError<D::Error>> {
+    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<D::Error>> {
         self.db.read().await.get_book(id).await
     }
 
@@ -245,7 +245,7 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    async fn get_selected_books(&self) -> Result<Vec<Book>, BookViewError<D::Error>> {
+    async fn get_selected_books(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>> {
         match self.scopes.last() {
             None => match self.root_cursor.selected() {
                 None => Err(BookViewError::NoBookSelected),

@@ -234,16 +234,8 @@ pub(crate) struct ColumnWidget<D> {
 
 impl<D: IndexableDatabase + Send + Sync> ColumnWidget<D> {
     async fn refresh_book_widget(&mut self, state: &UIState<D>) {
-        let book = state.book_view.get_selected_books().await.ok();
-        let should_change = match (&book, &self.book_widget) {
-            (Some(_), None) => true,
-            (None, Some(_)) => true,
-            (Some(b), Some(bw)) => b[0].id() != bw.book().id(),
-            (None, None) => false,
-        };
-        if should_change {
-            self.book_widget = book.map(|book| BookWidget::new(Rect::default(), book[0].clone()));
-        };
+        let books = state.book_view.get_selected_books().await.ok();
+        self.book_widget = books.map(|book| BookWidget::new(Rect::default(), book[0].clone()));
     }
 
     fn scroll_up(&mut self, state: &mut UIState<D>) {

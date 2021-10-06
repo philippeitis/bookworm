@@ -10,6 +10,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -342,7 +343,7 @@ impl SQLiteDatabase {
         }
 
         self.local_cache = BookCache::from_values_unchecked(
-            books.into_iter().map(|(a, b)| (a, b)).collect(),
+            books.into_iter().map(|(a, b)| (a, Arc::new(b))).collect(),
             prime_cols.into_iter().map(UniCase::new).collect(),
         );
         Ok(())
@@ -500,7 +501,7 @@ impl SQLiteDatabase {
                 let id = BookID::try_from(id as u64)
                     .expect("SQLite database should never return NULL ID from primary key.");
                 self.local_cache
-                    .insert_book(Book::from_variant(id, variant));
+                    .insert_book(Arc::new(Book::from_variant(id, variant)));
 
                 ids.push(id);
             }
@@ -929,7 +930,7 @@ impl AppDatabase for SQLiteDatabase {
         Ok(())
     }
 
-    async fn get_book(&self, id: BookID) -> Result<Book, DatabaseError<Self::Error>> {
+    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM books WHERE book_id = {id}"
         self.local_cache
             .get_book(id)
@@ -939,7 +940,7 @@ impl AppDatabase for SQLiteDatabase {
     async fn get_books<I: IntoIterator<Item = BookID> + Send>(
         &self,
         ids: I,
-    ) -> Result<Vec<Option<Book>>, DatabaseError<Self::Error>> {
+    ) -> Result<Vec<Option<Arc<Book>>>, DatabaseError<Self::Error>> {
         // SELECT * FROM {} WHERE book_id IN ({}, );
         Ok(ids
             .into_iter()
@@ -947,7 +948,7 @@ impl AppDatabase for SQLiteDatabase {
             .collect())
     }
 
-    async fn get_all_books(&self) -> Result<Vec<Book>, DatabaseError<Self::Error>> {
+    async fn get_all_books(&self) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
         // "SELECT * FROM {} ORDER BY {} {};"
         Ok(self.local_cache.get_all_books())
     }
@@ -980,7 +981,7 @@ impl AppDatabase for SQLiteDatabase {
     async fn find_matches(
         &self,
         searches: &[Search],
-    ) -> Result<Vec<Book>, DatabaseError<Self::Error>> {
+    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
         // "SELECT * FROM {} WHERE {} REGEXP {};"
         // FIND_MATCHES_* - look at SQLite FTS5.
         Ok(self.local_cache.find_matches(searches)?)
@@ -1023,7 +1024,7 @@ impl IndexableDatabase for SQLiteDatabase {
     async fn get_books_indexed<I: RangeBounds<usize> + Send>(
         &self,
         indices: I,
-    ) -> Result<Vec<Book>, DatabaseError<Self::Error>> {
+    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
         // NOTE: The query below would require a paginated search.
         //  Jumping to end is possible with the reverse search pattern,
         //  BUT: for searches, finding all results can be expensive
@@ -1051,7 +1052,10 @@ impl IndexableDatabase for SQLiteDatabase {
             .collect())
     }
 
-    async fn get_book_indexed(&self, index: usize) -> Result<Book, DatabaseError<Self::Error>> {
+    async fn get_book_indexed(
+        &self,
+        index: usize,
+    ) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM {} ORDER BY {} {} LIMIT 1 OFFSET {};"
         self.local_cache
             .get_book_indexed(index)

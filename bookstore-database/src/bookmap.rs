@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use indexmap::map::IndexMap;
 #[cfg(feature = "serde")]
@@ -16,7 +17,7 @@ use crate::search::{Error, Search};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct BookCache {
-    books: IndexMap<BookID, Book>,
+    books: IndexMap<BookID, Arc<Book>>,
     cols: HashSet<UniCase<String>>,
 }
 
@@ -36,13 +37,13 @@ impl Default for BookCache {
 impl BookCache {
     #[allow(dead_code)]
     pub(crate) fn from_values_unchecked(
-        books: IndexMap<BookID, Book>,
+        books: IndexMap<BookID, Arc<Book>>,
         cols: HashSet<UniCase<String>>,
     ) -> Self {
         BookCache { books, cols }
     }
 
-    pub(crate) fn insert_book(&mut self, book: Book) {
+    pub(crate) fn insert_book(&mut self, book: Arc<Book>) {
         self.books.insert(book.id(), book);
     }
 
@@ -66,15 +67,15 @@ impl BookCache {
         self.books.clear();
     }
 
-    pub fn get_book(&self, id: BookID) -> Option<Book> {
+    pub fn get_book(&self, id: BookID) -> Option<Arc<Book>> {
         self.books.get(&id).cloned()
     }
 
-    pub fn get_book_indexed(&self, index: usize) -> Option<Book> {
+    pub fn get_book_indexed(&self, index: usize) -> Option<Arc<Book>> {
         self.books.get_index(index).map(|(_, book)| book.clone())
     }
 
-    pub fn get_all_books(&self) -> Vec<Book> {
+    pub fn get_all_books(&self) -> Vec<Arc<Book>> {
         self.books.values().cloned().collect()
     }
 
@@ -87,7 +88,7 @@ impl BookCache {
             None => Ok(false),
             Some(book) => {
                 for (column, edit) in edits {
-                    book.edit_column(&column, edit)?;
+                    Arc::make_mut(book).edit_column(&column, edit)?;
                     match column {
                         ColumnIdentifier::NamedTag(x) => {
                             self.cols.insert(UniCase::new(x.to_owned()));
@@ -109,7 +110,7 @@ impl BookCache {
             None => Ok(false),
             Some((_, book)) => {
                 for (column, edit) in edits {
-                    book.edit_column(&column, edit)?;
+                    Arc::make_mut(book).edit_column(&column, edit)?;
                     match column {
                         ColumnIdentifier::NamedTag(x) => {
                             self.cols.insert(UniCase::new(x.to_owned()));
@@ -143,16 +144,16 @@ impl BookCache {
             }
         }
 
-        let placeholder = Book::placeholder();
+        let placeholder = Arc::new(Book::placeholder());
         for (b1, b2_id) in merges.iter() {
-            // Dummy allows for O(n) time book removal while maintaining sort
+            // Placeholder allows for O(n) time book removal while maintaining sort
             // and getting owned copy of book.
             let b2 = self.books.insert(*b2_id, placeholder.clone());
             // b1, b2 always exist: ref_map only stores b1, and any given b2 can only merge into
             // a b1, and never a b2, and a b1 never merges into b2, since b1 comes first.
             if let Some(b1) = self.books.get_mut(b1) {
                 if let Some(b2) = b2 {
-                    b1.merge_mut(&b2);
+                    Arc::make_mut(b1).merge_mut(&b2);
                 }
             }
         }
@@ -160,7 +161,7 @@ impl BookCache {
         merges
     }
 
-    pub fn find_matches(&self, searches: &[Search]) -> Result<Vec<Book>, Error> {
+    pub fn find_matches(&self, searches: &[Search]) -> Result<Vec<Arc<Book>>, Error> {
         let mut results: Vec<_> = self.books.values().cloned().collect();
         for search in searches {
             let matcher = search.clone().into_matcher()?;
