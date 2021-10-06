@@ -562,26 +562,6 @@ impl PageCursorMultiple {
             },
             "Selection with height = 0."
         );
-        // Can not select values outside of bounds.
-        assert!(
-            match &self.selected {
-                None => true,
-                Some(Selection::Single(x)) => {
-                    *x < self.height
-                }
-                Some(Selection::Range(start, end, _)) => {
-                    *start < *end && *end <= self.height
-                }
-                Some(Selection::Multi(tree, _)) => {
-                    if let Some(s) = tree.iter().last() {
-                        *s < self.height
-                    } else {
-                        false
-                    }
-                }
-            },
-            "Selection out of bounds."
-        );
         // Can not have top index higher than window height, unless window height is 0.
         assert!(
             if self.window.top_index >= self.window.height {

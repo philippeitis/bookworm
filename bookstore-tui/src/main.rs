@@ -124,7 +124,6 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
         cursor::Hide
     )?;
     let default_panic = std::panic::take_hook();
-
     std::panic::set_hook(Box::new(move |info| {
         let stdout_ = stdout();
         let _ = execute!(
@@ -133,6 +132,7 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
             DisableMouseCapture,
             LeaveAlternateScreen
         );
+        let _ = crossterm::terminal::disable_raw_mode();
         default_panic(info);
         exit(1)
     }));
