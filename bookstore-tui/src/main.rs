@@ -182,3 +182,5 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
 //  Pop-up notifications
 //  Documentation
 //  Testing
+//  Provide peeking access to text widgets
+//  Make text widgets
