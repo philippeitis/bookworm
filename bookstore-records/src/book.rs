@@ -150,7 +150,7 @@ impl Book {
     /// to include `other` variants.
     ///
     /// # Arguments
-    /// * ` other ` - Another book with more useful metadata, to be merged with self
+    /// * ` other ` - Another book with additional metadata, to be merged with self
     pub fn merge_mut(&mut self, other: &Self) {
         if self.title.is_none() {
             self.title = other.title.clone();

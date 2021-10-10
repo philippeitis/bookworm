@@ -4,12 +4,11 @@ use std::env;
 use std::io::stdout;
 use std::path::PathBuf;
 use std::process::exit;
-use std::time::Duration;
-
-use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::{cursor, event::DisableMouseCapture, event::EnableMouseCapture, execute};
 
 use clap::Clap;
+use crossterm::event::EventStream;
+use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::{cursor, event::DisableMouseCapture, event::EnableMouseCapture, execute};
 
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
@@ -19,7 +18,6 @@ use bookstore_app::{parse_args, App, Settings};
 use bookstore_database::AppDatabase;
 use bookstore_database::SQLiteDatabase;
 
-use crate::ui::terminal_ui::AppEvent;
 use crate::ui::{AppInterface, TuiError};
 
 #[derive(Clap)]
@@ -70,7 +68,7 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
 
     let db = SQLiteDatabase::open(&app_settings.database_settings.path).await?;
 
-    let mut app = App::new(db, app_settings.sort_settings);
+    let (mut app, receiver) = App::new(db, app_settings.sort_settings);
     let mut placeholder_table_view = TableView::default();
     let mut book_view = app.new_book_view().await;
     if !commands.is_empty() {
@@ -99,20 +97,18 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
     // Goes before due to lifetime issues.
     let stdout_ = stdout();
 
+    tokio::spawn(async move {
+        let _ = app.event_loop().await;
+    });
+
     let mut app = AppInterface::new(
         "Really Cool Library",
         interface_settings,
         settings_path,
-        app,
+        receiver,
+        EventStream::new(),
     )
     .await;
-
-    let s = app.create_sender();
-    std::thread::spawn(move || loop {
-        if let Ok(true) = crossterm::event::poll(Duration::from_millis(500)) {
-            let _ = s.send(AppEvent::UserInput(crossterm::event::read().unwrap()));
-        }
-    });
 
     let backend = CrosstermBackend::new(&stdout_);
     let mut terminal = Terminal::new(backend)?;

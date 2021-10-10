@@ -1,12 +1,14 @@
 use std::borrow::BorrowMut;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Command as ProcessCommand;
 use std::sync::Arc;
 
 use glob::PatternError;
 use rayon::prelude::*;
-use tokio::sync::RwLock as TokioRwLock;
+
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::RwLock;
 use unicase::UniCase;
 
 use bookstore_database::{
@@ -238,21 +240,153 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-pub struct App<D: AppDatabase> {
-    db: Arc<TokioRwLock<D>>,
+pub enum AppTask<D: IndexableDatabase> {
+    ApplySort(SearchableBookView<D>),
+    RunCommand(parser::Command, TableView, SearchableBookView<D>),
+    Save,
+    IsSaved,
+    GetDbPath,
+    GetSortSettings,
+    TakeUpdate,
+    TakeHelpInformation,
+    GetBookView,
+}
+
+pub enum AppResponse<D: IndexableDatabase> {
+    Sorted(Result<SearchableBookView<D>, ApplicationError<D::Error>>),
+    IsSaved(bool),
+    HelpInformation(Option<String>),
+    Updated(bool),
+    DbPath(PathBuf),
+    SortSettings(SortSettings),
+    CommandResult(Result<(bool, TableView, SearchableBookView<D>), ApplicationError<D::Error>>),
+    BookView(SearchableBookView<D>),
+}
+
+pub struct App<D: IndexableDatabase> {
+    db: Arc<RwLock<D>>,
     active_help_string: Option<&'static str>,
     sort_settings: SortSettings,
     updated: bool,
+    event_receiver: Receiver<AppTask<D>>,
+    result_sender: Sender<AppResponse<D>>,
+}
+
+pub struct AppChannel<D: IndexableDatabase> {
+    sender: Sender<AppTask<D>>,
+    receiver: Arc<RwLock<Receiver<AppResponse<D>>>>,
+}
+
+impl<D: IndexableDatabase> AppChannel<D> {
+    pub async fn send(&self, app_task: AppTask<D>) -> bool {
+        self.sender.send(app_task).await.is_ok()
+    }
+
+    pub async fn receive(&self) -> Option<AppResponse<D>> {
+        self.receiver.as_ref().write().await.recv().await
+    }
+
+    pub async fn apply_sort(
+        &self,
+        book_view: SearchableBookView<D>,
+    ) -> Result<SearchableBookView<D>, ApplicationError<D::Error>> {
+        self.send(AppTask::ApplySort(book_view)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Sorted(result) => result,
+            _ => panic!("Expected sorted response from application"),
+        }
+    }
+
+    pub async fn take_update(&self) -> bool {
+        self.send(AppTask::TakeUpdate).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Updated(result) => result,
+            _ => panic!("Expected IsSaved response from application"),
+        }
+    }
+
+    pub async fn saved(&self) -> bool {
+        self.send(AppTask::IsSaved).await;
+        match self.receive().await.unwrap() {
+            AppResponse::IsSaved(result) => result,
+            _ => panic!("Expected IsSaved response from application"),
+        }
+    }
+
+    pub async fn save(&self) -> bool {
+        self.send(AppTask::Save).await;
+        match self.receive().await.unwrap() {
+            AppResponse::IsSaved(result) => result,
+            _ => panic!("Expected IsSaved response from application"),
+        }
+    }
+
+    pub async fn db_path(&self) -> PathBuf {
+        self.send(AppTask::GetDbPath).await;
+        match self.receive().await.unwrap() {
+            AppResponse::DbPath(result) => result,
+            _ => panic!("Expected GetDbPath response from application"),
+        }
+    }
+
+    pub async fn sort_settings(&self) -> SortSettings {
+        self.send(AppTask::GetSortSettings).await;
+        match self.receive().await.unwrap() {
+            AppResponse::SortSettings(result) => result,
+            _ => panic!("Expected GetSortSettings response from application"),
+        }
+    }
+
+    pub async fn run_command(
+        &self,
+        command: Command,
+        table_view: TableView,
+        book_view: SearchableBookView<D>,
+    ) -> Result<(bool, TableView, SearchableBookView<D>), ApplicationError<D::Error>> {
+        self.send(AppTask::RunCommand(command, table_view, book_view))
+            .await;
+        match self.receive().await.unwrap() {
+            AppResponse::CommandResult(result) => result,
+            _ => panic!("Expected CommandResult response from application"),
+        }
+    }
+
+    pub async fn take_help_string(&self) -> Option<String> {
+        self.send(AppTask::TakeHelpInformation).await;
+        match self.receive().await.unwrap() {
+            AppResponse::HelpInformation(result) => result,
+            _ => panic!("Expected HelpInformation response from application"),
+        }
+    }
+
+    pub async fn new_book_view(&self) -> SearchableBookView<D> {
+        self.send(AppTask::GetBookView).await;
+        match self.receive().await.unwrap() {
+            AppResponse::BookView(result) => result,
+            _ => panic!("Expected BookView response from application"),
+        }
+    }
 }
 
 impl<D: IndexableDatabase + Send + Sync> App<D> {
-    pub fn new(db: D, sort_settings: SortSettings) -> Self {
-        App {
-            db: Arc::new(TokioRwLock::new(db)),
-            sort_settings,
-            updated: true,
-            active_help_string: None,
-        }
+    pub fn new(db: D, sort_settings: SortSettings) -> (Self, AppChannel<D>) {
+        let (event_sender, event_receiver) = tokio::sync::mpsc::channel(100);
+        let (result_sender, result_receiver) = tokio::sync::mpsc::channel(100);
+
+        (
+            App {
+                db: Arc::new(RwLock::new(db)),
+                sort_settings,
+                updated: true,
+                event_receiver,
+                active_help_string: None,
+                result_sender,
+            },
+            AppChannel {
+                sender: event_sender,
+                receiver: Arc::new(RwLock::new(result_receiver)),
+            },
+        )
     }
 
     pub async fn db_path(&self) -> std::path::PathBuf {
@@ -291,7 +425,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     ///
     /// # Errors
     /// If no book is selected, or if editing the book fails, an error will be returned.
-    pub async fn edit_selected_book(
+    async fn edit_selected_book(
         &mut self,
         edits: &[(ColumnIdentifier, Edit)],
         book_view: &mut SearchableBookView<D>,
@@ -302,7 +436,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         Ok(())
     }
 
-    pub async fn edit_book_with_id(
+    async fn edit_book_with_id(
         &mut self,
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
@@ -314,7 +448,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         ))
     }
 
-    pub async fn remove_selected_books(
+    async fn remove_selected_books(
         &mut self,
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
@@ -329,7 +463,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         Ok(())
     }
 
-    pub async fn remove_book(
+    async fn remove_book(
         &mut self,
         id: BookID,
         book_view: &mut SearchableBookView<D>,
@@ -488,7 +622,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     ///
     /// # Errors
     /// If saving the database fails, an error will be returned.
-    pub async fn save(&mut self) -> Result<(), DatabaseError<D::Error>> {
+    async fn save(&mut self) -> Result<(), DatabaseError<D::Error>> {
         async_write!(self, db, db.save().await)
     }
 
@@ -504,7 +638,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     }
 
     // used in AppInterface::run
-    pub async fn apply_sort(
+    async fn apply_sort(
         &mut self,
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), DatabaseError<D::Error>> {
@@ -523,15 +657,44 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         Ok(())
     }
 
+    pub async fn event_loop(&mut self) -> Option<()> {
+        loop {
+            let val = match self.event_receiver.recv().await? {
+                AppTask::ApplySort(mut book_view) => match self.apply_sort(&mut book_view).await {
+                    Ok(_) => AppResponse::Sorted(Ok(book_view)),
+                    Err(e) => AppResponse::Sorted(Err(ApplicationError::Database(e))),
+                },
+                AppTask::IsSaved => AppResponse::IsSaved(self.saved().await),
+                AppTask::GetDbPath => AppResponse::DbPath(self.db_path().await),
+                AppTask::RunCommand(command, mut table_view, mut book_view) => {
+                    let res = self
+                        .run_command(command, &mut table_view, &mut book_view)
+                        .await;
+                    AppResponse::CommandResult(res.map(|val| (val, table_view, book_view)))
+                }
+                AppTask::Save => {
+                    self.save().await;
+                    AppResponse::IsSaved(self.saved().await)
+                }
+                AppTask::TakeUpdate => AppResponse::Updated(self.take_update()),
+                AppTask::TakeHelpInformation => {
+                    AppResponse::HelpInformation(self.active_help_string.map(String::from))
+                }
+                AppTask::GetSortSettings => AppResponse::SortSettings(self.sort_settings.clone()),
+                AppTask::GetBookView => AppResponse::BookView(self.new_book_view().await),
+            };
+            self.result_sender.send(val).await.ok();
+        }
+    }
     fn register_update(&mut self) {
         self.updated = true;
     }
 
-    pub fn take_update(&mut self) -> bool {
+    fn take_update(&mut self) -> bool {
         std::mem::replace(&mut self.updated, false)
     }
 
-    pub async fn saved(&mut self) -> bool {
+    async fn saved(&mut self) -> bool {
         self.db.read().await.saved().await
     }
 

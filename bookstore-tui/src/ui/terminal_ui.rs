@@ -1,20 +1,22 @@
 use std::marker::PhantomData;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender};
-use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
+
+use futures::{future::FutureExt, StreamExt};
 
 use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::Terminal;
 
+use bookstore_app::app::{AppChannel};
 use bookstore_app::settings::{
     DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings,
 };
 use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, EditState};
-use bookstore_app::{App, ApplicationError};
+use bookstore_app::{ApplicationError};
 use bookstore_database::bookview::BookViewError;
 use bookstore_database::{BookView, DatabaseError, IndexableDatabase, SearchableBookView};
 
@@ -31,10 +33,6 @@ pub(crate) enum TuiError<DBError> {
     Application(ApplicationError<DBError>),
     Database(DatabaseError<DBError>),
     Io(std::io::Error),
-}
-
-pub enum AppEvent {
-    UserInput(Event),
 }
 
 impl<DBError> From<ApplicationError<DBError>> for TuiError<DBError> {
@@ -60,24 +58,34 @@ pub(crate) struct UIState<D: IndexableDatabase + Send + Sync> {
     pub(crate) nav_settings: NavigationSettings,
     pub(crate) curr_command: CommandString,
     pub(crate) selected_column: usize,
-    pub(crate) table_view: TableView,
-    pub(crate) book_view: SearchableBookView<D>,
+    pub(crate) table_view: Option<TableView>,
+    pub(crate) book_view: Option<SearchableBookView<D>>,
     // pub(crate) command_log: Vec<CommandString>,
 }
 
 impl<D: IndexableDatabase + Send + Sync> UIState<D> {
     pub(crate) fn modify_bv(&mut self, f: impl Fn(&mut SearchableBookView<D>) -> bool) -> bool {
-        f(&mut self.book_view)
+        f(self.book_view.as_mut().unwrap())
     }
 
     pub(crate) async fn update_column_data(&mut self) -> Result<(), BookViewError<D::Error>> {
-        self.table_view.regenerate_columns(&self.book_view).await
+        self.table_view
+            .as_mut()
+            .unwrap()
+            .regenerate_columns(self.book_view.as_ref().unwrap())
+            .await
     }
 
     pub(crate) fn selected_table_value(&self) -> Option<Vec<&str>> {
-        let selected_column = self.table_view.get_column(self.selected_column);
+        let selected_column = self
+            .table_view
+            .as_ref()
+            .unwrap()
+            .get_column(self.selected_column);
         Some(
             self.book_view
+                .as_ref()
+                .unwrap()
                 .relative_selections()?
                 .iter()
                 .map(|x| selected_column[x].as_str())
@@ -86,16 +94,23 @@ impl<D: IndexableDatabase + Send + Sync> UIState<D> {
     }
 
     pub(crate) fn num_cols(&self) -> usize {
-        self.table_view.selected_cols().len()
+        self.table_view.as_ref().unwrap().selected_cols().len()
     }
 
     pub(crate) fn selected(&self) -> Option<(usize, RelativeSelection)> {
-        Some((self.selected_column, self.book_view.relative_selections()?))
+        Some((
+            self.selected_column,
+            self.book_view.as_ref().unwrap().relative_selections()?,
+        ))
     }
 
     pub(crate) async fn make_selection_visible(&mut self) -> Result<(), BookViewError<D::Error>> {
-        if self.book_view.make_selection_visible() {
-            self.table_view.regenerate_columns(&self.book_view).await?;
+        if self.book_view.as_mut().unwrap().make_selection_visible() {
+            self.table_view
+                .as_mut()
+                .unwrap()
+                .regenerate_columns(self.book_view.as_ref().unwrap())
+                .await?;
         }
         Ok(())
     }
@@ -115,14 +130,13 @@ impl<D: IndexableDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for HelpW
 // TODO: Use channels to allow CTRL+Q when application freezes
 //          Also, allow text input / waiting animation
 pub(crate) struct AppInterface<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> {
-    app: App<D>,
     border_widget: BorderWidget,
     active_view: Box<dyn ViewHandler<D, B> + 'a>,
     ui_state: UIState<D>,
     ui_updated: bool,
     settings_path: Option<PathBuf>,
-    event_receiver: Receiver<AppEvent>,
-    event_sender: Sender<AppEvent>,
+    event_receiver: EventStream,
+    app_channel: AppChannel<D>,
 }
 
 impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
@@ -140,19 +154,19 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
         name: S,
         settings: InterfaceSettings,
         settings_path: Option<PathBuf>,
-        app: App<D>,
+        app_channel: AppChannel<D>,
+        event_receiver: EventStream,
     ) -> AppInterface<'a, D, B> {
-        let book_view = app.new_book_view().await;
-        let path = app.db_path().await;
+        let book_view = app_channel.new_book_view().await;
+        let path = app_channel.db_path().await;
         let ui_state = UIState {
             style: settings.interface_style,
             nav_settings: settings.navigation_settings,
             curr_command: CommandString::new(),
             selected_column: 0,
-            table_view: TableView::from(settings.columns),
-            book_view,
+            table_view: Some(TableView::from(settings.columns)),
+            book_view: Some(book_view),
         };
-        let (event_sender, event_receiver) = std::sync::mpsc::channel();
         AppInterface {
             border_widget: BorderWidget::new(name.into(), path),
             active_view: Box::new(ColumnWidget {
@@ -162,15 +176,10 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
             }),
             ui_updated: false,
             ui_state,
-            app,
             settings_path,
+            app_channel,
             event_receiver,
-            event_sender,
         }
-    }
-
-    pub fn create_sender(&self) -> Sender<AppEvent> {
-        self.event_sender.clone()
     }
 
     /// Reads and handles user input. On success, returns a bool
@@ -182,12 +191,9 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
     ///
     /// # Errors
     /// This function may error if executing a particular action fails.
-    async fn get_input(&mut self) -> Result<bool, TuiError<D::Error>> {
+    async fn read_user_input(&mut self) -> Result<bool, TuiError<D::Error>> {
         loop {
-            if let Ok(event) = self.event_receiver.recv_timeout(Duration::from_millis(500)) {
-                let event = match event {
-                    AppEvent::UserInput(e) => e,
-                };
+            if let Some(Ok(event)) = self.event_receiver.next().fuse().await {
                 match event {
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('q'),
@@ -197,14 +203,14 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
                         code: KeyCode::Char('s'),
                         modifiers: KeyModifiers::CONTROL,
                     }) => {
-                        self.app.save().await?;
+                        self.app_channel.save().await;
                         return Ok(false);
                     }
                     _ => {}
                 }
                 match self
                     .active_view
-                    .handle_input(event, &mut self.ui_state, &mut self.app)
+                    .handle_input(event, &mut self.ui_state, &mut self.app_channel)
                     .await?
                 {
                     ApplicationTask::Quit => return Ok(true),
@@ -220,7 +226,6 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
                             }
                             AppView::Edit => {
                                 let _ = self.ui_state.make_selection_visible().await;
-
                                 if let Some(selected_str) = self.ui_state.selected_table_value() {
                                     self.active_view = Box::new(EditWidget {
                                         edit: EditState::new(selected_str[0]),
@@ -229,8 +234,7 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
                                     });
                                 }
                             }
-                            AppView::Help => {
-                                let help_string = self.app.take_help_string();
+                            AppView::Help(help_string) => {
                                 self.active_view = Box::new(HelpWidget {
                                     text: ScrollableText::new(help_string),
                                     database: PhantomData,
@@ -266,10 +270,14 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
         terminal: &mut Terminal<B>,
     ) -> Result<(), TuiError<D::Error>> {
         loop {
-            self.app.apply_sort(&mut self.ui_state.book_view).await?;
+            self.ui_state.book_view = Some(
+                self.app_channel
+                    .apply_sort(std::mem::take(&mut self.ui_state.book_view).unwrap())
+                    .await?,
+            );
 
-            if self.app.take_update() | self.take_update() {
-                self.border_widget.saved = self.app.saved().await;
+            if self.app_channel.take_update().await | self.take_update() {
+                self.border_widget.saved = self.app_channel.saved().await;
                 let chunk = {
                     let frame = terminal.get_frame();
                     let s = frame.size();
@@ -289,8 +297,9 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
                 })?;
             }
 
-            match self.get_input().await {
+            match self.read_user_input().await {
                 Ok(true) => {
+                    println!("OK TRUE");
                     self.write_settings().await?;
                     return Ok(terminal.clear()?);
                 }
@@ -309,14 +318,16 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
                 columns: self
                     .ui_state
                     .table_view
+                    .as_ref()
+                    .unwrap()
                     .selected_cols()
                     .iter()
                     .map(|s| s.clone().into_inner())
                     .collect(),
-                sort_settings: self.app.sort_settings().clone(),
+                sort_settings: self.app_channel.sort_settings().await,
                 navigation_settings: self.ui_state.nav_settings,
                 database_settings: DatabaseSettings {
-                    path: self.app.db_path().await,
+                    path: self.app_channel.db_path().await,
                 },
             };
             if let Some(p) = path.parent() {
