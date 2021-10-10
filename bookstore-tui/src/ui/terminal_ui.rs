@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
-
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 
 use futures::{future::FutureExt, StreamExt};
@@ -10,13 +9,13 @@ use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::Terminal;
 
-use bookstore_app::app::{AppChannel};
+use bookstore_app::app::AppChannel;
 use bookstore_app::settings::{
     DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings,
 };
 use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, EditState};
-use bookstore_app::{ApplicationError};
+use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
 use bookstore_database::{BookView, DatabaseError, IndexableDatabase, SearchableBookView};
 
