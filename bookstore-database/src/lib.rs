@@ -1,5 +1,5 @@
 pub use bookstore_records::book::Book;
-pub use bookview::{BookView, NestedBookView, ScrollableBookView, SearchableBookView};
+pub use bookview::BookView;
 pub use database::{AppDatabase, DatabaseError, IndexableDatabase};
 #[cfg(feature = "sqlite")]
 pub use sqlite_database::SQLiteDatabase;

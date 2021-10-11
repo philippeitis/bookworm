@@ -12,8 +12,7 @@ use tokio::sync::RwLock;
 use unicase::UniCase;
 
 use bookstore_database::{
-    bookview::BookViewError, AppDatabase, Book, BookView, DatabaseError, IndexableDatabase,
-    NestedBookView, ScrollableBookView, SearchableBookView,
+    bookview::BookViewError, Book, BookView, DatabaseError, IndexableDatabase,
 };
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant, ColumnOrder, Edit};
@@ -241,8 +240,8 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
 }
 
 pub enum AppTask<D: IndexableDatabase> {
-    ApplySort(SearchableBookView<D>),
-    RunCommand(parser::Command, TableView, SearchableBookView<D>),
+    ApplySort(BookView<D>),
+    RunCommand(parser::Command, TableView, BookView<D>),
     Save,
     IsSaved,
     GetDbPath,
@@ -253,14 +252,14 @@ pub enum AppTask<D: IndexableDatabase> {
 }
 
 pub enum AppResponse<D: IndexableDatabase> {
-    Sorted(Result<SearchableBookView<D>, ApplicationError<D::Error>>),
+    Sorted(Result<BookView<D>, ApplicationError<D::Error>>),
     IsSaved(bool),
     HelpInformation(Option<String>),
     Updated(bool),
     DbPath(PathBuf),
     SortSettings(SortSettings),
-    CommandResult(Result<(bool, TableView, SearchableBookView<D>), ApplicationError<D::Error>>),
-    BookView(SearchableBookView<D>),
+    CommandResult(Result<(bool, TableView, BookView<D>), ApplicationError<D::Error>>),
+    BookView(BookView<D>),
 }
 
 pub struct App<D: IndexableDatabase> {
@@ -270,6 +269,7 @@ pub struct App<D: IndexableDatabase> {
     updated: bool,
     event_receiver: Receiver<AppTask<D>>,
     result_sender: Sender<AppResponse<D>>,
+    is_sorted: bool
 }
 
 pub struct AppChannel<D: IndexableDatabase> {
@@ -288,8 +288,8 @@ impl<D: IndexableDatabase> AppChannel<D> {
 
     pub async fn apply_sort(
         &self,
-        book_view: SearchableBookView<D>,
-    ) -> Result<SearchableBookView<D>, ApplicationError<D::Error>> {
+        book_view: BookView<D>,
+    ) -> Result<BookView<D>, ApplicationError<D::Error>> {
         self.send(AppTask::ApplySort(book_view)).await;
         match self.receive().await.unwrap() {
             AppResponse::Sorted(result) => result,
@@ -341,8 +341,8 @@ impl<D: IndexableDatabase> AppChannel<D> {
         &self,
         command: Command,
         table_view: TableView,
-        book_view: SearchableBookView<D>,
-    ) -> Result<(bool, TableView, SearchableBookView<D>), ApplicationError<D::Error>> {
+        book_view: BookView<D>,
+    ) -> Result<(bool, TableView, BookView<D>), ApplicationError<D::Error>> {
         self.send(AppTask::RunCommand(command, table_view, book_view))
             .await;
         match self.receive().await.unwrap() {
@@ -359,7 +359,7 @@ impl<D: IndexableDatabase> AppChannel<D> {
         }
     }
 
-    pub async fn new_book_view(&self) -> SearchableBookView<D> {
+    pub async fn new_book_view(&self) -> BookView<D> {
         self.send(AppTask::GetBookView).await;
         match self.receive().await.unwrap() {
             AppResponse::BookView(result) => result,
@@ -376,6 +376,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         (
             App {
                 db: Arc::new(RwLock::new(db)),
+                is_sorted: sort_settings.columns.is_empty(),
                 sort_settings,
                 updated: true,
                 event_receiver,
@@ -398,8 +399,8 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     }
 
     /// Returns a BookView, allowing reads of all available books.
-    pub async fn new_book_view(&self) -> SearchableBookView<D> {
-        SearchableBookView::new(self.db.clone()).await
+    pub async fn new_book_view(&self) -> BookView<D> {
+        BookView::new(self.db.clone()).await
     }
 
     /// Gets the book specified by the `BookIndex` from the BookView.
@@ -412,7 +413,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     /// If the database fails for any reason, an error will be returned.
     async fn get_book(
         b: BookIndex,
-        bv: &SearchableBookView<D>,
+        bv: &BookView<D>,
     ) -> Result<Vec<Arc<Book>>, ApplicationError<D::Error>> {
         match b {
             BookIndex::Selected => Ok(bv.get_selected_books().await?),
@@ -428,7 +429,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     async fn edit_selected_book(
         &mut self,
         edits: &[(ColumnIdentifier, Edit)],
-        book_view: &mut SearchableBookView<D>,
+        book_view: &mut BookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         for book in book_view.get_selected_books().await? {
             self.edit_book_with_id(book.id(), edits).await?;
@@ -451,7 +452,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     // TODO: Remove this
     async fn remove_selected_books(
         &mut self,
-        book_view: &mut SearchableBookView<D>,
+        book_view: &mut BookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         log(format!(
             "Removing selected books: have {} books now.",
@@ -468,7 +469,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         &mut self,
         id: BookID,
         // TODO: Remove this as argument
-        book_view: &mut SearchableBookView<D>,
+        book_view: &mut BookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         book_view.remove_book(id);
         async_write!(self, db, db.remove_book(id).await)?;
@@ -487,7 +488,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         command: parser::Command,
         // TODO: These should be removed as arguments
         table: &mut TableView,
-        book_view: &mut SearchableBookView<D>,
+        book_view: &mut BookView<D>,
     ) -> Result<bool, ApplicationError<D::Error>> {
         match command {
             Command::DeleteSelected => {
@@ -515,7 +516,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
                     }
                     BookIndex::ID(id) => self.edit_book_with_id(id, &edits).await?,
                 };
-                self.sort_settings.is_sorted = false;
+                self.is_sorted = false;
             }
             Command::AddBooks(sources) => {
                 // TODO: Handle failed reads.
@@ -547,7 +548,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
                 }
 
                 book_view.refresh_db_size().await;
-                self.sort_settings.is_sorted = false;
+                self.is_sorted = false;
             }
             Command::ModifyColumns(columns) => {
                 for column in columns.into_vec() {
@@ -637,15 +638,15 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     /// * ` reverse ` - Whether to reverse the sort.
     fn update_selected_columns(&mut self, cols: Box<[(ColumnIdentifier, ColumnOrder)]>) {
         self.sort_settings.columns = cols;
-        self.sort_settings.is_sorted = false;
+        self.is_sorted = false;
     }
 
     // used in AppInterface::run
     async fn apply_sort(
         &mut self,
-        book_view: &mut SearchableBookView<D>,
+        book_view: &mut BookView<D>,
     ) -> Result<(), DatabaseError<D::Error>> {
-        if !self.sort_settings.is_sorted {
+        if !self.is_sorted {
             self.db
                 .write()
                 .await
@@ -654,7 +655,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
             book_view
                 .sort_by_columns(&self.sort_settings.columns)
                 .await?;
-            self.sort_settings.is_sorted = true;
+            self.is_sorted = true;
             self.register_update();
         }
         Ok(())
@@ -710,20 +711,24 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     }
 }
 
-// When adding books:
-// Return an appropriately sorted list of book ids for each scope
-// -> app needs to maintain scopes?
-// Local copy of BookView needs to do the following:
-// Maintain selections
-// Maintain position:
-// eg. top of window, or currently selected item?
-// Update underlying size
-// Need to make sure that sorting and scopes are maintained
-// When editing:
-// Changes can be made locally
-// When deleting books:
-// Return a hashset of all bookids to remove
-// If selections, remove all selections. No other changes made.
-// If schematic, need to remove own book indices.
-// > Make sure to update table view & top cursor position
-// > make sure all scopes are updated
+// TODO: UI should update immediately, but have a ... in the corner
+//  Maybe ... updates
+//  to indicate that background tasks are running
+//  Wait until all expected messages are received to remove
+//  When adding books:
+//  Return an appropriately sorted list of book ids for each scope
+//  -> app needs to maintain scopes?
+//  Local copy of BookView needs to do the following:
+//  Maintain selections
+//  Maintain position:
+//  eg. top of window, or currently selected item?
+//  Update underlying size
+//  Need to make sure that sorting and scopes are maintained
+//  When editing:
+//  Changes can be made locally
+//  When deleting books:
+//  Return a hashset of all bookids to remove
+//  If selections, remove all selections. No other changes made.
+//  If schematic, need to remove own book indices.
+//  > Make sure to update table view & top cursor position
+//  > make sure all scopes are updated

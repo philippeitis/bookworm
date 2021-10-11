@@ -17,7 +17,7 @@ use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, EditState};
 use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
-use bookstore_database::{BookView, DatabaseError, IndexableDatabase, SearchableBookView};
+use bookstore_database::{BookView, DatabaseError, IndexableDatabase};
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::views::{
@@ -58,12 +58,12 @@ pub(crate) struct UIState<D: IndexableDatabase + Send + Sync> {
     pub(crate) curr_command: CommandString,
     pub(crate) selected_column: usize,
     pub(crate) table_view: Option<TableView>,
-    pub(crate) book_view: Option<SearchableBookView<D>>,
+    pub(crate) book_view: Option<BookView<D>>,
     // pub(crate) command_log: Vec<CommandString>,
 }
 
 impl<D: IndexableDatabase + Send + Sync> UIState<D> {
-    pub(crate) fn modify_bv(&mut self, f: impl Fn(&mut SearchableBookView<D>) -> bool) -> bool {
+    pub(crate) fn modify_bv(&mut self, f: impl Fn(&mut BookView<D>) -> bool) -> bool {
         f(self.book_view.as_mut().unwrap())
     }
 

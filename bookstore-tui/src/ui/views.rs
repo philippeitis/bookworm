@@ -21,7 +21,7 @@ use bookstore_app::app::AppChannel;
 use bookstore_app::settings::Color;
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
-use bookstore_database::{BookView, IndexableDatabase, NestedBookView, ScrollableBookView};
+use bookstore_database::IndexableDatabase;
 use bookstore_records::book::{ColumnIdentifier, RecordError};
 
 use crate::ui::scrollable_text::ScrollableText;
@@ -572,7 +572,13 @@ impl<D: IndexableDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                                     state.curr_command.deselect();
                                     state.book_view.as_mut().unwrap().deselect_all();
                                 }
-                                ('a', _) => state.curr_command.select_all(),
+                                ('a', _) => {
+                                    if !self.command_widget_selected {
+                                        state.book_view.as_mut().unwrap().select_all();
+                                    } else {
+                                        state.curr_command.select_all();
+                                    }
+                                }
                                 _ => state.curr_command.push(x),
                             }
                         } else {
@@ -652,15 +658,17 @@ impl<D: IndexableDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                     KeyCode::Delete => {
                         if state.curr_command.is_empty() {
                             log("User pressed delete.");
-                            let (_, table_view, book_view) = app
-                                .run_command(
-                                    Command::DeleteSelected,
-                                    std::mem::take(&mut state.table_view).unwrap(),
-                                    std::mem::take(&mut state.book_view).unwrap(),
-                                )
-                                .await?;
-                            state.table_view = Some(table_view);
-                            state.book_view = Some(book_view);
+                            if !state.book_view.as_ref().unwrap().selected().is_none() {
+                                let (_, table_view, book_view) = app
+                                    .run_command(
+                                        Command::DeleteSelected,
+                                        std::mem::take(&mut state.table_view).unwrap(),
+                                        std::mem::take(&mut state.book_view).unwrap(),
+                                    )
+                                    .await?;
+                                state.table_view = Some(table_view);
+                                state.book_view = Some(book_view);
+                            }
                         } else {
                             state.curr_command.del();
                         }

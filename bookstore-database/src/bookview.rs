@@ -3,14 +3,13 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use async_trait::async_trait;
 use indexmap::map::IndexMap;
 use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, ColumnOrder};
 
-use crate::paged_cursor::{PageCursorMultiple, RelativeSelection, Selection};
+use crate::paged_cursor::{PageCursor, RelativeSelection, Selection};
 use crate::search::{Error as SearchError, Search};
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
@@ -59,112 +58,20 @@ impl<DBError> From<RecordError> for BookViewError<DBError> {
     }
 }
 
-#[async_trait]
-pub trait BookView<D: AppDatabase + Send + Sync> {
-    async fn new(db: Arc<RwLock<D>>) -> Self;
-
-    async fn get_books_cursored(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>>;
-
-    async fn sort_by_columns(
-        &mut self,
-        cols: &[(ColumnIdentifier, ColumnOrder)],
-    ) -> Result<(), DatabaseError<D::Error>>;
-
-    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<D::Error>>;
-
-    /// Removes the specified book from the upper scopes. Note that this does not affect the root
-    /// scope, which depends on the database, and must be refreshed with a call to `refresh_db_size()`.
-    /// Not calling `refresh_db_size()` after deleting from the underlying database is undefined behaviour.
-    fn remove_book(&mut self, id: BookID);
-
-    /// Removes the specified books from the upper scopes. Note that this does not affect the root
-    /// scope, which depends on the database, and must be refreshed with a call to `refresh_db_size()`
-    fn remove_books(&mut self, ids: &HashSet<BookID>);
-
-    async fn get_selected_books(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>>;
-
-    /// Removes the books selected in the last scope, except if the last scope is the database, in
-    /// which case, the user must delete the books from the database and manually refresh the root
-    /// cursor with a call to `refresh_db_size()`.
-    async fn remove_selected_books(&mut self) -> Result<HashSet<BookID>, BookViewError<D::Error>>;
-
-    fn refresh_window_size(&mut self, size: usize) -> bool;
-
-    async fn clear(&mut self);
-
-    fn window_size(&self) -> usize;
-
-    // fn select(&mut self, item: usize) -> bool;
-
-    fn selected(&self) -> Option<&Selection>;
-
-    fn make_selection_visible(&mut self) -> bool;
-
-    fn relative_selections(&self) -> Option<RelativeSelection>;
-
-    fn deselect_all(&mut self) -> bool;
-
-    async fn refresh_db_size(&mut self);
-
-    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>>;
-}
-
-#[async_trait]
-pub trait ScrollableBookView<D: AppDatabase + Send + Sync>: BookView<D> {
-    async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>>;
-
-    fn top_index(&self) -> usize;
-
-    fn scroll_up(&mut self, scroll: usize) -> bool;
-
-    fn scroll_down(&mut self, scroll: usize) -> bool;
-
-    fn page_up(&mut self) -> bool;
-
-    fn page_down(&mut self) -> bool;
-
-    fn home(&mut self) -> bool;
-
-    fn end(&mut self) -> bool;
-
-    fn up(&mut self) -> bool;
-
-    fn down(&mut self) -> bool;
-
-    fn select_up(&mut self) -> bool;
-
-    fn select_down(&mut self) -> bool;
-
-    fn select_page_up(&mut self) -> bool;
-
-    fn select_page_down(&mut self) -> bool;
-
-    fn select_to_start(&mut self) -> bool;
-
-    fn select_to_end(&mut self) -> bool;
-}
-
-#[async_trait]
-pub trait NestedBookView<D: AppDatabase + Send + Sync>: BookView<D> {
-    async fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>>;
-
-    fn pop_scope(&mut self) -> bool;
-}
-
 struct Scope {
-    cursor: PageCursorMultiple,
+    cursor: PageCursor,
     books: IndexMap<BookID, Arc<Book>>,
 }
 
-pub struct SearchableBookView<D: AppDatabase> {
+pub struct BookView<D: AppDatabase> {
     scopes: Vec<Scope>,
     // The "root" scope.
-    root_cursor: PageCursorMultiple,
+    root_cursor: PageCursor,
     db: Arc<RwLock<D>>,
 }
 
-impl<D: AppDatabase> SearchableBookView<D> {
-    fn active_cursor_mut(&mut self) -> &mut PageCursorMultiple {
+impl<D: AppDatabase> BookView<D> {
+    fn active_cursor_mut(&mut self) -> &mut PageCursor {
         match self.scopes.last_mut() {
             None => &mut self.root_cursor,
             Some(scope) => &mut scope.cursor,
@@ -172,18 +79,17 @@ impl<D: AppDatabase> SearchableBookView<D> {
     }
 }
 
-#[async_trait]
-impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
-    async fn new(db: Arc<RwLock<D>>) -> Self {
+impl<D: IndexableDatabase + Send + Sync> BookView<D> {
+    pub async fn new(db: Arc<RwLock<D>>) -> Self {
         let size = db.read().await.size().await;
         Self {
             scopes: vec![],
-            root_cursor: PageCursorMultiple::new(size, 0),
+            root_cursor: PageCursor::new(size, 0),
             db,
         }
     }
 
-    async fn get_books_cursored(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>> {
+    pub async fn get_books_cursored(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>> {
         match self.scopes.last() {
             None => Ok(self
                 .db
@@ -200,7 +106,7 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    async fn sort_by_columns(
+    pub async fn sort_by_columns(
         &mut self,
         cols: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>> {
@@ -211,11 +117,14 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         Ok(())
     }
 
-    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<D::Error>> {
+    pub async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<D::Error>> {
         self.db.read().await.get_book(id).await
     }
 
-    fn remove_book(&mut self, id: BookID) {
+    /// Removes the specified book from the upper scopes. Note that this does not affect the root
+    /// scope, which depends on the database, and must be refreshed with a call to `refresh_db_size()`.
+    /// Not calling `refresh_db_size()` after deleting from the underlying database is undefined behaviour.
+    pub fn remove_book(&mut self, id: BookID) {
         for scope in self.scopes.iter_mut() {
             // Required to maintain sort order.
             if scope.books.shift_remove(&id).is_none() {
@@ -231,7 +140,9 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    fn remove_books(&mut self, ids: &HashSet<BookID>) {
+    /// Removes the specified books from the upper scopes. Note that this does not affect the root
+    /// scope, which depends on the database, and must be refreshed with a call to `refresh_db_size()`
+    pub fn remove_books(&mut self, ids: &HashSet<BookID>) {
         for scope in self.scopes.iter_mut() {
             // Required to maintain sort order.
             scope.books.retain(|id, _| !ids.contains(id));
@@ -253,7 +164,7 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    async fn get_selected_books(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>> {
+    pub async fn get_selected_books(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>> {
         match self.scopes.last() {
             None => match self.root_cursor.selected() {
                 None => Err(BookViewError::NoBookSelected),
@@ -289,7 +200,12 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         }
     }
 
-    async fn remove_selected_books(&mut self) -> Result<HashSet<BookID>, BookViewError<D::Error>> {
+    /// Removes the books selected in the last scope, except if the last scope is the database, in
+    /// which case, the user must delete the books from the database and manually refresh the root
+    /// cursor with a call to `refresh_db_size()`.
+    pub async fn remove_selected_books(
+        &mut self,
+    ) -> Result<HashSet<BookID>, BookViewError<D::Error>> {
         let mut selected_books = HashSet::new();
         for book in self.get_selected_books().await? {
             selected_books.insert(book.id());
@@ -298,7 +214,7 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         Ok(selected_books)
     }
 
-    fn refresh_window_size(&mut self, size: usize) -> bool {
+    pub fn refresh_window_size(&mut self, size: usize) -> bool {
         self.scopes
             .iter_mut()
             .map(|scope| &mut scope.cursor)
@@ -307,44 +223,44 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
             .fold(false, |a, b| a | b)
     }
 
-    async fn clear(&mut self) {
+    pub async fn clear(&mut self) {
         self.scopes.clear();
         self.refresh_db_size().await;
     }
 
-    fn window_size(&self) -> usize {
+    pub fn window_size(&self) -> usize {
         self.root_cursor.window_size()
     }
 
-    fn selected(&self) -> Option<&Selection> {
+    pub fn selected(&self) -> Option<&Selection> {
         match self.scopes.last() {
             None => self.root_cursor.selected(),
             Some(scope) => scope.cursor.selected(),
         }
     }
 
-    fn make_selection_visible(&mut self) -> bool {
+    pub fn make_selection_visible(&mut self) -> bool {
         match self.scopes.last_mut() {
             None => self.root_cursor.make_selected_visible(),
             Some(scope) => scope.cursor.make_selected_visible(),
         }
     }
 
-    fn relative_selections(&self) -> Option<RelativeSelection> {
+    pub fn relative_selections(&self) -> Option<RelativeSelection> {
         match self.scopes.last() {
             None => self.root_cursor.relative_selections(),
             Some(scope) => scope.cursor.relative_selections(),
         }
     }
 
-    fn deselect_all(&mut self) -> bool {
+    pub fn deselect_all(&mut self) -> bool {
         match self.scopes.last_mut() {
             None => self.root_cursor.deselect(),
             Some(scope) => scope.cursor.deselect(),
         }
     }
 
-    async fn refresh_db_size(&mut self) {
+    pub async fn refresh_db_size(&mut self) {
         log("refreshing db size.");
         let db_size = self.db.read().await.size().await;
         log(format!("size is {}.", db_size));
@@ -381,14 +297,13 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
         // };
     }
 
-    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>> {
+    pub async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<D::Error>> {
         self.db.read().await.has_column(col).await
     }
 }
 
-#[async_trait]
-impl<D: IndexableDatabase + Send + Sync> NestedBookView<D> for SearchableBookView<D> {
-    async fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>> {
+impl<D: IndexableDatabase + Send + Sync> BookView<D> {
+    pub async fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>> {
         let results: IndexMap<_, _> = match self.scopes.last() {
             None => self
                 .db
@@ -412,21 +327,20 @@ impl<D: IndexableDatabase + Send + Sync> NestedBookView<D> for SearchableBookVie
         };
 
         self.scopes.push(Scope {
-            cursor: PageCursorMultiple::new(self.root_cursor.window_size(), results.len()),
+            cursor: PageCursor::new(self.root_cursor.window_size(), results.len()),
             books: results,
         });
 
         Ok(())
     }
 
-    fn pop_scope(&mut self) -> bool {
+    pub fn pop_scope(&mut self) -> bool {
         self.scopes.pop().is_some()
     }
 }
 
-#[async_trait]
-impl<D: IndexableDatabase + Send + Sync> ScrollableBookView<D> for SearchableBookView<D> {
-    async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
+impl<D: IndexableDatabase + Send + Sync> BookView<D> {
+    pub async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
         let target_book = match self.scopes.last() {
             None => self.db.read().await.find_book_index(searches).await?,
             Some(scope) => {
@@ -452,65 +366,69 @@ impl<D: IndexableDatabase + Send + Sync> ScrollableBookView<D> for SearchableBoo
         })
     }
 
-    fn top_index(&self) -> usize {
+    pub fn top_index(&self) -> usize {
         match self.scopes.last() {
             None => self.root_cursor.top_index(),
             Some(scope) => scope.cursor.top_index(),
         }
     }
-    fn scroll_up(&mut self, scroll: usize) -> bool {
+    pub fn scroll_up(&mut self, scroll: usize) -> bool {
         self.active_cursor_mut().scroll_up(scroll)
     }
 
-    fn scroll_down(&mut self, scroll: usize) -> bool {
+    pub fn scroll_down(&mut self, scroll: usize) -> bool {
         self.active_cursor_mut().scroll_down(scroll)
     }
 
-    fn page_up(&mut self) -> bool {
+    pub fn page_up(&mut self) -> bool {
         self.active_cursor_mut().page_up()
     }
 
-    fn page_down(&mut self) -> bool {
+    pub fn page_down(&mut self) -> bool {
         self.active_cursor_mut().page_down()
     }
 
-    fn home(&mut self) -> bool {
+    pub fn home(&mut self) -> bool {
         self.active_cursor_mut().home()
     }
 
-    fn end(&mut self) -> bool {
+    pub fn end(&mut self) -> bool {
         self.active_cursor_mut().end()
     }
 
-    fn up(&mut self) -> bool {
+    pub fn up(&mut self) -> bool {
         self.active_cursor_mut().up()
     }
 
-    fn down(&mut self) -> bool {
+    pub fn down(&mut self) -> bool {
         self.active_cursor_mut().down()
     }
 
-    fn select_up(&mut self) -> bool {
+    pub fn select_up(&mut self) -> bool {
         self.active_cursor_mut().select_up(1)
     }
 
-    fn select_down(&mut self) -> bool {
+    pub fn select_down(&mut self) -> bool {
         self.active_cursor_mut().select_down(1)
     }
 
-    fn select_page_up(&mut self) -> bool {
+    pub fn select_all(&mut self) -> bool {
+        self.active_cursor_mut().select_all()
+    }
+
+    pub fn select_page_up(&mut self) -> bool {
         self.active_cursor_mut().select_page_up()
     }
 
-    fn select_page_down(&mut self) -> bool {
+    pub fn select_page_down(&mut self) -> bool {
         self.active_cursor_mut().select_page_down()
     }
 
-    fn select_to_start(&mut self) -> bool {
+    pub fn select_to_start(&mut self) -> bool {
         self.active_cursor_mut().select_to_home()
     }
 
-    fn select_to_end(&mut self) -> bool {
+    pub fn select_to_end(&mut self) -> bool {
         self.active_cursor_mut().select_to_end()
     }
 }

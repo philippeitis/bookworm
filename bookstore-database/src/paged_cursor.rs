@@ -66,20 +66,20 @@ impl UnwrapSelection for Option<Selection> {
 struct Window {
     top_index: usize,
     size: usize,
-    height: usize,
+    num_items: usize,
 }
 
 // Has a window, and has selected items
-pub struct PageCursorMultiple {
+pub struct PageCursor {
     window: Window,
     selected: Option<Selection>,
-    height: usize,
+    num_items: usize,
 }
 
 impl Window {
     /// Returns whether the last element of data is in the window.
     pub(crate) fn at_end(&self) -> bool {
-        self.size >= self.height || self.top_index >= self.height - self.size - 1
+        self.size >= self.num_items || self.top_index >= self.num_items - self.size - 1
     }
 
     /// Returns whether the first element of data is in the window
@@ -90,8 +90,8 @@ impl Window {
     /// Moves the view down by inc, but does not move the view past the last element
     /// of data if possible.
     pub(crate) fn scroll_down(&mut self, inc: usize) -> bool {
-        if self.top_index + inc + self.size > self.height {
-            let new_val = self.height.saturating_sub(self.size);
+        if self.top_index + inc + self.size > self.num_items {
+            let new_val = self.num_items.saturating_sub(self.size);
             !self.top_index.replace_and_equal(new_val)
         } else {
             self.top_index += inc;
@@ -108,9 +108,9 @@ impl Window {
     }
 
     pub(crate) fn refresh_height(&mut self, height: usize) {
-        self.height = height;
-        if self.top_index + self.size > self.height {
-            self.top_index = self.height.saturating_sub(self.size)
+        self.num_items = height;
+        if self.top_index + self.size > self.num_items {
+            self.top_index = self.num_items.saturating_sub(self.size)
         }
     }
 
@@ -119,8 +119,8 @@ impl Window {
             return false;
         }
 
-        if self.top_index + self.size > self.height {
-            self.top_index = self.height.saturating_sub(self.size)
+        if self.top_index + self.size > self.num_items {
+            self.top_index = self.num_items.saturating_sub(self.size)
         }
 
         true
@@ -128,7 +128,7 @@ impl Window {
 
     pub(crate) fn range(&self) -> std::ops::Range<usize> {
         // min is used in the case that height < self.size
-        self.top_index..(self.top_index + self.size).min(self.height)
+        self.top_index..(self.top_index + self.size).min(self.num_items)
     }
 }
 
@@ -182,16 +182,16 @@ impl<'a> RelativeSelection<'a> {
     }
 }
 
-impl PageCursorMultiple {
+impl PageCursor {
     /// Creates a new Cursor at location 0, with no selection active.
-    pub(crate) fn new(height: usize, window_size: usize) -> Self {
-        PageCursorMultiple {
+    pub(crate) fn new(num_items: usize, window_size: usize) -> Self {
+        PageCursor {
             window: Window {
                 top_index: 0,
                 size: window_size,
-                height,
+                num_items,
             },
-            height,
+            num_items: num_items,
             selected: None,
         }
     }
@@ -239,8 +239,8 @@ impl PageCursorMultiple {
                 index
             } + self.window.top_index;
 
-            if ind > self.height {
-                self.height.saturating_sub(1)
+            if ind > self.num_items {
+                self.num_items.saturating_sub(1)
             } else {
                 ind
             }
@@ -269,12 +269,12 @@ impl PageCursorMultiple {
             index
         ));
         self.assert_invariants();
-        if self.height == 0 {
+        if self.num_items == 0 {
             return std::mem::take(&mut self.selected).is_some();
         }
 
         assert!(
-            index < self.height,
+            index < self.num_items,
             "Attempted to select index that does not exist."
         );
 
@@ -323,12 +323,12 @@ impl PageCursorMultiple {
                 index, self.window.size
             ));
             0
-        } else if index + self.window.size > self.height {
+        } else if index + self.window.size > self.num_items {
             log(format!(
                 "hit index + self.window.size > self.height case ({} + {} > {}).",
-                index, self.window.size, self.height
+                index, self.window.size, self.num_items
             ));
-            self.height - self.window.size
+            self.num_items - self.window.size
         } else if index >= self.window.top_index && index < self.window.top_index + self.window.size
         {
             log(format!("hit index >= self.window.top_index && index < self.window.top_index + self.window.size case ({} >= {} && {} < {} + {}).",
@@ -348,11 +348,11 @@ impl PageCursorMultiple {
 
     pub(crate) fn select_index(&mut self, index: usize) {
         self.assert_invariants();
-        if self.height == 0 {
+        if self.num_items == 0 {
             self.selected = None;
         } else {
             assert!(
-                index < self.height,
+                index < self.num_items,
                 "Attempted to select index that does not exist."
             );
             self.selected = Some(Selection::Single(index));
@@ -374,7 +374,7 @@ impl PageCursorMultiple {
             self.selected, self.window
         ));
 
-        if self.height == 0 || self.window.size == 0 {
+        if self.num_items == 0 || self.window.size == 0 {
             log("No selection applied - no items visible.");
             return false;
         }
@@ -394,7 +394,7 @@ impl PageCursorMultiple {
                     return self.select_index_and_make_visible(s);
                 }
 
-                if s + 1 >= self.height {
+                if s + 1 >= self.num_items {
                     return false;
                 }
                 // t..t+s
@@ -431,7 +431,7 @@ impl PageCursorMultiple {
             self.selected, self.window, inc
         ));
 
-        if self.height == 0 || self.window.size == 0 {
+        if self.num_items == 0 || self.window.size == 0 {
             log("No selection applied - no items visible.");
             return false;
         }
@@ -444,11 +444,11 @@ impl PageCursorMultiple {
             x @ Some(Selection::Single(_)) => {
                 let s = x.unwrap_single();
 
-                if s + 1 >= self.height {
+                if s + 1 >= self.num_items {
                     return false;
                 }
 
-                let new_s = (s + inc).min(self.height.saturating_sub(1));
+                let new_s = (s + inc).min(self.num_items.saturating_sub(1));
                 if let Some(diff) = new_s
                     .saturating_sub(self.window.top_index)
                     .checked_sub(self.window.size)
@@ -461,7 +461,7 @@ impl PageCursorMultiple {
             }
             x @ Some(Selection::Range(_, _, Direction::Up)) => {
                 let (start, end, _) = x.unwrap_range();
-                let new_s = (start + inc).min(self.height.saturating_sub(1));
+                let new_s = (start + inc).min(self.num_items.saturating_sub(1));
 
                 if new_s >= end {
                     *x = Some(Selection::Range(end - 1, new_s + 1, Direction::Down))
@@ -486,11 +486,11 @@ impl PageCursorMultiple {
             x @ Some(Selection::Range(_, _, Direction::Down)) => {
                 let (start, end, _) = x.unwrap_range();
 
-                if end + 1 > self.height {
+                if end + 1 > self.num_items {
                     return false;
                 }
                 // t..t+s
-                let new_end = (end + inc).min(self.height);
+                let new_end = (end + inc).min(self.num_items);
 
                 if let Some(s) = new_end
                     .saturating_sub(self.window.top_index)
@@ -514,7 +514,7 @@ impl PageCursorMultiple {
 
         log(format!("pressed up: {:?} {:?}", self.selected, self.window));
 
-        if self.height == 0 || self.window.size == 0 {
+        if self.num_items == 0 || self.window.size == 0 {
             log("No selection applied - no items visible.");
             return false;
         }
@@ -555,7 +555,7 @@ impl PageCursorMultiple {
     fn assert_invariants(&self) {
         // Can not select if nothing exists.
         assert!(
-            if self.height == 0 {
+            if self.num_items == 0 {
                 self.selected.is_none()
             } else {
                 true
@@ -564,18 +564,18 @@ impl PageCursorMultiple {
         );
         // Can not have top index higher than window height, unless window height is 0.
         assert!(
-            if self.window.top_index >= self.window.height {
+            if self.window.top_index >= self.window.num_items {
                 self.window.top_index == 0
             } else {
                 true
             },
             "Top index must be less than height. {} {}",
             self.window.top_index,
-            self.window.height
+            self.window.num_items
         );
         // Can't scroll past end - unless there aren't enough items to fill screen.
         assert!(
-            if self.window.top_index + self.window.size > self.window.height {
+            if self.window.top_index + self.window.size > self.window.num_items {
                 self.window.top_index == 0
             } else {
                 true
@@ -594,7 +594,7 @@ impl PageCursorMultiple {
             self.selected, self.window
         ));
 
-        if self.height == 0 || self.window.size == 0 {
+        if self.num_items == 0 || self.window.size == 0 {
             log("No selection applied - no items visible.");
             return false;
         }
@@ -638,7 +638,7 @@ impl PageCursorMultiple {
             self.selected, self.window
         ));
 
-        if self.height == 0 || self.window.size == 0 {
+        if self.num_items == 0 || self.window.size == 0 {
             log("No selection applied - no items visible.");
             return false;
         }
@@ -711,12 +711,12 @@ impl PageCursorMultiple {
 
     pub fn select_to_home(&mut self) -> bool {
         self.assert_invariants();
-        self.select_up(self.height)
+        self.select_up(self.num_items)
     }
 
     pub fn select_to_end(&mut self) -> bool {
         self.assert_invariants();
-        self.select_down(self.height)
+        self.select_down(self.num_items)
     }
 
     /// Moves the view down by the size of the window, except in the case that moving the page
@@ -731,16 +731,16 @@ impl PageCursorMultiple {
             self.selected, self.window
         ));
 
-        if self.height == 0 || self.window.size == 0 {
+        if self.num_items == 0 || self.window.size == 0 {
             log("No selection applied - no items visible.");
             return false;
         }
 
         let end = match &mut self.selected {
             Some(Selection::Single(s)) => {
-                return s
-                    .replace_and_equal((*s + self.window.size).min(self.height.saturating_sub(1)))
-                    | self.window.scroll_down(self.window.size);
+                return s.replace_and_equal(
+                    (*s + self.window.size).min(self.num_items.saturating_sub(1)),
+                ) | self.window.scroll_down(self.window.size);
             }
             Some(Selection::Range(_, end, _)) => end.saturating_sub(1),
             Some(Selection::Multi(tree, _)) => *tree.iter().next_back().unwrap(),
@@ -773,10 +773,10 @@ impl PageCursorMultiple {
     /// the bottom.
     pub(crate) fn end(&mut self) -> bool {
         self.assert_invariants();
-        let t_change = self.window.scroll_down(self.height);
+        let t_change = self.window.scroll_down(self.num_items);
         let s_change = match &mut self.selected {
             None => false,
-            Some(Selection::Single(s)) => !s.replace_and_equal(self.height.saturating_sub(1)),
+            Some(Selection::Single(s)) => !s.replace_and_equal(self.num_items.saturating_sub(1)),
             x @ Some(Selection::Range(_, _, _)) => {
                 let (_, end, _) = x.unwrap_range();
                 let ind = end.saturating_sub(1);
@@ -813,13 +813,13 @@ impl PageCursorMultiple {
     /// Sets height internally and adjusts the window settings.
     pub(crate) fn refresh_height(&mut self, height: usize) {
         self.assert_invariants();
-        self.height = height;
+        self.num_items = height;
         self.window.refresh_height(height);
         match &mut self.selected {
             None => {}
             x @ Some(Selection::Single(_)) => {
                 let ind = x.unwrap_single();
-                if ind >= self.height {
+                if ind >= self.num_items {
                     *x = None;
                 }
             }
@@ -853,6 +853,11 @@ impl PageCursorMultiple {
         self.assert_invariants();
         self.window.range()
     }
+
+    pub(crate) fn select_all(&mut self) -> bool {
+        self.selected
+            .replace_and_equal(Some(Selection::Range(0, self.num_items, Direction::Down)))
+    }
 }
 
 #[cfg(test)]
@@ -861,9 +866,9 @@ mod test {
 
     #[test]
     fn test_at_end() {
-        let cursor = PageCursorMultiple::new(20, 25);
+        let cursor = PageCursor::new(20, 25);
         assert!(cursor.at_end());
-        let mut cursor = PageCursorMultiple::new(40, 25);
+        let mut cursor = PageCursor::new(40, 25);
         assert!(!cursor.at_end());
         cursor.scroll_down(10);
         assert!(!cursor.at_end());
@@ -873,7 +878,7 @@ mod test {
 
     #[test]
     fn cursor_select_up() {
-        let mut cursor = PageCursorMultiple::new(20, 25);
+        let mut cursor = PageCursor::new(20, 25);
         assert!(cursor.select_up(1));
         assert_eq!(cursor.selected, Some(Selection::Single(0)));
         assert!(!cursor.select_up(1));
@@ -923,7 +928,7 @@ mod test {
 
     #[test]
     fn test_window_slice() {
-        let mut cursor = PageCursorMultiple::new(50, 25);
+        let mut cursor = PageCursor::new(50, 25);
         assert!(cursor.window_range().eq(0..25));
         assert!(cursor.scroll_down(10));
         assert!(cursor.window_range().eq(10..35));
@@ -933,7 +938,7 @@ mod test {
 
     #[test]
     fn test_scroll() {
-        let mut cursor = PageCursorMultiple::new(50, 25);
+        let mut cursor = PageCursor::new(50, 25);
         assert_eq!(cursor.window_range().len(), 25);
         cursor.scroll_down(10);
         assert_eq!(cursor.window_range().len(), 25);
@@ -951,7 +956,7 @@ mod test {
 
     #[test]
     fn test_selected_never_out_of_bounds() {
-        let mut cursor = PageCursorMultiple::new(50, 25);
+        let mut cursor = PageCursor::new(50, 25);
         cursor.select_relative(15);
         // assert!(cursor.selected().unwrap() < 50);
         // cursor.end();
@@ -970,7 +975,7 @@ mod test {
 
     #[test]
     fn test_select_up_down_no_select_when_empty() {
-        let mut cursor = PageCursorMultiple::new(25, 0);
+        let mut cursor = PageCursor::new(25, 0);
         assert!(!cursor.select_up(1));
         assert!(!cursor.select_down(1));
         // assert!(!cursor.select(Some(0)));

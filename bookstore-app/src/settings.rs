@@ -72,14 +72,12 @@ impl Default for InterfaceStyle {
 #[derive(Debug, Clone)]
 pub struct SortSettings {
     pub columns: Box<[(ColumnIdentifier, ColumnOrder)]>,
-    pub is_sorted: bool,
 }
 
 impl Default for SortSettings {
     fn default() -> Self {
         SortSettings {
             columns: vec![].into_boxed_slice(),
-            is_sorted: false,
         }
     }
 }
@@ -299,7 +297,6 @@ impl From<TomlSort> for SortSettings {
             })
             .collect();
         SortSettings {
-            is_sorted: columns.is_empty(),
             columns: columns.into_boxed_slice(),
         }
     }

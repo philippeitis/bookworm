@@ -18,9 +18,9 @@ pub struct TableView {
 impl TableView {
     /// Refreshes the table data according to the currently selected columns and the books
     /// in the BookView's cursor.
-    pub async fn regenerate_columns<D: IndexableDatabase + Send + Sync, S: BookView<D>>(
+    pub async fn regenerate_columns<D: IndexableDatabase + Send + Sync>(
         &mut self,
-        bv: &S,
+        bv: &BookView<D>,
     ) -> Result<(), BookViewError<D::Error>> {
         self.column_data = vec![Vec::with_capacity(bv.window_size()); self.selected_cols.len()];
 
