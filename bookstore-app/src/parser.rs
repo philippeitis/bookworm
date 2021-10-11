@@ -523,7 +523,7 @@ impl CommandParser for SortColumns {
             .collect();
 
         for (flag, args) in trailing_args.into_iter() {
-            if flag != "d" {
+            if flag != "-d" {
                 return Err(CommandError::UnknownFlag);
             }
             let mut args = args.into_iter();
