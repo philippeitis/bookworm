@@ -269,7 +269,7 @@ pub struct App<D: IndexableDatabase> {
     updated: bool,
     event_receiver: Receiver<AppTask<D>>,
     result_sender: Sender<AppResponse<D>>,
-    is_sorted: bool
+    is_sorted: bool,
 }
 
 pub struct AppChannel<D: IndexableDatabase> {
