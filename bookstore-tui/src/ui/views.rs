@@ -179,7 +179,7 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
             )));
         }
         #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
-        _ => return Ok(true),
+        _ => return Ok(ApplicationTask::DoNothing),
     }
     Ok(ApplicationTask::DoNothing)
 }
