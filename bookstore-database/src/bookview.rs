@@ -151,8 +151,13 @@ pub trait NestedBookView<D: AppDatabase + Send + Sync>: BookView<D> {
     fn pop_scope(&mut self) -> bool;
 }
 
+struct Scope {
+    cursor: PageCursorMultiple,
+    books: IndexMap<BookID, Arc<Book>>,
+}
+
 pub struct SearchableBookView<D: AppDatabase> {
-    scopes: Vec<(PageCursorMultiple, IndexMap<BookID, Arc<Book>>)>,
+    scopes: Vec<Scope>,
     // The "root" scope.
     root_cursor: PageCursorMultiple,
     db: Arc<RwLock<D>>,
@@ -162,7 +167,7 @@ impl<D: AppDatabase> SearchableBookView<D> {
     fn active_cursor_mut(&mut self) -> &mut PageCursorMultiple {
         match self.scopes.last_mut() {
             None => &mut self.root_cursor,
-            Some((cursor, _)) => cursor,
+            Some(scope) => &mut scope.cursor,
         }
     }
 }
@@ -186,9 +191,10 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
                 .await
                 .get_books_indexed(self.root_cursor.window_range())
                 .await?),
-            Some((cursor, books)) => Ok(cursor
+            Some(scope) => Ok(scope
+                .cursor
                 .window_range()
-                .filter_map(|i| books.get_index(i))
+                .filter_map(|i| scope.books.get_index(i))
                 .map(|(_, b)| b.clone())
                 .collect()),
         }
@@ -200,7 +206,7 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
     ) -> Result<(), DatabaseError<D::Error>> {
         self.scopes
             .iter_mut()
-            .for_each(|(_, scope)| scope.sort_by(|_, a, _, b| b.cmp_columns(a, &cols)));
+            .for_each(|scope| scope.books.sort_by(|_, a, _, b| b.cmp_columns(a, &cols)));
 
         Ok(())
     }
@@ -210,12 +216,12 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
     }
 
     fn remove_book(&mut self, id: BookID) {
-        for (cursor, map) in self.scopes.iter_mut() {
+        for scope in self.scopes.iter_mut() {
             // Required to maintain sort order.
-            if map.shift_remove(&id).is_none() {
+            if scope.books.shift_remove(&id).is_none() {
                 break;
             } else {
-                cursor.refresh_height(map.len());
+                scope.cursor.refresh_height(scope.books.len());
                 // if let Some(s) = cursor.selected() {
                 //     if s == cursor.window_size() && s != 0 {
                 //         cursor.select(s - 1);
@@ -226,19 +232,21 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
     }
 
     fn remove_books(&mut self, ids: &HashSet<BookID>) {
-        for (cursor, map) in self.scopes.iter_mut() {
+        for scope in self.scopes.iter_mut() {
             // Required to maintain sort order.
-            map.retain(|id, _| !ids.contains(id));
-            cursor.refresh_height(map.len());
-            match cursor.selected().cloned() {
+            scope.books.retain(|id, _| !ids.contains(id));
+            scope.cursor.refresh_height(scope.books.len());
+            match scope.cursor.selected() {
                 None => {}
                 Some(Selection::Single(s)) => {
-                    if s != 0 {
-                        cursor.select_index(s - 1);
+                    if *s != 0 {
+                        scope.cursor.select_index(*s - 1);
                     }
                 }
                 Some(Selection::Range(start, _, _)) => {
-                    cursor.select_index_and_make_visible(start.saturating_sub(1));
+                    scope
+                        .cursor
+                        .select_index_and_make_visible(start.saturating_sub(1));
                 }
                 _ => unimplemented!("Non-continuous selections not currently supported."),
             }
@@ -264,17 +272,17 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
                     Ok(results)
                 }
             },
-            Some((cursor, books)) => match cursor.selected() {
+            Some(scope) => match scope.cursor.selected() {
                 None => Err(BookViewError::NoBookSelected),
-                Some(Selection::Single(i)) => Ok(vec![books[*i].clone()]),
+                Some(Selection::Single(i)) => Ok(vec![scope.books[*i].clone()]),
                 Some(Selection::Range(start, end, _)) => Ok((*start..*end)
-                    .filter_map(|i| books.get_index(i))
+                    .filter_map(|i| scope.books.get_index(i))
                     .map(|(_, b)| b.clone())
                     .collect::<Vec<_>>()),
                 Some(Selection::Multi(multi, _)) => Ok(multi
                     .iter()
                     .copied()
-                    .filter_map(|i| books.get_index(i))
+                    .filter_map(|i| scope.books.get_index(i))
                     .map(|(_, b)| b.clone())
                     .collect::<Vec<_>>()),
             },
@@ -293,7 +301,7 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
     fn refresh_window_size(&mut self, size: usize) -> bool {
         self.scopes
             .iter_mut()
-            .map(|(a, _)| a)
+            .map(|scope| &mut scope.cursor)
             .chain(std::iter::once(&mut self.root_cursor))
             .map(|a| a.refresh_window_size(size))
             .fold(false, |a, b| a | b)
@@ -311,28 +319,28 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> for SearchableBookView<D> {
     fn selected(&self) -> Option<&Selection> {
         match self.scopes.last() {
             None => self.root_cursor.selected(),
-            Some((cursor, _)) => cursor.selected(),
+            Some(scope) => scope.cursor.selected(),
         }
     }
 
     fn make_selection_visible(&mut self) -> bool {
         match self.scopes.last_mut() {
             None => self.root_cursor.make_selected_visible(),
-            Some((cursor, _)) => cursor.make_selected_visible(),
+            Some(scope) => scope.cursor.make_selected_visible(),
         }
     }
 
     fn relative_selections(&self) -> Option<RelativeSelection> {
         match self.scopes.last() {
             None => self.root_cursor.relative_selections(),
-            Some((cursor, _)) => cursor.relative_selections(),
+            Some(scope) => scope.cursor.relative_selections(),
         }
     }
 
     fn deselect_all(&mut self) -> bool {
         match self.scopes.last_mut() {
             None => self.root_cursor.deselect(),
-            Some((cursor, _)) => cursor.deselect(),
+            Some(scope) => scope.cursor.deselect(),
         }
     }
 
@@ -392,8 +400,8 @@ impl<D: IndexableDatabase + Send + Sync> NestedBookView<D> for SearchableBookVie
                 .map(|book| (book.id(), book))
                 .collect(),
 
-            Some((_, books)) => {
-                let mut results: Vec<_> = books.values().cloned().collect();
+            Some(scope) => {
+                let mut results: Vec<_> = scope.books.values().cloned().collect();
                 for search in searches {
                     let matcher = search.clone().into_matcher()?;
                     results.retain(|book| matcher.is_match(book));
@@ -403,10 +411,10 @@ impl<D: IndexableDatabase + Send + Sync> NestedBookView<D> for SearchableBookVie
             }
         };
 
-        self.scopes.push((
-            PageCursorMultiple::new(self.root_cursor.window_size(), results.len()),
-            results,
-        ));
+        self.scopes.push(Scope {
+            cursor: PageCursorMultiple::new(self.root_cursor.window_size(), results.len()),
+            books: results,
+        });
 
         Ok(())
     }
@@ -421,14 +429,15 @@ impl<D: IndexableDatabase + Send + Sync> ScrollableBookView<D> for SearchableBoo
     async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
         let target_book = match self.scopes.last() {
             None => self.db.read().await.find_book_index(searches).await?,
-            Some((_, books)) => {
-                let mut results: Vec<_> = books.values().cloned().collect();
+            Some(scope) => {
+                let mut results: Vec<_> = scope.books.values().cloned().collect();
                 for search in searches {
                     let matcher = search.clone().into_matcher()?;
                     results.retain(|book| matcher.is_match(&book));
                 }
                 results.first().cloned().map(|b| {
-                    books
+                    scope
+                        .books
                         .get_index_of(&b.id())
                         .expect("Reference to existing book was invalidated during search.")
                 })
@@ -446,7 +455,7 @@ impl<D: IndexableDatabase + Send + Sync> ScrollableBookView<D> for SearchableBoo
     fn top_index(&self) -> usize {
         match self.scopes.last() {
             None => self.root_cursor.top_index(),
-            Some((cursor, _)) => cursor.top_index(),
+            Some(scope) => scope.cursor.top_index(),
         }
     }
     fn scroll_up(&mut self, scroll: usize) -> bool {

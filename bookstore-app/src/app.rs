@@ -448,6 +448,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         ))
     }
 
+    // TODO: Remove this
     async fn remove_selected_books(
         &mut self,
         book_view: &mut SearchableBookView<D>,
@@ -466,6 +467,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     async fn remove_book(
         &mut self,
         id: BookID,
+        // TODO: Remove this as argument
         book_view: &mut SearchableBookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         book_view.remove_book(id);
@@ -483,6 +485,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
     pub async fn run_command(
         &mut self,
         command: parser::Command,
+        // TODO: These should be removed as arguments
         table: &mut TableView,
         book_view: &mut SearchableBookView<D>,
     ) -> Result<bool, ApplicationError<D::Error>> {
@@ -706,3 +709,21 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         std::mem::take(&mut self.active_help_string).unwrap_or(GENERAL_HELP)
     }
 }
+
+// When adding books:
+// Return an appropriately sorted list of book ids for each scope
+// -> app needs to maintain scopes?
+// Local copy of BookView needs to do the following:
+// Maintain selections
+// Maintain position:
+// eg. top of window, or currently selected item?
+// Update underlying size
+// Need to make sure that sorting and scopes are maintained
+// When editing:
+// Changes can be made locally
+// When deleting books:
+// Return a hashset of all bookids to remove
+// If selections, remove all selections. No other changes made.
+// If schematic, need to remove own book indices.
+// > Make sure to update table view & top cursor position
+// > make sure all scopes are updated
