@@ -18,6 +18,7 @@ use bookstore_app::{parse_args, App, Settings};
 use bookstore_database::AppDatabase;
 use bookstore_database::SQLiteDatabase;
 
+use crate::ui::views::{run_command, AppView, ApplicationTask};
 use crate::ui::{AppInterface, TuiError};
 
 #[derive(Clap)]
@@ -68,9 +69,14 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
 
     let db = SQLiteDatabase::open(&app_settings.database_settings.path).await?;
 
-    let (mut app, receiver) = App::new(db, app_settings.sort_settings);
+    let (mut app, mut receiver) = App::new(db, app_settings.sort_settings);
     let mut placeholder_table_view = TableView::default();
     let mut book_view = app.new_book_view().await;
+
+    tokio::spawn(async move {
+        let _ = app.event_loop().await;
+    });
+
     if !commands.is_empty() {
         for command in commands.split(|v| v == "--") {
             if let Ok(command) = parse_args(command.to_owned()) {
@@ -81,25 +87,26 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
                     );
                     return Ok(());
                 }
-                if !app
-                    .run_command(command, &mut placeholder_table_view, &mut book_view)
-                    .await?
+                match run_command(
+                    &mut receiver,
+                    command,
+                    &mut placeholder_table_view,
+                    &mut book_view,
+                )
+                .await?
                 {
-                    return Ok(());
-                }
-                if app.has_help_string() {
-                    println!("{}", app.take_help_string());
+                    ApplicationTask::Quit => return Ok(()),
+                    ApplicationTask::SwitchView(AppView::Help(msg)) => println!("{}", msg),
+                    _ => {}
                 }
             }
         }
     }
 
+    let default_sort = receiver.sort_settings().await;
+    receiver.sort_cols(default_sort.columns).await;
     // Goes before due to lifetime issues.
     let stdout_ = stdout();
-
-    tokio::spawn(async move {
-        let _ = app.event_loop().await;
-    });
 
     let mut app = AppInterface::new(
         "Really Cool Library",

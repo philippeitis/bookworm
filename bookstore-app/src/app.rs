@@ -1,4 +1,5 @@
 use std::borrow::BorrowMut;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Command as ProcessCommand;
@@ -11,6 +12,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use unicase::UniCase;
 
+use bookstore_database::search::Search;
 use bookstore_database::{
     bookview::BookViewError, Book, BookView, DatabaseError, IndexableDatabase,
 };
@@ -19,8 +21,7 @@ use bookstore_records::{BookError, BookVariant, ColumnOrder, Edit};
 
 use crate::autocomplete::AutoCompleteError;
 use crate::help_strings::{help_strings, GENERAL_HELP};
-use crate::parser;
-use crate::parser::{BookIndex, Command, ModifyColumn, Source};
+use crate::parser::{ModifyColumn, Source};
 use crate::settings::SortSettings;
 use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
@@ -52,8 +53,7 @@ macro_rules! async_write {
     ($self:ident, $id: ident, $op:expr) => {{
         let value = {
             let mut db = $self.db.write().await;
-            #[allow(unused_mut)]
-            let mut $id = db.borrow_mut();
+            let $id = db.borrow_mut();
             $op
         };
         $self.register_update();
@@ -239,27 +239,47 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-pub enum AppTask<D: IndexableDatabase> {
-    ApplySort(BookView<D>),
-    RunCommand(parser::Command, TableView, BookView<D>),
+pub enum Target {
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    FileManager,
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    NativeApp,
+}
+
+pub enum AppTask {
     Save,
     IsSaved,
     GetDbPath,
     GetSortSettings,
     TakeUpdate,
-    TakeHelpInformation,
     GetBookView,
+    GetHelp(Option<String>),
+    DeleteIds(HashSet<BookID>),
+    DeleteMatching(Box<[Search]>),
+    DeleteAll,
+    EditBooks(Box<[BookID]>, Box<[(ColumnIdentifier, Edit)]>),
+    AddBooks(Box<[Source]>),
+    SortColumns(Box<[(ColumnIdentifier, ColumnOrder)]>),
+    TryMergeAllBooks,
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    OpenBookIn(BookID, usize, Target),
 }
 
 pub enum AppResponse<D: IndexableDatabase> {
-    Sorted(Result<BookView<D>, ApplicationError<D::Error>>),
     IsSaved(bool),
-    HelpInformation(Option<String>),
+    HelpInformation(String),
     Updated(bool),
     DbPath(PathBuf),
     SortSettings(SortSettings),
-    CommandResult(Result<(bool, TableView, BookView<D>), ApplicationError<D::Error>>),
     BookView(BookView<D>),
+    // DeleteMatching
+    Deleted(HashSet<BookID>),
+    // AddBooks
+    Created(Vec<BookID>),
+    // Delete these ids, and refresh ids from DB
+    MergeRefresh(HashSet<BookID>),
+    Empty,
 }
 
 pub struct App<D: IndexableDatabase> {
@@ -267,18 +287,18 @@ pub struct App<D: IndexableDatabase> {
     active_help_string: Option<&'static str>,
     sort_settings: SortSettings,
     updated: bool,
-    event_receiver: Receiver<AppTask<D>>,
+    event_receiver: Receiver<AppTask>,
     result_sender: Sender<AppResponse<D>>,
     is_sorted: bool,
 }
 
 pub struct AppChannel<D: IndexableDatabase> {
-    sender: Sender<AppTask<D>>,
+    sender: Sender<AppTask>,
     receiver: Arc<RwLock<Receiver<AppResponse<D>>>>,
 }
 
-impl<D: IndexableDatabase> AppChannel<D> {
-    pub async fn send(&self, app_task: AppTask<D>) -> bool {
+impl<D: IndexableDatabase + Send + Sync> AppChannel<D> {
+    pub async fn send(&self, app_task: AppTask) -> bool {
         self.sender.send(app_task).await.is_ok()
     }
 
@@ -286,14 +306,27 @@ impl<D: IndexableDatabase> AppChannel<D> {
         self.receiver.as_ref().write().await.recv().await
     }
 
-    pub async fn apply_sort(
-        &self,
-        book_view: BookView<D>,
-    ) -> Result<BookView<D>, ApplicationError<D::Error>> {
-        self.send(AppTask::ApplySort(book_view)).await;
+    pub async fn delete_ids(&self, ids: HashSet<BookID>) {
+        self.send(AppTask::DeleteIds(ids)).await;
         match self.receive().await.unwrap() {
-            AppResponse::Sorted(result) => result,
-            _ => panic!("Expected sorted response from application"),
+            AppResponse::Empty => {}
+            _ => panic!("Expected AppResponse::Empty response from application"),
+        }
+    }
+
+    pub async fn delete_matching(&self, matches: Box<[Search]>) -> HashSet<BookID> {
+        self.send(AppTask::DeleteMatching(matches)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Deleted(deleted) => deleted,
+            _ => panic!("Expected AppResponse::Empty response from application"),
+        }
+    }
+
+    pub async fn delete_all(&self) {
+        self.send(AppTask::DeleteAll).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Empty => {}
+            _ => panic!("Expected AppResponse::Empty response from application"),
         }
     }
 
@@ -337,34 +370,83 @@ impl<D: IndexableDatabase> AppChannel<D> {
         }
     }
 
-    pub async fn run_command(
-        &self,
-        command: Command,
-        table_view: TableView,
-        book_view: BookView<D>,
-    ) -> Result<(bool, TableView, BookView<D>), ApplicationError<D::Error>> {
-        self.send(AppTask::RunCommand(command, table_view, book_view))
-            .await;
-        match self.receive().await.unwrap() {
-            AppResponse::CommandResult(result) => result,
-            _ => panic!("Expected CommandResult response from application"),
-        }
-    }
-
-    pub async fn take_help_string(&self) -> Option<String> {
-        self.send(AppTask::TakeHelpInformation).await;
-        match self.receive().await.unwrap() {
-            AppResponse::HelpInformation(result) => result,
-            _ => panic!("Expected HelpInformation response from application"),
-        }
-    }
-
     pub async fn new_book_view(&self) -> BookView<D> {
         self.send(AppTask::GetBookView).await;
         match self.receive().await.unwrap() {
             AppResponse::BookView(result) => result,
             _ => panic!("Expected BookView response from application"),
         }
+    }
+
+    pub async fn help(&self, target: Option<String>) -> String {
+        self.send(AppTask::GetHelp(target)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::HelpInformation(result) => result,
+            _ => panic!("Expected HelpInformation response from application"),
+        }
+    }
+
+    pub async fn edit_books(&self, books: Box<[BookID]>, edits: Box<[(ColumnIdentifier, Edit)]>) {
+        self.send(AppTask::EditBooks(books, edits)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Empty => {}
+            _ => panic!("Expected HelpInformation response from application"),
+        }
+    }
+
+    pub async fn add_books(&self, sources: Box<[Source]>) -> Vec<BookID> {
+        self.send(AppTask::AddBooks(sources)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Created(result) => result,
+            _ => panic!("Expected HelpInformation response from application"),
+        }
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    pub async fn open_book(&self, id: BookID, index: usize, target: Target) {
+        self.send(AppTask::OpenBookIn(id, index, target)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Empty => {}
+            _ => panic!("Expected Empty response from application"),
+        }
+    }
+
+    pub async fn try_merge_all_books(&self) -> HashSet<BookID> {
+        self.send(AppTask::TryMergeAllBooks).await;
+        match self.receive().await.unwrap() {
+            AppResponse::MergeRefresh(book_ids) => book_ids,
+            _ => panic!("Expected Empty response from application"),
+        }
+    }
+
+    pub async fn sort_cols(&self, cols: Box<[(ColumnIdentifier, ColumnOrder)]>) {
+        self.send(AppTask::SortColumns(cols)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Empty => {}
+            _ => panic!("Expected Empty response from application"),
+        }
+    }
+
+    pub async fn modify_columns(
+        &self,
+        columns: Box<[ModifyColumn]>,
+        table: &mut TableView,
+        book_view: &mut BookView<D>,
+    ) -> Result<(), ApplicationError<D::Error>> {
+        for column in columns.into_vec() {
+            match column {
+                ModifyColumn::Add(column) => {
+                    let column = UniCase::new(column);
+                    if book_view.has_column(&column).await? {
+                        table.add_column(column);
+                    }
+                }
+                ModifyColumn::Remove(column) => {
+                    table.remove_column(&UniCase::new(column));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -403,40 +485,11 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         BookView::new(self.db.clone()).await
     }
 
-    /// Gets the book specified by the `BookIndex` from the BookView.
-    ///
-    /// # Arguments
-    ///
-    /// * ` b ` - A `BookIndex` to get a book by ID or by current selection.
-    ///
-    /// # Errors
-    /// If the database fails for any reason, an error will be returned.
-    async fn get_book(
-        b: BookIndex,
-        bv: &BookView<D>,
-    ) -> Result<Vec<Arc<Book>>, ApplicationError<D::Error>> {
-        match b {
-            BookIndex::Selected => Ok(bv.get_selected_books().await?),
-            BookIndex::ID(id) => Ok(vec![bv.get_book(id).await?]),
-        }
-    }
-
     /// Applies the specified edits to the provided book in the internal
     /// database.
     ///
     /// # Errors
     /// If no book is selected, or if editing the book fails, an error will be returned.
-    async fn edit_selected_book(
-        &mut self,
-        edits: &[(ColumnIdentifier, Edit)],
-        book_view: &mut BookView<D>,
-    ) -> Result<(), ApplicationError<D::Error>> {
-        for book in book_view.get_selected_books().await? {
-            self.edit_book_with_id(book.id(), edits).await?;
-        }
-        Ok(())
-    }
-
     async fn edit_book_with_id(
         &mut self,
         id: BookID,
@@ -449,176 +502,12 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         ))
     }
 
-    // TODO: Remove this
-    async fn remove_selected_books(
+    async fn remove_books(
         &mut self,
-        book_view: &mut BookView<D>,
+        ids: &HashSet<BookID>,
     ) -> Result<(), ApplicationError<D::Error>> {
-        log(format!(
-            "Removing selected books: have {} books now.",
-            self.db.read().await.size().await
-        ));
-
-        let books = book_view.remove_selected_books().await?;
-        async_write!(self, db, db.remove_books(&books).await)?;
-        book_view.refresh_db_size().await;
+        async_write!(self, db, db.remove_books(ids).await)?;
         Ok(())
-    }
-
-    async fn remove_book(
-        &mut self,
-        id: BookID,
-        // TODO: Remove this as argument
-        book_view: &mut BookView<D>,
-    ) -> Result<(), ApplicationError<D::Error>> {
-        book_view.remove_book(id);
-        async_write!(self, db, db.remove_book(id).await)?;
-        book_view.refresh_db_size().await;
-        Ok(())
-    }
-
-    /// Runs the command currently in the current command string. On success, returns a bool
-    /// indicating whether to continue or not.
-    ///
-    /// # Arguments
-    ///
-    /// * ` command ` - The command to run.
-    pub async fn run_command(
-        &mut self,
-        command: parser::Command,
-        // TODO: These should be removed as arguments
-        table: &mut TableView,
-        book_view: &mut BookView<D>,
-    ) -> Result<bool, ApplicationError<D::Error>> {
-        match command {
-            Command::DeleteSelected => {
-                self.remove_selected_books(book_view).await?;
-            }
-            Command::DeleteMatching(matches) => {
-                let targets = self.db.read().await.find_matches(&matches).await?;
-                let ids = targets.into_iter().map(|target| target.id()).collect();
-
-                book_view.remove_books(&ids);
-                async_write!(self, db, db.remove_books(&ids).await)?;
-                book_view.refresh_db_size().await;
-            }
-            Command::DeleteAll => {
-                async_write!(self, db, db.clear().await)?;
-                book_view.clear().await;
-            }
-            Command::EditBook(b, edits) => {
-                match b {
-                    BookIndex::Selected => {
-                        if book_view.make_selection_visible() {
-                            table.regenerate_columns(book_view).await?;
-                        }
-                        self.edit_selected_book(&edits, book_view).await?
-                    }
-                    BookIndex::ID(id) => self.edit_book_with_id(id, &edits).await?,
-                };
-                self.is_sorted = false;
-            }
-            Command::AddBooks(sources) => {
-                // TODO: Handle failed reads.
-                for source in sources.into_vec() {
-                    match source {
-                        Source::File(f) => {
-                            async_write!(self, db, {
-                                let book = BookVariant::from_path(&f)?;
-                                db.insert_book(book)
-                                    .await
-                                    .map_err(ApplicationError::Database)
-                            })?;
-                        }
-                        Source::Dir(dir, depth) => {
-                            async_write!(
-                                self,
-                                db,
-                                db.insert_books(books_in_dir(&dir, depth)?.into_iter())
-                                    .await
-                            )?;
-                        }
-                        Source::Glob(glob) => {
-                            async_write!(self, db, {
-                                let books = books_globbed(&glob)?;
-                                db.insert_books(books.into_iter()).await
-                            })?;
-                        }
-                    }
-                }
-
-                book_view.refresh_db_size().await;
-                self.is_sorted = false;
-            }
-            Command::ModifyColumns(columns) => {
-                for column in columns.into_vec() {
-                    match column {
-                        ModifyColumn::Add(column) => {
-                            let column = UniCase::new(column);
-                            if book_view.has_column(&column).await? {
-                                table.add_column(column);
-                            }
-                        }
-                        ModifyColumn::Remove(column) => {
-                            table.remove_column(&UniCase::new(column));
-                        }
-                    }
-                }
-            }
-            Command::SortColumns(sort_cols) => {
-                self.update_selected_columns(sort_cols);
-            }
-            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-            Command::OpenBookInApp(b, index) => {
-                if let Ok(b) = Self::get_book(b, book_view).await {
-                    let b = &b[0];
-                    open_book(b, index)?;
-                }
-            }
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
-            Command::OpenBookInExplorer(b, index) => {
-                if let Ok(b) = Self::get_book(b, book_view).await {
-                    let b = &b[0];
-                    open_book_in_dir(b, index)?;
-                }
-            }
-            Command::FilterMatches(searches) => {
-                book_view.push_scope(&searches).await?;
-                self.register_update();
-            }
-            Command::JumpTo(searches) => {
-                book_view.jump_to(&searches).await?;
-                self.register_update();
-            }
-            Command::Write => {
-                async_write!(self, db, db.save().await)?;
-            }
-            // TODO: A warning pop-up when user is about to exit
-            //  with unsaved changes.
-            Command::Quit => return Ok(false),
-            Command::WriteAndQuit => {
-                async_write!(self, db, db.save().await)?;
-                return Ok(false);
-            }
-            Command::TryMergeAllBooks => {
-                let ids = async_write!(self, db, db.merge_similar().await)?;
-                book_view.remove_books(&ids);
-                book_view.refresh_db_size().await;
-            }
-            Command::Help(flag) => {
-                if let Some(s) = help_strings(&flag) {
-                    self.active_help_string = Some(s);
-                } else {
-                    self.active_help_string = Some(GENERAL_HELP);
-                }
-            }
-            Command::GeneralHelp => {
-                self.active_help_string = Some(GENERAL_HELP);
-            }
-            #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
-            _ => return Ok(true),
-        }
-        Ok(true)
     }
 
     /// Saves the internal database to disk. Note that with SQLite, all operations are saved
@@ -641,51 +530,133 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         self.is_sorted = false;
     }
 
-    // used in AppInterface::run
-    async fn apply_sort(
-        &mut self,
-        book_view: &mut BookView<D>,
-    ) -> Result<(), DatabaseError<D::Error>> {
-        if !self.is_sorted {
-            self.db
-                .write()
-                .await
-                .sort_books_by_cols(&self.sort_settings.columns)
-                .await?;
-            book_view
-                .sort_by_columns(&self.sort_settings.columns)
-                .await?;
-            self.is_sorted = true;
-            self.register_update();
-        }
-        Ok(())
-    }
-
     pub async fn event_loop(&mut self) -> Option<()> {
         loop {
             let val = match self.event_receiver.recv().await? {
-                AppTask::ApplySort(mut book_view) => match self.apply_sort(&mut book_view).await {
-                    Ok(_) => AppResponse::Sorted(Ok(book_view)),
-                    Err(e) => AppResponse::Sorted(Err(ApplicationError::Database(e))),
-                },
                 AppTask::IsSaved => AppResponse::IsSaved(self.saved().await),
                 AppTask::GetDbPath => AppResponse::DbPath(self.db_path().await),
-                AppTask::RunCommand(command, mut table_view, mut book_view) => {
-                    let res = self
-                        .run_command(command, &mut table_view, &mut book_view)
-                        .await;
-                    AppResponse::CommandResult(res.map(|val| (val, table_view, book_view)))
-                }
                 AppTask::Save => {
-                    self.save().await;
+                    let _ = self.save().await;
                     AppResponse::IsSaved(self.saved().await)
                 }
-                AppTask::TakeUpdate => AppResponse::Updated(self.take_update()),
-                AppTask::TakeHelpInformation => {
-                    AppResponse::HelpInformation(self.active_help_string.map(String::from))
-                }
                 AppTask::GetSortSettings => AppResponse::SortSettings(self.sort_settings.clone()),
+                AppTask::TakeUpdate => AppResponse::Updated(self.take_update()),
                 AppTask::GetBookView => AppResponse::BookView(self.new_book_view().await),
+                #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+                AppTask::OpenBookIn(book, index, target) => {
+                    match target {
+                        #[cfg(any(target_os = "windows", target_os = "linux"))]
+                        Target::FileManager => {
+                            if let Ok(b) = self.db.read().await.get_book(book).await {
+                                let _ = open_book_in_dir(&b, index);
+                            }
+                        }
+                        #[cfg(any(
+                            target_os = "windows",
+                            target_os = "linux",
+                            target_os = "macos"
+                        ))]
+                        Target::NativeApp => {
+                            if let Ok(b) = self.db.read().await.get_book(book).await {
+                                let _ = open_book(&b, index);
+                            }
+                        }
+                    }
+                    AppResponse::Empty
+                }
+                AppTask::GetHelp(Some(target)) => {
+                    if let Some(s) = help_strings(&target) {
+                        AppResponse::HelpInformation(s.to_string())
+                    } else {
+                        AppResponse::HelpInformation(GENERAL_HELP.to_string())
+                    }
+                }
+                AppTask::GetHelp(None) => AppResponse::HelpInformation(GENERAL_HELP.to_string()),
+                AppTask::DeleteIds(ids) => {
+                    let _ = self.remove_books(&ids).await;
+                    AppResponse::Empty
+                }
+                AppTask::DeleteMatching(matches) => {
+                    let res = self.db.read().await.find_matches(&matches).await;
+                    if let Ok(targets) = res {
+                        let ids = targets.into_iter().map(|target| target.id()).collect();
+                        let _ = self.remove_books(&ids).await;
+                        AppResponse::Deleted(ids)
+                    } else {
+                        AppResponse::Empty
+                    }
+                }
+                AppTask::DeleteAll => {
+                    let _ = async_write!(self, db, db.clear().await);
+                    AppResponse::Empty
+                }
+                AppTask::EditBooks(books, edits) => {
+                    for book in books.to_vec().into_iter() {
+                        let _ = self.edit_book_with_id(book, &edits).await;
+                    }
+                    self.is_sorted = false;
+                    AppResponse::Empty
+                }
+                AppTask::AddBooks(sources) => {
+                    // TODO: Handle failed reads.
+                    let mut ids = vec![];
+                    for source in sources.into_vec() {
+                        match source {
+                            Source::File(f) => {
+                                if let Ok(book) = BookVariant::from_path(&f) {
+                                    if let Ok(id) =
+                                        async_write!(self, db, db.insert_book(book).await)
+                                    {
+                                        ids.push(id);
+                                    }
+                                }
+                            }
+                            Source::Dir(dir, depth) => {
+                                if let Ok(books) = books_in_dir(&dir, depth) {
+                                    if let Ok(new_ids) = async_write!(
+                                        self,
+                                        db,
+                                        db.insert_books(books.into_iter()).await
+                                    ) {
+                                        ids.extend(new_ids)
+                                    }
+                                }
+                            }
+                            Source::Glob(glob) => {
+                                if let Ok(books) = books_globbed(&glob) {
+                                    if let Ok(new_ids) = async_write!(
+                                        self,
+                                        db,
+                                        db.insert_books(books.into_iter()).await
+                                    ) {
+                                        ids.extend(new_ids)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    self.is_sorted = false;
+                    AppResponse::Created(ids)
+                }
+                AppTask::SortColumns(sort_cols) => {
+                    self.update_selected_columns(sort_cols);
+                    let _ = self
+                        .db
+                        .write()
+                        .await
+                        .sort_books_by_cols(&self.sort_settings.columns)
+                        .await;
+                    self.register_update();
+                    AppResponse::Empty
+                }
+                AppTask::TryMergeAllBooks => {
+                    if let Ok(ids) = async_write!(self, db, db.merge_similar().await) {
+                        AppResponse::MergeRefresh(ids)
+                    } else {
+                        AppResponse::Empty
+                    }
+                }
             };
             self.result_sender.send(val).await.ok();
         }

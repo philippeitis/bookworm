@@ -57,34 +57,24 @@ pub(crate) struct UIState<D: IndexableDatabase + Send + Sync> {
     pub(crate) nav_settings: NavigationSettings,
     pub(crate) curr_command: CommandString,
     pub(crate) selected_column: usize,
-    pub(crate) table_view: Option<TableView>,
-    pub(crate) book_view: Option<BookView<D>>,
+    pub(crate) table_view: TableView,
+    pub(crate) book_view: BookView<D>,
     // pub(crate) command_log: Vec<CommandString>,
 }
 
 impl<D: IndexableDatabase + Send + Sync> UIState<D> {
     pub(crate) fn modify_bv(&mut self, f: impl Fn(&mut BookView<D>) -> bool) -> bool {
-        f(self.book_view.as_mut().unwrap())
+        f(&mut self.book_view)
     }
 
     pub(crate) async fn update_column_data(&mut self) -> Result<(), BookViewError<D::Error>> {
-        self.table_view
-            .as_mut()
-            .unwrap()
-            .regenerate_columns(self.book_view.as_ref().unwrap())
-            .await
+        self.table_view.regenerate_columns(&self.book_view).await
     }
 
     pub(crate) fn selected_table_value(&self) -> Option<Vec<&str>> {
-        let selected_column = self
-            .table_view
-            .as_ref()
-            .unwrap()
-            .get_column(self.selected_column);
+        let selected_column = self.table_view.get_column(self.selected_column);
         Some(
             self.book_view
-                .as_ref()
-                .unwrap()
                 .relative_selections()?
                 .iter()
                 .map(|x| selected_column[x].as_str())
@@ -93,23 +83,16 @@ impl<D: IndexableDatabase + Send + Sync> UIState<D> {
     }
 
     pub(crate) fn num_cols(&self) -> usize {
-        self.table_view.as_ref().unwrap().selected_cols().len()
+        self.table_view.selected_cols().len()
     }
 
     pub(crate) fn selected(&self) -> Option<(usize, RelativeSelection)> {
-        Some((
-            self.selected_column,
-            self.book_view.as_ref().unwrap().relative_selections()?,
-        ))
+        Some((self.selected_column, self.book_view.relative_selections()?))
     }
 
     pub(crate) async fn make_selection_visible(&mut self) -> Result<(), BookViewError<D::Error>> {
-        if self.book_view.as_mut().unwrap().make_selection_visible() {
-            self.table_view
-                .as_mut()
-                .unwrap()
-                .regenerate_columns(self.book_view.as_ref().unwrap())
-                .await?;
+        if self.book_view.make_selection_visible() {
+            self.table_view.regenerate_columns(&self.book_view).await?;
         }
         Ok(())
     }
@@ -163,8 +146,8 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
             nav_settings: settings.navigation_settings,
             curr_command: CommandString::new(),
             selected_column: 0,
-            table_view: Some(TableView::from(settings.columns)),
-            book_view: Some(book_view),
+            table_view: TableView::from(settings.columns),
+            book_view,
         };
         AppInterface {
             border_widget: BorderWidget::new(name.into(), path),
@@ -269,11 +252,11 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
         terminal: &mut Terminal<B>,
     ) -> Result<(), TuiError<D::Error>> {
         loop {
-            self.ui_state.book_view = Some(
-                self.app_channel
-                    .apply_sort(std::mem::take(&mut self.ui_state.book_view).unwrap())
-                    .await?,
-            );
+            let res = self.app_channel.sort_settings().await;
+            self.ui_state
+                .book_view
+                .sort_by_columns(&res.columns)
+                .await?;
 
             if self.app_channel.take_update().await | self.take_update() {
                 self.border_widget.saved = self.app_channel.saved().await;
@@ -298,7 +281,6 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
 
             match self.read_user_input().await {
                 Ok(true) => {
-                    println!("OK TRUE");
                     self.write_settings().await?;
                     return Ok(terminal.clear()?);
                 }
@@ -317,8 +299,6 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
                 columns: self
                     .ui_state
                     .table_view
-                    .as_ref()
-                    .unwrap()
                     .selected_cols()
                     .iter()
                     .map(|s| s.clone().into_inner())

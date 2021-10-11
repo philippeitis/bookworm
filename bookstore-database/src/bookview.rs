@@ -210,6 +210,10 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> {
         for book in self.get_selected_books().await? {
             selected_books.insert(book.id());
         }
+        match self.scopes.last_mut() {
+            None => self.root_cursor.deselect(),
+            Some(scope) => scope.cursor.deselect(),
+        };
         self.remove_books(&selected_books);
         Ok(selected_books)
     }
