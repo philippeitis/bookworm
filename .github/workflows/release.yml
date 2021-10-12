@@ -5,14 +5,14 @@ on:
 
   push:
     tags:
-    - 'v[0-9]+.[0-9]+.[0-9]+'
+    - 'v[0-9]+.[0-9]+(.[0-9]+)+'
     ## - release
 
 env:
   BIN_NAME: bookstore
   PROJECT_NAME: bookstore-tui
   REPO_NAME: philippeitis/bookstore
-  BREW_TAP: jondot/homebrew-tap
+#   BREW_TAP: jondot/homebrew-tap
 
 jobs:
   dist:
