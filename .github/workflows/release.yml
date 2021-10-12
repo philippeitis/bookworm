@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  BIN_NAME: bookstore
+  BIN_NAME: bookstore-tui
   PROJECT_NAME: bookstore-tui
   REPO_NAME: philippeitis/bookstore
 #   BREW_TAP: jondot/homebrew-tap
