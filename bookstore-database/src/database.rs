@@ -10,6 +10,7 @@ use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, BookVariant, ColumnOrder, Edit};
 
 use crate::search::{Error as SearchError, Search};
+use crate::paginator::Variable;
 
 #[derive(Debug)]
 pub enum DatabaseError<DBError> {
@@ -278,4 +279,10 @@ pub trait IndexableDatabase: AppDatabase + Sized {
         index: usize,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>>;
+
+    async fn perform_query(
+        &mut self,
+        query: &str,
+        bound_variables: &[Variable],
+    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
 }

@@ -2,6 +2,7 @@ mod ui;
 
 use std::env;
 use std::io::stdout;
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::process::exit;
 
@@ -15,8 +16,9 @@ use tui::Terminal;
 
 use bookstore_app::table_view::TableView;
 use bookstore_app::{parse_args, App, Settings};
-use bookstore_database::AppDatabase;
+use bookstore_database::paginator::Variable;
 use bookstore_database::SQLiteDatabase;
+use bookstore_database::{AppDatabase, IndexableDatabase};
 
 use crate::ui::views::{run_command, AppView, ApplicationTask};
 use crate::ui::{AppInterface, TuiError};
@@ -67,108 +69,172 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
         app_settings.database_settings.path = path;
     }
 
-    let db = SQLiteDatabase::open(&app_settings.database_settings.path).await?;
+    let mut db = SQLiteDatabase::open(&app_settings.database_settings.path).await?;
+    use bookstore_database::paginator::join_cols;
+    use bookstore_records::book::{BookID, ColumnIdentifier};
+    use bookstore_records::{Book, BookVariant, ColumnOrder};
+    use std::convert::TryFrom;
+    let (query, vars) = join_cols(
+        Some(&Book::from_variant(
+            BookID::try_from(1).unwrap(),
+            BookVariant::from_path("./temp/sample books/Airman - Eoin Colfer.epub").unwrap(),
+        )),
+        &[(ColumnIdentifier::Author, ColumnOrder::Descending)],
+        ColumnOrder::Descending,
+    );
 
-    let (mut app, mut receiver) = App::new(db, app_settings.sort_settings);
-    let mut placeholder_table_view = TableView::default();
-    let mut book_view = app.new_book_view().await;
-
-    tokio::spawn(async move {
-        let _ = app.event_loop().await;
-    });
-
-    if !commands.is_empty() {
-        for command in commands.split(|v| v == "--") {
-            if let Ok(command) = parse_args(command.to_owned()) {
-                if command.requires_ui() {
-                    println!(
-                        "The selected command ({:?}) requires opening the user interface.",
-                        command
-                    );
-                    return Ok(());
-                }
-                match run_command(
-                    &mut receiver,
-                    command,
-                    &mut placeholder_table_view,
-                    &mut book_view,
-                )
-                .await?
-                {
-                    ApplicationTask::Quit => return Ok(()),
-                    ApplicationTask::SwitchView(AppView::Help(msg)) => println!("{}", msg),
-                    _ => {}
-                }
-            }
-        }
+    println!("{}", query);
+    let books = db.perform_query(&query, &vars).await?;
+    for book in books.iter() {
+        println!(
+            "{}|{:?}|{:?}",
+            book.id(),
+            book.title,
+            book.authors().map(|x| x.first()).flatten()
+        );
     }
 
-    let default_sort = receiver.sort_settings().await;
-    receiver.sort_cols(default_sort.columns).await;
-    // Goes before due to lifetime issues.
-    let stdout_ = stdout();
-
-    let mut app = AppInterface::new(
-        "Really Cool Library",
-        interface_settings,
-        settings_path,
-        receiver,
-        EventStream::new(),
-    )
-    .await;
-
-    let backend = CrosstermBackend::new(&stdout_);
-    let mut terminal = Terminal::new(backend)?;
-    crossterm::terminal::enable_raw_mode()?;
-    execute!(
-        &stdout_,
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        cursor::Hide
-    )?;
-    let default_panic = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let stdout_ = stdout();
-        let _ = execute!(
-            &stdout_,
-            cursor::Show,
-            DisableMouseCapture,
-            LeaveAlternateScreen
-        );
-        let _ = crossterm::terminal::disable_raw_mode();
-        default_panic(info);
-        exit(1)
-    }));
-
-    let r = app.run(&mut terminal).await;
-    execute!(
-        &stdout_,
-        cursor::Show,
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    )?;
-    crossterm::terminal::disable_raw_mode()?;
-    r
-    // match r {
-    //     Ok(res) => res,
-    //     Err(e) => match e.downcast_ref::<&'static str>() {
-    //         Some(s) => {
-    //             println!("Error occurred during execution: {}", s);
-    //             Ok(())
-    //         }
-    //         None => match e.downcast_ref::<String>() {
-    //             Some(s) => {
-    //                 println!("Error occurred during execution: {}", s);
-    //                 Ok(())
-    //             }
-    //             None => {
-    //                 println!("Unknown error occurred during execution.");
-    //                 Ok(())
-    //             }
-    //         },
-    //     },
-    // }
+    Ok(())
 }
+// #[tokio::main]
+// async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
+//     let (opts, commands) = {
+//         let args: Vec<_> = env::args().collect();
+//         if args.is_empty() {
+//             (Opts::parse_from(Vec::<String>::new()), vec![])
+//         } else {
+//             let before_index = args.iter().position(|s| "--".eq(s)).unwrap_or(args.len());
+//             let (args, command) = args.split_at(before_index);
+//             if command.is_empty() {
+//                 (Opts::parse_from(args), command.to_owned())
+//             } else {
+//                 (Opts::parse_from(args), command[1..].to_owned())
+//             }
+//         }
+//     };
+//
+//     let Opts { settings, database } = opts;
+//     let ((interface_settings, mut app_settings), settings_path) = if let Some(path) = settings {
+//         (
+//             Settings::open(&path).unwrap_or_default().split(),
+//             Some(path),
+//         )
+//     } else if let Some(mut path) = dirs::config_dir() {
+//         path.push("bookstore/settings.toml");
+//         (
+//             Settings::open(&path).unwrap_or_default().split(),
+//             Some(path),
+//         )
+//     } else {
+//         (Settings::default().split(), None)
+//     };
+//
+//     if let Some(path) = database {
+//         app_settings.database_settings.path = path;
+//     }
+//
+//     let db = SQLiteDatabase::open(&app_settings.database_settings.path).await?;
+//
+//     let (mut app, mut receiver) = App::new(db, app_settings.sort_settings);
+//     let mut placeholder_table_view = TableView::default();
+//     let mut book_view = app.new_book_view().await;
+//
+//     tokio::spawn(async move {
+//         let _ = app.event_loop().await;
+//     });
+//
+//     if !commands.is_empty() {
+//         for command in commands.split(|v| v == "--") {
+//             if let Ok(command) = parse_args(command.to_owned()) {
+//                 if command.requires_ui() {
+//                     println!(
+//                         "The selected command ({:?}) requires opening the user interface.",
+//                         command
+//                     );
+//                     return Ok(());
+//                 }
+//                 match run_command(
+//                     &mut receiver,
+//                     command,
+//                     &mut placeholder_table_view,
+//                     &mut book_view,
+//                 )
+//                 .await?
+//                 {
+//                     ApplicationTask::Quit => return Ok(()),
+//                     ApplicationTask::SwitchView(AppView::Help(msg)) => println!("{}", msg),
+//                     _ => {}
+//                 }
+//             }
+//         }
+//     }
+//
+//     let default_sort = receiver.sort_settings().await;
+//     receiver.sort_cols(default_sort.columns).await;
+//     // Goes before due to lifetime issues.
+//     let stdout_ = stdout();
+//
+//     let mut app = AppInterface::new(
+//         "Really Cool Library",
+//         interface_settings,
+//         settings_path,
+//         receiver,
+//         EventStream::new(),
+//     )
+//     .await;
+//
+//     let backend = CrosstermBackend::new(&stdout_);
+//     let mut terminal = Terminal::new(backend)?;
+//     crossterm::terminal::enable_raw_mode()?;
+//     execute!(
+//         &stdout_,
+//         EnterAlternateScreen,
+//         EnableMouseCapture,
+//         cursor::Hide
+//     )?;
+//     let default_panic = std::panic::take_hook();
+//     std::panic::set_hook(Box::new(move |info| {
+//         let stdout_ = stdout();
+//         let _ = execute!(
+//             &stdout_,
+//             cursor::Show,
+//             DisableMouseCapture,
+//             LeaveAlternateScreen
+//         );
+//         let _ = crossterm::terminal::disable_raw_mode();
+//         default_panic(info);
+//         exit(1)
+//     }));
+//
+//     let r = app.run(&mut terminal).await;
+//     execute!(
+//         &stdout_,
+//         cursor::Show,
+//         DisableMouseCapture,
+//         LeaveAlternateScreen
+//     )?;
+//     crossterm::terminal::disable_raw_mode()?;
+//     r
+//     // match r {
+//     //     Ok(res) => res,
+//     //     Err(e) => match e.downcast_ref::<&'static str>() {
+//     //         Some(s) => {
+//     //             println!("Error occurred during execution: {}", s);
+//     //             Ok(())
+//     //         }
+//     //         None => match e.downcast_ref::<String>() {
+//     //             Some(s) => {
+//     //                 println!("Error occurred during execution: {}", s);
+//     //                 Ok(())
+//     //             }
+//     //             None => {
+//     //                 println!("Unknown error occurred during execution.");
+//     //                 Ok(())
+//     //             }
+//     //         },
+//     //     },
+//     // }
+// }
 
 // TODO:
 //  Live search, fuzzy text search? meillisearch?

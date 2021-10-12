@@ -8,6 +8,7 @@ mod bookmap;
 pub mod bookview;
 pub mod database;
 pub mod paged_cursor;
+pub mod paginator;
 pub mod search;
 #[cfg(feature = "sqlite")]
 pub mod sqlite_database;

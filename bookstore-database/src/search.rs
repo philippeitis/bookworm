@@ -26,6 +26,7 @@ impl From<RegexError> for Error {
         Error::Regex(e)
     }
 }
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Search {
     pub mode: SearchMode,
@@ -46,11 +47,15 @@ impl Search {
     }
 }
 
+/// Provides a mechanism to determine if a particular book matches a particular search string,
+/// using some internally defined comparison method.
 pub trait Matcher {
+    /// Creates a new Matcher instance over the given search string.
     fn new(column: ColumnIdentifier, search: String) -> Result<Self, Error>
     where
         Self: Sized;
 
+    /// Determines if the book matches the internal match rules.
     fn is_match(&self, book: &Book) -> bool;
 }
 

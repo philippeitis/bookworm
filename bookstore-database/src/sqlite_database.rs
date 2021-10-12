@@ -23,9 +23,12 @@ use bookstore_records::series::Series;
 use bookstore_records::{Book, BookVariant, ColumnOrder, Edit};
 
 use crate::bookmap::BookCache;
+use crate::paginator::Variable;
 use crate::search::Search;
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
+// TODO: Index for title, named_tags, min of multimap_tag
+/// Top level book metadata
 const CREATE_BOOKS: &str = r#"CREATE TABLE IF NOT EXISTS `books` (
 `book_id` INTEGER NOT NULL PRIMARY KEY,
 `title` TEXT DEFAULT NULL,
@@ -33,6 +36,7 @@ const CREATE_BOOKS: &str = r#"CREATE TABLE IF NOT EXISTS `books` (
 `series_id` REAL DEFAULT NULL
 );"#;
 
+/// Tags for books with a particular name and single value
 // TODO: Fix inability to store multiple authors.
 const CREATE_NAMED_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `named_tags` (
 `name` TEXT NOT NULL,
@@ -44,6 +48,7 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON DELETE CASCADE
 );"#;
 
+/// Tags without associated value
 const CREATE_FREE_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `free_tags` (
 `value` TEXT NOT NULL,
 `book_id` INTEGER NOT NULL,
@@ -53,6 +58,7 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON DELETE CASCADE
 );"#;
 
+/// Tags which map to multiple values
 const CREATE_MULTIMAP_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `multimap_tags` (
 `name` TEXT NOT NULL,
 `value` TEXT NOT NULL,
@@ -63,6 +69,7 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON DELETE CASCADE
 );"#;
 
+/// Variant metadata - each book can have multiple variants
 const CREATE_VARIANTS: &str = r#"CREATE TABLE IF NOT EXISTS `variants` (
 `book_type` TEXT NOT NULL,
 `path` BLOB NOT NULL,
@@ -78,7 +85,7 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
     ON DELETE CASCADE
 );"#;
-
+#[derive(sqlx::FromRow)]
 struct BookData {
     book_id: i64,
     title: Option<String>,
@@ -86,6 +93,7 @@ struct BookData {
     series_id: Option<f32>,
 }
 
+#[derive(sqlx::FromRow)]
 struct VariantData {
     book_id: i64,
     book_type: String,
@@ -99,12 +107,14 @@ struct VariantData {
     hash: Vec<u8>,
 }
 
+#[derive(sqlx::FromRow)]
 struct NamedTagData {
     name: String,
     value: String,
     book_id: i64,
 }
 
+#[derive(sqlx::FromRow)]
 struct FreeTagData {
     value: String,
     book_id: i64,
@@ -213,31 +223,13 @@ pub struct SQLiteDatabase {
 //  Deletion of many book ids is very slow for large numbers - fix through lazy loading, using SQL queries?
 //
 impl SQLiteDatabase {
-    async fn load_books(
-        &mut self,
-    ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
-        // TODO: Benchmark this for large databases with complex books.
-        let raw_books = sqlx::query_as!(BookData, "SELECT * FROM books")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let raw_variants = sqlx::query_as!(VariantData, "SELECT * FROM variants")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let raw_named_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM named_tags")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let raw_free_tags = sqlx::query_as!(FreeTagData, "SELECT * FROM free_tags")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let raw_multimap_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM multimap_tags")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-
+    fn books_from_sql(
+        raw_books: Vec<BookData>,
+        raw_variants: Vec<VariantData>,
+        raw_named_tags: Vec<NamedTagData>,
+        raw_free_tags: Vec<FreeTagData>,
+        raw_multimap_tags: Vec<NamedTagData>,
+    ) -> (Vec<(BookID, Arc<Book>)>, HashSet<UniCase<String>>) {
         let mut books: HashMap<_, _> = raw_books
             .into_iter()
             .filter_map(|book_data: BookData| match Book::try_from(book_data) {
@@ -342,10 +334,104 @@ impl SQLiteDatabase {
             }
         }
 
-        self.local_cache = BookCache::from_values_unchecked(
+        (
             books.into_iter().map(|(a, b)| (a, Arc::new(b))).collect(),
             prime_cols.into_iter().map(UniCase::new).collect(),
+        )
+    }
+
+    async fn load_book_ids(
+        &mut self,
+        ids: &[BookID],
+    ) -> Result<HashMap<BookID, Arc<Book>>, DatabaseError<<SQLiteDatabase as AppDatabase>::Error>>
+    {
+        // TODO: Benchmark this for large databases with complex books.
+        let where_ = format!("IN ({})", ids.iter().map(|x| x.to_string()).join(", "));
+        let raw_books = sqlx::query_as(&format!(
+            "SELECT * FROM books WHERE books.book_id {}",
+            where_
+        ))
+        .fetch_all(&self.backend)
+        .await
+        .map_err(DatabaseError::Backend)?;
+        let raw_variants = sqlx::query_as(&format!(
+            "SELECT * FROM variants WHERE variants.book_id {}",
+            where_
+        ))
+        .fetch_all(&self.backend)
+        .await
+        .map_err(DatabaseError::Backend)?;
+        let raw_named_tags = sqlx::query_as(&format!(
+            "SELECT * FROM named_tags WHERE named_tags.book_id {}",
+            where_
+        ))
+        .fetch_all(&self.backend)
+        .await
+        .map_err(DatabaseError::Backend)?;
+        let raw_free_tags = sqlx::query_as(&format!(
+            "SELECT * FROM free_tags WHERE free_tags.book_id {}",
+            where_
+        ))
+        .fetch_all(&self.backend)
+        .await
+        .map_err(DatabaseError::Backend)?;
+        let raw_multimap_tags = sqlx::query_as(&format!(
+            "SELECT * FROM multimap_tags WHERE multimap_tags.book_id {}",
+            where_
+        ))
+        .fetch_all(&self.backend)
+        .await
+        .map_err(DatabaseError::Backend)?;
+
+        let (books, columns) = SQLiteDatabase::books_from_sql(
+            raw_books,
+            raw_variants,
+            raw_named_tags,
+            raw_free_tags,
+            raw_multimap_tags,
         );
+
+        books
+            .iter()
+            .for_each(|(_, book)| self.local_cache.insert_book(book.clone()));
+        self.local_cache.insert_columns(columns);
+        Ok(books.into_iter().collect())
+    }
+
+    async fn load_books(
+        &mut self,
+    ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
+        // TODO: Benchmark this for large databases with complex books.
+        let raw_books = sqlx::query_as!(BookData, "SELECT * FROM books")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let raw_variants = sqlx::query_as!(VariantData, "SELECT * FROM variants")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let raw_named_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM named_tags")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let raw_free_tags = sqlx::query_as!(FreeTagData, "SELECT * FROM free_tags")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let raw_multimap_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM multimap_tags")
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+
+        let (books, columns) = SQLiteDatabase::books_from_sql(
+            raw_books,
+            raw_variants,
+            raw_named_tags,
+            raw_free_tags,
+            raw_multimap_tags,
+        );
+
+        self.local_cache = BookCache::from_values_unchecked(books.into_iter().collect(), columns);
         Ok(())
     }
 }
@@ -1094,5 +1180,38 @@ impl IndexableDatabase for SQLiteDatabase {
             .ok_or(DatabaseError::IndexOutOfBounds(index))?;
         let id = book.id();
         self.edit_book_with_id(id, edits).await
+    }
+
+    async fn perform_query(
+        &mut self,
+        query: &str,
+        bound_variables: &[Variable],
+    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
+        #[derive(sqlx::FromRow, Debug)]
+        struct SqlxBookId {
+            book_id: i64,
+        }
+        let mut query = sqlx::query_as(query);
+        for value in bound_variables {
+            query = match value {
+                Variable::Int(i) => query.bind(i),
+                Variable::Str(s) => query.bind(s),
+            };
+        }
+
+        let ids: Vec<SqlxBookId> = query
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let ids: Vec<BookID> = ids
+            .into_iter()
+            .map(|id| BookID::try_from(id.book_id as u64).unwrap())
+            .collect();
+
+        let books = self.load_book_ids(&ids).await?;
+        Ok(ids
+            .iter()
+            .map(|id| books.get(id).unwrap().clone())
+            .collect())
     }
 }

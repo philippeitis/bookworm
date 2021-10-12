@@ -47,6 +47,10 @@ impl BookCache {
         self.books.insert(book.id(), book);
     }
 
+    pub(crate) fn insert_columns<I: IntoIterator<Item = UniCase<String>>>(&mut self, columns: I) {
+        self.cols.extend(columns.into_iter());
+    }
+
     pub fn len(&self) -> usize {
         self.books.len()
     }
