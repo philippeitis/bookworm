@@ -27,6 +27,29 @@ use crate::paginator::Variable;
 use crate::search::Search;
 use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
+// CREATE VIRTUAL TABLE table_fts USING FTS5 (
+//     fields,
+//     content="items"
+// );
+// INSERT INTO table_fts (fields)
+//     SELECT fields FROM table;
+//
+// SELECT rowid, * FROM table_fts WHERE table_fts MATCH ?;
+// CREATE TRIGGER notes_fts_before_update BEFORE UPDATE ON notes BEGIN
+//     DELETE FROM notes_fts WHERE docid=old.rowid;
+// END
+//
+// CREATE TRIGGER notes_fts_before_delete BEFORE DELETE ON notes BEGIN
+//     DELETE FROM notes_fts WHERE docid=old.rowid;
+// END
+//
+// CREATE TRIGGER notes_after_update AFTER UPDATE ON notes BEGIN
+//     INSERT INTO notes_fts(docid, id, title, body) SELECT rowid, id, title, body FROM notes WHERE is_conflict = 0 AND encryption_applied = 0 AND new.rowid = notes.rowid;
+// END
+//
+// CREATE TRIGGER notes_after_insert AFTER INSERT ON notes BEGIN
+//     INSERT INTO notes_fts(docid, id, title, body) SELECT rowid, id, title, body FROM notes WHERE is_conflict = 0 AND encryption_applied = 0 AND new.rowid = notes.rowid;
+// END
 // TODO: Index for title, named_tags, min of multimap_tag
 /// Top level book metadata
 const CREATE_BOOKS: &str = r#"CREATE TABLE IF NOT EXISTS `books` (
@@ -1146,40 +1169,6 @@ impl IndexableDatabase for SQLiteDatabase {
         self.local_cache
             .get_book_indexed(index)
             .ok_or(DatabaseError::IndexOutOfBounds(index))
-    }
-
-    async fn remove_book_indexed(
-        &mut self,
-        index: usize,
-    ) -> Result<(), DatabaseError<Self::Error>> {
-        // "DELETE FROM books WHERE book_id > last_id ORDER BY {} {} LIMIT 1"
-        // NOTE: remove_book_indexed is for removing a selected book -
-        // a book can only be selected if it is already loaded - eg. in cache.
-        // "DELETE FROM books WHERE book_id = {}"
-
-        let book = self
-            .local_cache
-            .get_book_indexed(index)
-            .ok_or(DatabaseError::IndexOutOfBounds(index))?;
-        let id = book.id();
-        self.remove_book(id).await
-    }
-
-    async fn edit_book_indexed(
-        &mut self,
-        index: usize,
-        edits: &[(ColumnIdentifier, Edit)],
-    ) -> Result<(), DatabaseError<Self::Error>> {
-        // "UPDATE {} SET {} = {} WHERE book_id > last_id ORDER BY {} {} LIMIT 1"
-        // NOTE: edit_book_indexed is for editing a selected book -
-        // a book can only be selected if it is already loaded - eg. in cache.
-
-        let book = self
-            .local_cache
-            .get_book_indexed(index)
-            .ok_or(DatabaseError::IndexOutOfBounds(index))?;
-        let id = book.id();
-        self.edit_book_with_id(id, edits).await
     }
 
     async fn perform_query(

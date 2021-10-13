@@ -254,32 +254,6 @@ pub trait IndexableDatabase: AppDatabase + Sized {
     async fn get_book_indexed(&self, index: usize)
         -> Result<Arc<Book>, DatabaseError<Self::Error>>;
 
-    /// Remove the book at the current index, respecting the current ordering.
-    ///
-    /// # Arguments
-    /// * ` index ` - the index of the book to remove
-    ///
-    /// # Errors
-    /// This function will return an error if updating the database fails.
-    async fn remove_book_indexed(&mut self, index: usize)
-        -> Result<(), DatabaseError<Self::Error>>;
-
-    /// Finds the book at the given index, then, for each pair of strings (field, new_value)
-    /// in `edits`, set the corresponding field to new_value. If a given field is immutable,
-    /// or some other failure occurs, an error will be returned.
-    ///
-    /// # Arguments
-    /// * ` id ` - The ID of the book to be edited.
-    /// * ` edits ` - A set of <field, value> pairs to set in the book.
-    ///
-    /// # Errors
-    /// This function will return an error if updating the database fails.
-    async fn edit_book_indexed(
-        &mut self,
-        index: usize,
-        edits: &[(ColumnIdentifier, Edit)],
-    ) -> Result<(), DatabaseError<Self::Error>>;
-
     async fn perform_query(
         &mut self,
         query: &str,

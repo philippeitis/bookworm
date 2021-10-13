@@ -35,7 +35,6 @@ impl Default for BookCache {
 }
 
 impl BookCache {
-    #[allow(dead_code)]
     pub(crate) fn from_values_unchecked(
         books: IndexMap<BookID, Arc<Book>>,
         cols: HashSet<UniCase<String>>,
@@ -57,10 +56,6 @@ impl BookCache {
 
     pub fn remove_book(&mut self, id: BookID) {
         self.books.shift_remove(&id);
-    }
-
-    pub fn remove_book_indexed(&mut self, index: usize) -> bool {
-        self.books.shift_remove_index(index).is_some()
     }
 
     pub fn remove_books(&mut self, ids: &HashSet<BookID>) {
@@ -91,28 +86,6 @@ impl BookCache {
         match self.books.get_mut(&id) {
             None => Ok(false),
             Some(book) => {
-                for (column, edit) in edits {
-                    Arc::make_mut(book).edit_column(&column, edit)?;
-                    match column {
-                        ColumnIdentifier::NamedTag(x) => {
-                            self.cols.insert(UniCase::new(x.to_owned()));
-                        }
-                        _ => {}
-                    }
-                }
-                Ok(true)
-            }
-        }
-    }
-
-    pub fn edit_book_indexed(
-        &mut self,
-        index: usize,
-        edits: &[(ColumnIdentifier, Edit)],
-    ) -> Result<bool, RecordError> {
-        match self.books.get_index_mut(index) {
-            None => Ok(false),
-            Some((_, book)) => {
                 for (column, edit) in edits {
                     Arc::make_mut(book).edit_column(&column, edit)?;
                     match column {
