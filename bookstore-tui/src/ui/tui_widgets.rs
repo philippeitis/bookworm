@@ -135,6 +135,44 @@ impl<'a> MultiSelectList<'a> {
         self.start_corner = corner;
         self
     }
+
+    fn get_items_bounds(
+        &self,
+        selected: Option<usize>,
+        offset: usize,
+        max_height: usize,
+    ) -> (usize, usize) {
+        let offset = offset.min(self.items.len().saturating_sub(1));
+        let mut start = offset;
+        let mut end = offset;
+        let mut height = 0;
+        for item in self.items.iter().skip(offset) {
+            if height + item.height() > max_height {
+                break;
+            }
+            height += item.height();
+            end += 1;
+        }
+
+        let selected = selected.unwrap_or(0).min(self.items.len() - 1);
+        while selected >= end {
+            height = height.saturating_add(self.items[end].height());
+            end += 1;
+            while height > max_height {
+                height = height.saturating_sub(self.items[start].height());
+                start += 1;
+            }
+        }
+        while selected < start {
+            start -= 1;
+            height = height.saturating_add(self.items[start].height());
+            while height > max_height {
+                end -= 1;
+                height = height.saturating_sub(self.items[end].height());
+            }
+        }
+        (start, end)
+    }
 }
 
 impl<'a> StatefulWidget for MultiSelectList<'a> {
@@ -160,43 +198,12 @@ impl<'a> StatefulWidget for MultiSelectList<'a> {
         }
         let list_height = list_area.height as usize;
 
-        let mut start = state.offset;
-        let mut end = state.offset;
-        let mut height = 0;
-        for item in self.items.iter().skip(state.offset) {
-            if height + item.height() > list_height {
-                break;
-            }
-            height += item.height();
-            end += 1;
-        }
-
-        let vis_selected = state
-            .front_selection()
-            .unwrap_or(0)
-            .min(self.items.len() - 1);
-        while vis_selected >= end {
-            height = height.saturating_add(self.items[end].height());
-            end += 1;
-            while height > list_height {
-                height = height.saturating_sub(self.items[start].height());
-                start += 1;
-            }
-        }
-        while vis_selected < start {
-            start -= 1;
-            height = height.saturating_add(self.items[start].height());
-            while height > list_height {
-                end -= 1;
-                height = height.saturating_sub(self.items[end].height());
-            }
-        }
+        let (start, end) =
+            self.get_items_bounds(state.front_selection(), state.offset, list_height);
         state.offset = start;
 
         let highlight_symbol = self.highlight_symbol.unwrap_or("");
-        let blank_symbol = std::iter::repeat(" ")
-            .take(highlight_symbol.width())
-            .collect::<String>();
+        let blank_symbol = " ".repeat(highlight_symbol.width());
 
         let mut current_height = 0;
         let has_selection = !state.selected.is_empty();
