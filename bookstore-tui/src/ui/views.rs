@@ -19,7 +19,6 @@ use clipboard::{ClipboardContext, ClipboardProvider};
 
 use bookstore_app::app::AppChannel;
 use bookstore_app::parser::Source;
-use bookstore_app::parser::Target;
 use bookstore_app::settings::{Color, SortSettings};
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
@@ -483,8 +482,7 @@ impl<'b, D: IndexableDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> f
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
-        // Subtract 1 for
-        let window_height = usize::from(vchunks[0].height).saturating_sub(1);
+        let window_height = usize::from(vchunks[0].height);
         log(format!("{:?}", chunk));
         log(format!("{:?}", vchunks));
         log(format!("{}", window_height));

@@ -275,23 +275,40 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
 
             if self.app_channel.take_update().await | self.take_update() {
                 self.border_widget.saved = self.app_channel.saved().await;
-                let chunk = {
+                {
                     let frame = terminal.get_frame();
-                    let s = frame.size();
-                    log(format!("{:?}", s));
-                    Rect::new(
-                        s.x + 1,
-                        s.y + 1,
-                        s.width.saturating_sub(2),
-                        s.height.saturating_sub(2),
-                    )
+                    let size = frame.size();
+                    self.active_view
+                        .prepare_render(
+                            &mut self.ui_state,
+                            Rect::new(
+                                size.x + 1,
+                                size.y + 1,
+                                size.width.saturating_sub(2),
+                                size.height.saturating_sub(2),
+                            ),
+                        )
+                        .await;
                 };
-                self.active_view
-                    .prepare_render(&mut self.ui_state, chunk)
-                    .await;
                 terminal.draw(|f| {
-                    self.border_widget.render_into_frame(f, f.size());
-                    self.active_view.render_into_frame(f, &self.ui_state, chunk);
+                    let size = f.size();
+                    if size.height < 2 || size.width < 2 {
+                        return;
+                    }
+                    self.border_widget.render_into_frame(f, size);
+                    // TODO: User may suddenly enlargen the window,
+                    //  - should ensure that more than the window size items
+                    //  are loaded
+                    self.active_view.render_into_frame(
+                        f,
+                        &self.ui_state,
+                        Rect::new(
+                            size.x + 1,
+                            size.y + 1,
+                            size.width.saturating_sub(2),
+                            size.height.saturating_sub(2),
+                        ),
+                    );
                 })?;
             }
 
