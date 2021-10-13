@@ -1,11 +1,13 @@
-use crate::search::{Matcher, Search};
-use crate::{DatabaseError, IndexableDatabase};
-use bookstore_records::book::{BookID, ColumnIdentifier};
-use bookstore_records::{Book, ColumnOrder};
-use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::sync::Arc;
+
 use tokio::sync::RwLock;
+
+use bookstore_records::book::ColumnIdentifier;
+use bookstore_records::{Book, ColumnOrder};
+
+use crate::search::Matcher;
+use crate::{DatabaseError, IndexableDatabase};
 
 static ASCII_LOWER: [char; 26] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
@@ -230,41 +232,105 @@ impl<D: IndexableDatabase> Paginator<D> {
         &self.books[self.window_top..self.window_top + self.window_size]
     }
 
-    // TODO: Check that page is full & attempt to fill it by scrolling upwards.
+    async fn load_books_after_end(
+        &mut self,
+        num_books: usize,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        let (query, mut bindings) = join_cols(
+            self.books.last().map(|x| x.as_ref()),
+            &self.sorting_rules,
+            ColumnOrder::Descending,
+        );
+        bindings.push(Variable::Int(num_books as i64));
+        let books = self
+            .db
+            .write()
+            .await
+            .perform_query(&query, &bindings)
+            .await?;
+        self.books.extend(books);
+        Ok(())
+    }
+
+    // Should take the book by value to allow jumping around
+    async fn load_books_before_start(
+        &mut self,
+        num_books: usize,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        let (query, mut bindings) = join_cols(
+            self.books.first().map(|x| x.as_ref()),
+            &self.sorting_rules,
+            ColumnOrder::Ascending,
+        );
+        // Read only the number of items needed to fill top.
+        // TODO: If len is a large jump, we should do an OFFSET instead of loading
+        //  everything in-between (check if len > some multiple of window size),
+        //  and drop all ensuing books.
+        bindings.push(Variable::Int(num_books as i64));
+        let mut books = self
+            .db
+            .write()
+            .await
+            .perform_query(&query, &bindings)
+            .await?;
+
+        if !books.is_empty() {
+            books.reverse();
+            books.extend_from_slice(&mut self.books);
+            self.books = books;
+        }
+        Ok(())
+    }
+
     pub async fn scroll_down(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
-        if self.window_top + self.window_size + len > self.books.len() {
-            // need items from top of window + len, covering window size items
-            let start_from = self.window_top;
-            let limit = self.window_size + len;
-            let (query, mut bindings) = join_cols(
-                self.books.get(start_from).map(|book| book.as_ref()),
-                &self.sorting_rules,
-                ColumnOrder::Descending,
-            );
-            // skip len items, read full window
-            bindings.push(Variable::Int((len + self.window_size) as i64));
-            let mut books = self
-                .db
-                .write()
-                .await
-                .perform_query(&query, &bindings)
-                .await?
-                .into_iter();
-            if let Some(slice) = self.books.get_mut(self.window_top + 1..) {
-                for old_book in slice {
-                    if let Some(new_book) = books.next() {
-                        *old_book = new_book;
-                    } else {
-                        break;
+        match (self.window_top + self.window_size + len).checked_sub(self.books.len()) {
+            Some(limit) => {
+                // TODO If len is a large jump, we should do an OFFSET instead of loading
+                //  everything in-between (check if len > some multiple of window size),
+                //  and drop all current books.
+                self.load_books_after_end(limit).await?;
+                match self.books.len().checked_sub(self.window_size) {
+                    None => {
+                        self.load_books_before_start(self.window_size - self.books.len())
+                            .await?;
+                        self.window_top = 0;
                     }
+                    Some(window_top) => self.window_top = window_top,
                 }
+                Ok(())
             }
-            self.books.extend(books);
-            self.window_top += len;
-            Ok(())
-        } else {
-            self.window_top += len;
-            Ok(())
+            // checked above that it will contain enough books to fill a window.
+            None => {
+                self.window_top += len;
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn scroll_up(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
+        // TODO: Doesn't check that window size elements would be visible.
+        match self.window_top.checked_sub(len) {
+            None => {
+                self.load_books_before_start(len - self.window_top).await?;
+                self.window_top = 0;
+            }
+            Some(window_top) => {
+                self.window_top = window_top;
+            }
+        }
+
+        match (self.window_top + self.window_size).checked_sub(self.books.len()) {
+            // Attempt to scroll down, then scroll up to use all available books
+            Some(limit) => {
+                self.load_books_after_end(limit).await?;
+                self.window_top = self
+                    .books
+                    .len()
+                    .saturating_sub(self.window_size)
+                    .min(self.window_top);
+                Ok(())
+            }
+            None => Ok(()),
         }
     }
 
@@ -274,7 +340,11 @@ impl<D: IndexableDatabase> Paginator<D> {
             self.books.clear();
             self.scroll_down(0).await
         } else {
-            unimplemented!()
+            // self.make_visible(...)
+            // self.selected.iter().min_by(|a, b| a.cmp_columns(b, cols))
+            // Go to first selected item. Need to use ID w/ cmp + eq
+            // Find min of selected,
+            unimplemented!("Home should make the first selected item visible.")
         }
     }
 
@@ -294,49 +364,16 @@ impl<D: IndexableDatabase> Paginator<D> {
             self.books = books;
             Ok(())
         } else {
+            // Go to last selected item. Need to use ID w/ GEQ
             unimplemented!()
         }
     }
 
-    // TODO: Check that page is full & attempt to fill it by scrolling downwards.
-    pub async fn scroll_up(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
-        match self.window_top.checked_sub(len) {
-            None => {
-                let start_from = self.window_top;
-                let (query, mut bindings) = join_cols(
-                    self.books.get(start_from).map(|book| book.as_ref()),
-                    &self.sorting_rules,
-                    ColumnOrder::Ascending,
-                );
-                // skip len items, read full window
-                bindings.push(Variable::Int((len - self.window_top) as i64));
-                let mut books = self
-                    .db
-                    .write()
-                    .await
-                    .perform_query(&query, &bindings)
-                    .await?;
-                //
-                // need to prepend
-                if let Some(slice) = self.books.get_mut(..self.window_top) {
-                    for old_book in slice.iter_mut().rev() {
-                        if let Some(new_book) = books.pop() {
-                            *old_book = new_book;
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                books.reverse();
-                books.extend_from_slice(&mut self.books);
-                self.books = books;
-                self.window_top = 0;
-                Ok(())
-            }
-            Some(window_top) => {
-                self.window_top = window_top;
-                Ok(())
-            }
-        }
+    pub async fn update_window_size(
+        &mut self,
+        window_size: usize,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        self.window_size = window_size;
+        self.scroll_down(0).await
     }
 }

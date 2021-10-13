@@ -85,6 +85,8 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
     paginator.scroll_down(0).await?;
 
     for _ in 0..3 {
+        println!("SCROLL DOWN BY 1");
+        paginator.scroll_down(1).await?;
         for book in paginator.window() {
             println!(
                 "{}|{:?}|{:?}",
@@ -93,11 +95,11 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
                 book.authors().map(|x| x.first()).flatten()
             );
         }
-        println!("NEXT PAGE");
-        paginator.scroll_down(10).await?;
     }
 
     for _ in 0..5 {
+        println!("SCROLL UP BY 10");
+        paginator.scroll_up(10).await?;
         for book in paginator.window() {
             println!(
                 "{}|{:?}|{:?}",
@@ -106,12 +108,10 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
                 book.authors().map(|x| x.first()).flatten()
             );
         }
-        println!("NEXT PAGE");
-        paginator.scroll_up(10).await?;
     }
 
-    paginator.end().await?;
     println!("END");
+    paginator.end().await?;
     for book in paginator.window() {
         println!(
             "{}|{:?}|{:?}",
@@ -120,10 +120,10 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
             book.authors().map(|x| x.first()).flatten()
         );
     }
-    println!("NEXT PAGE");
-    for _ in 0..5 {
-        paginator.scroll_up(10).await?;
-        for book in paginator.window().iter().rev() {
+
+    paginator.update_window_size(25).await?;
+    for _ in 0..2 {
+        for book in paginator.window().iter() {
             println!(
                 "{}|{:?}|{:?}",
                 book.id(),
@@ -131,6 +131,8 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
                 book.authors().map(|x| x.first()).flatten()
             );
         }
+        println!("SCROLL UP BY 25");
+        paginator.scroll_up(25).await?;
     }
 
     Ok(())
