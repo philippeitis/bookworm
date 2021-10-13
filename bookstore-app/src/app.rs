@@ -18,7 +18,7 @@ use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant, Edit};
 
 use crate::help_strings::{help_strings, GENERAL_HELP};
-use crate::parser::{ModifyColumn, Source};
+use crate::parser::{ModifyColumn, Source, Target};
 use crate::table_view::TableView;
 
 fn log(s: impl AsRef<str>) {
@@ -141,36 +141,6 @@ fn get_book_path(book: &Book, index: usize) -> Option<&Path> {
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-/// Opens the book in the native system viewer.
-///
-/// # Arguments
-///
-/// * ` book ` - The book to open.
-///
-/// # Errors
-/// This function may error if the book's variants do not exist,
-/// or if the command itself fails.
-fn open_book(book: &Book, index: usize) -> Result<(), std::io::Error> {
-    if let Some(path) = get_book_path(book, index) {
-        #[cfg(target_os = "windows")]
-        {
-            ProcessCommand::new("cmd.exe")
-                .args(&["/C", "start", "explorer"])
-                .arg(path)
-                .spawn()?;
-        }
-        #[cfg(target_os = "linux")]
-        {
-            ProcessCommand::new("xdg-open").arg(path).spawn()?;
-        }
-        #[cfg(target_os = "macos")]
-        {
-            ProcessCommand::new("open").arg(path).spawn()?;
-        }
-    }
-    Ok(())
-}
-
 /// Opens the book and selects it, in File Explorer on Windows, or in Nautilus on Linux.
 /// Other operating systems not currently supported
 ///
@@ -182,9 +152,9 @@ fn open_book(book: &Book, index: usize) -> Result<(), std::io::Error> {
 /// # Errors
 /// This function may error if the book's variants do not exist,
 /// or if the command itself fails.
-fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
+fn open_in_dir<P: AsRef<Path>>(path: P) -> Result<(), std::io::Error> {
     #[cfg(target_os = "windows")]
-    if let Some(path) = get_book_path(book, index) {
+    {
         use std::io::Write;
 
         let mut open_book_path = std::env::current_dir()?;
@@ -200,24 +170,21 @@ fn open_book_in_dir(book: &Book, index: usize) -> Result<(), std::io::Error> {
 
         // TODO: Find a way to do this entirely in Rust
         ProcessCommand::new("python")
-            .args(&[open_book_path.as_path(), path])
+            .args(&[open_book_path.as_path(), path.as_ref()])
             .spawn()?;
     }
     #[cfg(target_os = "linux")]
-    if let Some(path) = get_book_path(book, index) {
-        ProcessCommand::new("nautilus")
-            .arg("--select")
-            .arg(path)
-            .spawn()?;
-    }
-    Ok(())
-}
+    ProcessCommand::new("nautilus")
+        .arg("--select")
+        .arg(path.as_ref())
+        .spawn()?;
+    #[cfg(target_os = "macos")]
+    ProcessCommand::new("open")
+        .arg("-R")
+        .arg(path.as_ref())
+        .spawn()?;
 
-pub enum Target {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    FileManager,
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-    NativeApp,
+    Ok(())
 }
 
 pub enum AppTask {
@@ -478,24 +445,19 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
                 AppTask::GetBookView => AppResponse::BookView(self.new_book_view().await),
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 AppTask::OpenBookIn(book, index, target) => {
-                    match target {
-                        #[cfg(any(target_os = "windows", target_os = "linux"))]
-                        Target::FileManager => {
-                            if let Ok(b) = self.db.read().await.get_book(book).await {
-                                let _ = open_book_in_dir(&b, index);
-                            }
-                        }
-                        #[cfg(any(
-                            target_os = "windows",
-                            target_os = "linux",
-                            target_os = "macos"
-                        ))]
-                        Target::NativeApp => {
-                            if let Ok(b) = self.db.read().await.get_book(book).await {
-                                let _ = open_book(&b, index);
+                    if let Ok(book) = self.db.read().await.get_book(book).await {
+                        if let Some(path) = get_book_path(&book, index) {
+                            match target {
+                                Target::FileManager => {
+                                    let _ = open_in_dir(path);
+                                }
+                                Target::DefaultApp => {
+                                    let _ = opener::open(path);
+                                }
                             }
                         }
                     }
+
                     AppResponse::Empty
                 }
                 AppTask::GetHelp(Some(target)) => {

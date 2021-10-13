@@ -73,8 +73,7 @@ pub enum Command {
     AddBooks(Box<[Source]>),
     ModifyColumns(Box<[ModifyColumn]>),
     SortColumns(Box<[(ColumnIdentifier, ColumnOrder)]>),
-    OpenBookInApp(BookIndex, usize),
-    OpenBookInExplorer(BookIndex, usize),
+    OpenBookIn(BookIndex, usize, Target),
     TryMergeAllBooks,
     Quit,
     Write,
@@ -94,9 +93,7 @@ impl Command {
     pub fn requires_ui(&self) -> bool {
         use Command::*;
         match self {
-            EditBook(b, _) | OpenBookInApp(b, _) | OpenBookInExplorer(b, _) => {
-                b == &BookIndex::Selected
-            }
+            EditBook(b, _) | OpenBookIn(b, _, _) => b == &BookIndex::Selected,
             DeleteSelected | ModifyColumns(_) | SortColumns(_) | FilterMatches(_) => true,
             _ => false,
         }
@@ -705,8 +702,9 @@ impl CommandParser for Help {
     }
 }
 
-enum Target {
-    App,
+#[derive(Debug)]
+pub enum Target {
+    DefaultApp,
     FileManager,
 }
 
@@ -718,10 +716,7 @@ struct OpenBook {
 
 impl From<OpenBook> for Command {
     fn from(ob: OpenBook) -> Self {
-        match ob.target {
-            Target::App => Command::OpenBookInApp(ob.book_index, ob.variant_index),
-            Target::FileManager => Command::OpenBookInExplorer(ob.book_index, ob.variant_index),
-        }
+        Command::OpenBookIn(ob.book_index, ob.variant_index, ob.target)
     }
 }
 
@@ -746,7 +741,7 @@ impl CommandParser for OpenBook {
             .map(|i| usize::from_str(&i).unwrap_or(0))
             .unwrap_or(0);
 
-        let mut target = Target::App;
+        let mut target = Target::DefaultApp;
 
         for (flag, args) in trailing_args {
             if flag == "-f" {

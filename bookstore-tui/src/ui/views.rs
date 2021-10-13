@@ -17,7 +17,8 @@ use unicode_truncate::UnicodeTruncateStr;
 #[cfg(feature = "copypaste")]
 use clipboard::{ClipboardContext, ClipboardProvider};
 
-use bookstore_app::app::{AppChannel, Target};
+use bookstore_app::app::AppChannel;
+use bookstore_app::parser::Target;
 use bookstore_app::settings::{Color, SortSettings};
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
@@ -121,7 +122,7 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
         }
         Command::SortColumns(columns) => ui_state.sort_settings = SortSettings { columns },
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-        Command::OpenBookInApp(book, index) => {
+        Command::OpenBookIn(book, index, target) => {
             let id = match book {
                 BookIndex::Selected => ui_state
                     .book_view
@@ -134,22 +135,7 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
                 BookIndex::ID(id) => id,
             };
 
-            app.open_book(id, index, Target::NativeApp).await;
-        }
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        Command::OpenBookInExplorer(book, index) => {
-            let id = match book {
-                BookIndex::Selected => ui_state
-                    .book_view
-                    .get_selected_books()
-                    .await?
-                    .into_iter()
-                    .map(|x| x.id())
-                    .next()
-                    .unwrap(),
-                BookIndex::ID(id) => id,
-            };
-            app.open_book(id, index, Target::FileManager).await;
+            app.open_book(id, index, target).await;
         }
         Command::FilterMatches(searches) => {
             ui_state.book_view.push_scope(&searches).await?;
