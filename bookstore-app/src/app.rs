@@ -13,17 +13,13 @@ use tokio::sync::RwLock;
 use unicase::UniCase;
 
 use bookstore_database::search::Search;
-use bookstore_database::{
-    bookview::BookViewError, Book, BookView, DatabaseError, IndexableDatabase,
-};
+use bookstore_database::{Book, BookView, DatabaseError, IndexableDatabase};
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant, Edit};
 
-use crate::autocomplete::AutoCompleteError;
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser::{ModifyColumn, Source};
 use crate::table_view::TableView;
-use crate::user_input::CommandStringError;
 
 fn log(s: impl AsRef<str>) {
     use std::io::Write;
@@ -66,8 +62,6 @@ pub enum ApplicationError<DBError> {
     Record(RecordError),
     Book(BookError),
     Database(DatabaseError<DBError>),
-    BookView(BookViewError<DBError>),
-    NoBookSelected,
     BadGlob(glob::PatternError),
     Unknown(&'static str),
 }
@@ -96,25 +90,6 @@ impl<DBError> From<BookError> for ApplicationError<DBError> {
 impl<DBError> From<RecordError> for ApplicationError<DBError> {
     fn from(e: RecordError) -> Self {
         ApplicationError::Record(e)
-    }
-}
-
-impl<DBError> From<BookViewError<DBError>> for ApplicationError<DBError> {
-    fn from(e: BookViewError<DBError>) -> Self {
-        match e {
-            BookViewError::NoBookSelected => ApplicationError::NoBookSelected,
-            x => ApplicationError::BookView(x),
-        }
-    }
-}
-
-impl<DBError> From<CommandStringError> for ApplicationError<DBError> {
-    fn from(e: CommandStringError) -> Self {
-        match e {
-            CommandStringError::AutoComplete(ac) => match ac {
-                AutoCompleteError::Glob(glob_err) => ApplicationError::BadGlob(glob_err),
-            },
-        }
     }
 }
 

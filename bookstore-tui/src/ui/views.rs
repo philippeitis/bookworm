@@ -25,7 +25,7 @@ use bookstore_database::IndexableDatabase;
 use bookstore_records::book::{ColumnIdentifier, RecordError};
 
 use crate::ui::scrollable_text::ScrollableText;
-use crate::ui::terminal_ui::UIState;
+use crate::ui::terminal_ui::{TuiError, UIState};
 use crate::ui::tui_widgets::{ListItemX, MultiSelectList, MultiSelectListState};
 use crate::ui::widgets::{
     char_chunks_to_styled_text, BookWidget, CommandWidget, StyleRules, Widget,
@@ -75,7 +75,7 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
     command: Command,
     // TODO: These should be removed as arguments
     ui_state: &mut UIState<D>,
-) -> Result<ApplicationTask, ApplicationError<D::Error>> {
+) -> Result<ApplicationTask, TuiError<D::Error>> {
     match command {
         Command::DeleteSelected => {
             let books = ui_state.book_view.remove_selected_books().await?;
@@ -287,7 +287,7 @@ pub(crate) trait InputHandler<D: IndexableDatabase + Send + Sync> {
         event: Event,
         state: &mut UIState<D>,
         app: &mut AppChannel<D>,
-    ) -> Result<ApplicationTask, ApplicationError<D::Error>>;
+    ) -> Result<ApplicationTask, TuiError<D::Error>>;
 }
 
 /// Takes `word`, and cuts excess letters to ensure that it fits within
@@ -585,7 +585,7 @@ impl<D: IndexableDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
         event: Event,
         state: &mut UIState<D>,
         app: &mut AppChannel<D>,
-    ) -> Result<ApplicationTask, ApplicationError<D::Error>> {
+    ) -> Result<ApplicationTask, TuiError<D::Error>> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Mouse(m) => match (m.kind, m.column, m.row) {
@@ -800,7 +800,7 @@ impl<D: IndexableDatabase + Send + Sync> EditWidget<D> {
         &mut self,
         app: &mut AppChannel<D>,
         state: &mut UIState<D>,
-    ) -> Result<(), ApplicationError<D::Error>> {
+    ) -> Result<(), TuiError<D::Error>> {
         if self.edit.started_edit {
             self.focused = false;
             let column = { state.table_view.selected_cols()[state.selected_column].to_owned() };
@@ -813,7 +813,9 @@ impl<D: IndexableDatabase + Send + Sync> EditWidget<D> {
             match run_command(app, Command::EditBook(BookIndex::Selected, edits), state).await {
                 Ok(_) => {}
                 // Catch immutable column error and discard changes.
-                Err(ApplicationError::Record(RecordError::ImmutableColumn)) => {}
+                Err(TuiError::Application(ApplicationError::Record(
+                    RecordError::ImmutableColumn,
+                ))) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -911,7 +913,7 @@ impl<D: IndexableDatabase + Send + Sync> InputHandler<D> for EditWidget<D> {
         event: Event,
         state: &mut UIState<D>,
         app: &mut AppChannel<D>,
-    ) -> Result<ApplicationTask, ApplicationError<D::Error>> {
+    ) -> Result<ApplicationTask, TuiError<D::Error>> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Key(event) => {
@@ -1114,7 +1116,7 @@ impl<D: IndexableDatabase + Send + Sync> InputHandler<D> for HelpWidget<D> {
         event: Event,
         state: &mut UIState<D>,
         _app: &mut AppChannel<D>,
-    ) -> Result<ApplicationTask, ApplicationError<D::Error>> {
+    ) -> Result<ApplicationTask, TuiError<D::Error>> {
         match event {
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             Event::Mouse(m) => match m.kind {

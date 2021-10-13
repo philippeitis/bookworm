@@ -14,7 +14,7 @@ use bookstore_app::settings::{
     DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings, SortSettings,
 };
 use bookstore_app::table_view::TableView;
-use bookstore_app::user_input::{CommandString, EditState};
+use bookstore_app::user_input::{CommandString, CommandStringError, EditState};
 use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
 use bookstore_database::{BookView, DatabaseError, IndexableDatabase};
@@ -31,12 +31,20 @@ use bookstore_database::paged_cursor::RelativeSelection;
 pub(crate) enum TuiError<DBError> {
     Application(ApplicationError<DBError>),
     Database(DatabaseError<DBError>),
+    BookView(BookViewError<DBError>),
     Io(std::io::Error),
+    CommandString(CommandStringError),
 }
 
 impl<DBError> From<ApplicationError<DBError>> for TuiError<DBError> {
     fn from(e: ApplicationError<DBError>) -> Self {
         TuiError::Application(e)
+    }
+}
+
+impl<DBError> From<BookViewError<DBError>> for TuiError<DBError> {
+    fn from(e: BookViewError<DBError>) -> Self {
+        TuiError::BookView(e)
     }
 }
 
@@ -52,6 +60,11 @@ impl<DBError> From<std::io::Error> for TuiError<DBError> {
     }
 }
 
+impl<DBError> From<CommandStringError> for TuiError<DBError> {
+    fn from(e: CommandStringError) -> Self {
+        TuiError::CommandString(e)
+    }
+}
 pub(crate) struct UIState<D: IndexableDatabase + Send + Sync> {
     pub(crate) style: InterfaceStyle,
     pub(crate) nav_settings: NavigationSettings,
