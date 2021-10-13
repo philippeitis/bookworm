@@ -702,7 +702,7 @@ impl CommandParser for Help {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Target {
     DefaultApp,
     FileManager,
