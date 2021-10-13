@@ -9,8 +9,8 @@ use unicase::UniCase;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, BookVariant, ColumnOrder, Edit};
 
-use crate::search::{Error as SearchError, Search};
 use crate::paginator::Variable;
+use crate::search::{Error as SearchError, Search};
 
 #[derive(Debug)]
 pub enum DatabaseError<DBError> {
