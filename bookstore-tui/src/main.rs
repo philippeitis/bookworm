@@ -74,14 +74,13 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
     let mut db = std::sync::Arc::new(tokio::sync::RwLock::new(
         SQLiteDatabase::open(&app_settings.database_settings.path).await?,
     ));
-    use bookstore_database::paginator::join_cols;
     use bookstore_records::book::{BookID, ColumnIdentifier};
     use bookstore_records::{Book, BookVariant, ColumnOrder};
     use std::convert::TryFrom;
 
     let mut paginator = bookstore_database::paginator::Paginator::new(
         db.clone(),
-        10,
+        5,
         vec![(ColumnIdentifier::ID, ColumnOrder::Ascending)].into_boxed_slice(),
     );
     paginator.scroll_down(0).await?;
@@ -123,8 +122,19 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
         );
     }
 
-    paginator.update_window_size(25).await?;
+    println!("update window size");
+    paginator.update_window_size(10).await?;
+    for book in paginator.window().iter() {
+        println!(
+            "{}|{:?}|{:?}",
+            book.id(),
+            book.title,
+            book.authors().map(|x| x.first()).flatten()
+        );
+    }
     for _ in 0..2 {
+        println!("SCROLL UP BY 25");
+        paginator.scroll_up(25).await?;
         for book in paginator.window().iter() {
             println!(
                 "{}|{:?}|{:?}",
@@ -133,8 +143,6 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
                 book.authors().map(|x| x.first()).flatten()
             );
         }
-        println!("SCROLL UP BY 25");
-        paginator.scroll_up(25).await?;
     }
 
     Ok(())

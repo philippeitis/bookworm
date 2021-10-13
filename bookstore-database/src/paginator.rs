@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use bookstore_records::book::ColumnIdentifier;
+use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::{Book, ColumnOrder};
 
 use crate::search::Matcher;
@@ -13,6 +13,155 @@ static ASCII_LOWER: [char; 26] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
     't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
+
+struct QueryBuilder {
+    order: ColumnOrder,
+    sort_rules: Vec<(ColumnIdentifier, ColumnOrder)>,
+    id_inclusive: bool,
+    limit: usize,
+}
+
+impl Default for QueryBuilder {
+    fn default() -> Self {
+        Self {
+            order: ColumnOrder::Descending,
+            sort_rules: vec![(ColumnIdentifier::ID, ColumnOrder::Ascending)],
+            id_inclusive: false,
+            limit: 0,
+        }
+    }
+}
+
+impl QueryBuilder {
+    fn sort_rules(mut self, sort_rules: &[(ColumnIdentifier, ColumnOrder)]) -> Self {
+        self.sort_rules = sort_rules.to_vec();
+        if !self
+            .sort_rules
+            .iter()
+            .any(|(col_id, _)| matches!(col_id, ColumnIdentifier::ID))
+        {
+            self.sort_rules
+                .push((ColumnIdentifier::ID, ColumnOrder::Ascending));
+        };
+        self
+    }
+
+    fn order(mut self, order: ColumnOrder) -> Self {
+        self.order = order;
+        self
+    }
+
+    fn include_id(mut self, include_id: bool) -> Self {
+        self.id_inclusive = include_id;
+        self
+    }
+
+    fn limit(mut self, limit: usize) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// Returns a query which returns the book ids, relative to the provided book.
+    /// Results will not include the provided book.
+    fn join_cols(&self, book: Option<&Book>) -> (String, Vec<Variable>) {
+        let mut from = String::new();
+        let mut where_str = String::new();
+        let mut join = String::new();
+        let mut order_str = String::new();
+        let mut num_ops = 0;
+        let mut bind_vars = vec![];
+        // SELECT book_id, MIN(value) from multimap_tags WHERE name={} GROUP BY book_id
+        // or max
+        // multimap / description: use GROUP_CONCAT (+ sort) or just regular min to join authors in sorted order
+        // SELECT
+        //     all fields involved
+        // FROM
+        //     books
+        // INNER JOIN named_tags AS TAGS ON
+        // TAGS.book_id = books.book_id
+        // AND TAGS.name = {named_tag}
+        // WHERE (sort_start > ...)
+        // ORDER BY COL1 ASC, COL2 DESC
+        // LIMIT n;
+        // select all keys needed to sort
+        // need FROM () as below to select a particular mmap key
+        // Need rule for reading each multimap key
+        // Need rule for reading books if title
+        // Need rule for reading named tag
+        // SELECT books.book_id FROM (
+        //     SELECT book_id, MIN(value) as mvalue
+        //     FROM multimap_tags
+        //     WHERE name= "author"
+        //     GROUP BY book_id
+        // ) as A INNER JOIN books ON (A.book_id = books.book_id)
+        // WHERE (books.book_id > 291 AND mvalue >= "Alastair")
+        // ORDER BY mvalue ASC, ..., books.book_id ASC
+        // LIMIT 5;
+
+        // Add the id comparison to ensure pagination doesn't repeat items
+        for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ASCII_LOWER.iter()) {
+            match read_column(col_id, alias.to_string()) {
+                None => {}
+                Some((select, bound)) => {
+                    bind_vars.extend(bound.map(Variable::Str).into_iter());
+                    let cmp = order_to_cmp(col_ord.clone(), self.order.clone());
+                    let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
+                    if num_ops == 0 {
+                        from.push_str(&select);
+                        from.push_str(&format!(" as {}TABLE ", alias.to_ascii_uppercase()));
+                    } else {
+                        join.push_str(&format!(
+                            "INNER JOIN {} as {} ON {}.book_id = ATABLE.book_id ",
+                            select, table_alias, table_alias
+                        ));
+                    }
+                    if let Some(book) = book {
+                        if matches!(col_id, ColumnIdentifier::ID) {
+                            if self.id_inclusive {
+                                where_str.push_str(&format!(
+                                    "{}.{} {}= ? AND ",
+                                    table_alias, alias, cmp
+                                ));
+                            } else {
+                                where_str
+                                    .push_str(&format!("{}.{} {} ? AND ", table_alias, alias, cmp));
+                            }
+                            bind_vars.push(Variable::Int(u64::from(book.id()) as i64));
+                        } else {
+                            let cmp_key = book.get_column(col_id).unwrap_or_default();
+                            where_str
+                                .push_str(&format!("{}.{} {}= ? AND ", table_alias, alias, cmp));
+                            bind_vars.push(Variable::Str(cmp_key.to_string()));
+                        }
+                    }
+                    order_str.push_str(&format!(
+                        "{} {}, ",
+                        alias,
+                        order_repr(col_ord.clone(), self.order.clone())
+                    ));
+                    num_ops += 1;
+                }
+            }
+        }
+
+        // Clean up string.
+        from.pop();
+        if book.is_some() {
+            where_str.truncate(where_str.len() - 5);
+            where_str = format!("WHERE ({})", where_str);
+        }
+        order_str.pop();
+        order_str.pop();
+        bind_vars.push(Variable::Int(self.limit as i64));
+        (
+            format!(
+                "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {} LIMIT ?;",
+                from, join, where_str, order_str
+            ),
+            bind_vars,
+        )
+    }
+}
 
 /// Paginator provides a fast way to scroll through book databases which allow both sorting
 /// and greater than comparisons.
@@ -31,7 +180,7 @@ pub struct Paginator<D: IndexableDatabase> {
     last_compared: Option<Arc<Book>>,
     // Store selected values (no relative indices).
     // When up/down etc is called, find first selected value based on ordering scheme & scroll from there.
-    selected: HashSet<Arc<Book>>,
+    selected: HashMap<BookID, Arc<Book>>,
     db: Arc<RwLock<D>>,
 }
 
@@ -102,120 +251,22 @@ fn order_repr(primary: ColumnOrder, secondary: ColumnOrder) -> &'static str {
     }
 }
 
-/// Returns a query which returns the book ids, relative to the provided book.
-/// Results will not include the provided book.
-pub fn join_cols(
-    book: Option<&Book>,
-    sort_rules: &[(ColumnIdentifier, ColumnOrder)],
-    order: ColumnOrder,
-) -> (String, Vec<Variable>) {
-    let mut from = String::new();
-    let mut where_str = String::new();
-    let mut join = String::new();
-    let mut order_str = String::new();
-    let mut num_ops = 0;
-    let mut bind_vars = vec![];
-    // SELECT book_id, MIN(value) from multimap_tags WHERE name={} GROUP BY book_id
-    // or max
-    // multimap / description: use GROUP_CONCAT (+ sort) or just regular min to join authors in sorted order
-    // SELECT
-    //     all fields involved
-    // FROM
-    //     books
-    // INNER JOIN named_tags AS TAGS ON
-    // TAGS.book_id = books.book_id
-    // AND TAGS.name = {named_tag}
-    // WHERE (sort_start > ...)
-    // ORDER BY COL1 ASC, COL2 DESC
-    // LIMIT n;
-    // select all keys needed to sort
-    // need FROM () as below to select a particular mmap key
-    // Need rule for reading each multimap key
-    // Need rule for reading books if title
-    // Need rule for reading named tag
-    // SELECT books.book_id FROM (
-    //     SELECT book_id, MIN(value) as mvalue
-    //     FROM multimap_tags
-    //     WHERE name= "author"
-    //     GROUP BY book_id
-    // ) as A INNER JOIN books ON (A.book_id = books.book_id)
-    // WHERE (books.book_id > 291 AND mvalue >= "Alastair")
-    // ORDER BY mvalue ASC, ..., books.book_id ASC
-    // LIMIT 5;
-
-    // Add the id comparison to ensure pagination doesn't repeat items
-    let id_rule = if !sort_rules
-        .iter()
-        .any(|(col_id, _)| matches!(col_id, ColumnIdentifier::ID))
-    {
-        Some((ColumnIdentifier::ID, ColumnOrder::Ascending))
-    } else {
-        None
-    };
-
-    for ((col_id, col_ord), alias) in sort_rules
-        .iter()
-        .chain(id_rule.iter())
-        .zip(ASCII_LOWER.iter())
-    {
-        match read_column(col_id, alias.to_string()) {
-            None => {}
-            Some((select, bound)) => {
-                bind_vars.extend(bound.map(Variable::Str).into_iter());
-                let cmp = order_to_cmp(col_ord.clone(), order.clone());
-                let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
-                if num_ops == 0 {
-                    from.push_str(&select);
-                    from.push_str(&format!(" as {}TABLE ", alias.to_ascii_uppercase()));
-                } else {
-                    join.push_str(&format!(
-                        "INNER JOIN {} as {} ON {}.book_id = ATABLE.book_id ",
-                        select, table_alias, table_alias
-                    ));
-                }
-                if let Some(book) = book {
-                    if matches!(col_id, ColumnIdentifier::ID) {
-                        where_str.push_str(&format!("{}.{} {} ? AND ", table_alias, alias, cmp));
-                        bind_vars.push(Variable::Int(u64::from(book.id()) as i64));
-                    } else {
-                        let cmp_key = book.get_column(col_id).unwrap_or_default();
-                        where_str.push_str(&format!("{}.{} {}= ? AND ", table_alias, alias, cmp));
-                        bind_vars.push(Variable::Str(cmp_key.to_string()));
-                    }
-                }
-                order_str.push_str(&format!(
-                    "{} {}, ",
-                    alias,
-                    order_repr(col_ord.clone(), order.clone())
-                ));
-                num_ops += 1;
-            }
-        }
-    }
-
-    // Clean up string.
-    from.pop();
-    if book.is_some() {
-        where_str.truncate(where_str.len() - 5);
-        where_str = format!("WHERE ({})", where_str);
-    }
-    order_str.pop();
-    order_str.pop();
-    (
-        format!(
-            "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {} LIMIT ?;",
-            from, join, where_str, order_str
-        ),
-        bind_vars,
-    )
-}
-
 impl<D: IndexableDatabase> Paginator<D> {
     pub fn new(
         db: Arc<RwLock<D>>,
         window_size: usize,
         sorting_rules: Box<[(ColumnIdentifier, ColumnOrder)]>,
     ) -> Self {
+        let sorting_rules = if !sorting_rules
+            .iter()
+            .any(|(col_id, _)| matches!(col_id, ColumnIdentifier::ID))
+        {
+            let mut sorting_rules = sorting_rules.to_vec();
+            sorting_rules.push((ColumnIdentifier::ID, ColumnOrder::Ascending));
+            sorting_rules.into_boxed_slice()
+        } else {
+            sorting_rules
+        };
         Self {
             books: vec![],
             window_size,
@@ -236,12 +287,11 @@ impl<D: IndexableDatabase> Paginator<D> {
         &mut self,
         num_books: usize,
     ) -> Result<(), DatabaseError<D::Error>> {
-        let (query, mut bindings) = join_cols(
-            self.books.last().map(|x| x.as_ref()),
-            &self.sorting_rules,
-            ColumnOrder::Descending,
-        );
-        bindings.push(Variable::Int(num_books as i64));
+        let (query, bindings) = QueryBuilder::default()
+            .sort_rules(&self.sorting_rules)
+            .order(ColumnOrder::Descending)
+            .limit(num_books)
+            .join_cols(self.books.last().map(|x| x.as_ref()));
         let books = self
             .db
             .write()
@@ -257,16 +307,15 @@ impl<D: IndexableDatabase> Paginator<D> {
         &mut self,
         num_books: usize,
     ) -> Result<(), DatabaseError<D::Error>> {
-        let (query, mut bindings) = join_cols(
-            self.books.first().map(|x| x.as_ref()),
-            &self.sorting_rules,
-            ColumnOrder::Ascending,
-        );
+        let (query, bindings) = QueryBuilder::default()
+            .sort_rules(&self.sorting_rules)
+            .order(ColumnOrder::Ascending)
+            .limit(num_books)
+            .join_cols(self.books.first().map(|x| x.as_ref()));
         // Read only the number of items needed to fill top.
         // TODO: If len is a large jump, we should do an OFFSET instead of loading
         //  everything in-between (check if len > some multiple of window size),
         //  and drop all ensuing books.
-        bindings.push(Variable::Int(num_books as i64));
         let mut books = self
             .db
             .write()
@@ -308,7 +357,6 @@ impl<D: IndexableDatabase> Paginator<D> {
     }
 
     pub async fn scroll_up(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
-        // TODO: Doesn't check that window size elements would be visible.
         match self.window_top.checked_sub(len) {
             None => {
                 self.load_books_before_start(len - self.window_top).await?;
@@ -334,38 +382,75 @@ impl<D: IndexableDatabase> Paginator<D> {
         }
     }
 
+    pub async fn make_book_visible<B: AsRef<Book>>(
+        &mut self,
+        book: Option<B>,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        let book_ref = match &book {
+            None => None,
+            Some(b) => Some(b.as_ref()),
+        };
+        let (query, bindings) = QueryBuilder::default()
+            .sort_rules(&self.sorting_rules)
+            .order(ColumnOrder::Ascending)
+            .include_id(true)
+            .limit(self.window_size)
+            .join_cols(book_ref);
+
+        self.books = self
+            .db
+            .write()
+            .await
+            .perform_query(&query, &bindings)
+            .await?;
+        self.window_top = 0;
+        let limit = self.window_size - self.books.len();
+        if limit != 0 {
+            self.load_books_before_start(limit).await?;
+        }
+        Ok(())
+    }
+
     pub async fn home(&mut self) -> Result<(), DatabaseError<D::Error>> {
         if self.selected.is_empty() {
             self.window_top = 0;
             self.books.clear();
             self.scroll_down(0).await
         } else {
-            // self.make_visible(...)
-            // self.selected.iter().min_by(|a, b| a.cmp_columns(b, cols))
-            // Go to first selected item. Need to use ID w/ cmp + eq
-            // Find min of selected,
-            unimplemented!("Home should make the first selected item visible.")
+            let target = self
+                .selected
+                .values()
+                .min_by(|a, b| a.cmp_columns(b, &self.sorting_rules))
+                .cloned();
+            self.make_book_visible(target).await
         }
     }
 
     pub async fn end(&mut self) -> Result<(), DatabaseError<D::Error>> {
         if self.selected.is_empty() {
             self.window_top = 0;
-            let (query, mut bindings) =
-                join_cols(None, &self.sorting_rules, ColumnOrder::Ascending);
-            bindings.push(Variable::Int(self.window_size as i64));
-            let mut books = self
+            let (query, bindings) = QueryBuilder::default()
+                .sort_rules(&self.sorting_rules)
+                .order(ColumnOrder::Ascending)
+                .limit(self.window_size)
+                .join_cols(None);
+
+            self.books = self
                 .db
                 .write()
                 .await
                 .perform_query(&query, &bindings)
                 .await?;
-            books.reverse();
-            self.books = books;
+            self.books.reverse();
             Ok(())
         } else {
             // Go to last selected item. Need to use ID w/ GEQ
-            unimplemented!()
+            let target = self
+                .selected
+                .values()
+                .max_by(|a, b| a.cmp_columns(b, &self.sorting_rules))
+                .cloned();
+            self.make_book_visible(target).await
         }
     }
 
@@ -375,5 +460,16 @@ impl<D: IndexableDatabase> Paginator<D> {
     ) -> Result<(), DatabaseError<D::Error>> {
         self.window_size = window_size;
         self.scroll_down(0).await
+    }
+
+    pub async fn refresh(&mut self) -> Result<(), DatabaseError<D::Error>> {
+        // Find first selected which is visible, otherwise first item in window
+        let target = self
+            .window()
+            .iter()
+            .find(|x| self.selected.contains_key(&x.id()))
+            .or_else(|| self.window().first())
+            .cloned();
+        self.make_book_visible(target).await
     }
 }
