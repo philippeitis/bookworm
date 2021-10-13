@@ -18,10 +18,10 @@ use unicode_truncate::UnicodeTruncateStr;
 use clipboard::{ClipboardContext, ClipboardProvider};
 
 use bookstore_app::app::{AppChannel, Target};
-use bookstore_app::settings::Color;
+use bookstore_app::settings::{Color, SortSettings};
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
-use bookstore_database::{BookView, IndexableDatabase};
+use bookstore_database::IndexableDatabase;
 use bookstore_records::book::{ColumnIdentifier, RecordError};
 
 use crate::ui::scrollable_text::ScrollableText;
@@ -32,7 +32,6 @@ use crate::ui::widgets::{
 };
 
 use bookstore_app::parser::Source;
-use bookstore_app::table_view::TableView;
 use bookstore_database::paged_cursor::Selection;
 use bookstore_records::Edit;
 
@@ -75,30 +74,33 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
     app: &mut AppChannel<D>,
     command: Command,
     // TODO: These should be removed as arguments
-    table: &mut TableView,
-    book_view: &mut BookView<D>,
+    ui_state: &mut UIState<D>,
 ) -> Result<ApplicationTask, ApplicationError<D::Error>> {
     match command {
         Command::DeleteSelected => {
-            let books = book_view.remove_selected_books().await?;
+            let books = ui_state.book_view.remove_selected_books().await?;
             app.delete_ids(books).await;
         }
         Command::DeleteMatching(matches) => {
             let targets = app.delete_matching(matches).await;
-            book_view.remove_books(&targets);
-            book_view.refresh_db_size().await;
+            ui_state.book_view.remove_books(&targets);
+            ui_state.book_view.refresh_db_size().await;
         }
         Command::DeleteAll => {
-            book_view.clear().await;
+            ui_state.book_view.clear().await;
             app.delete_all().await;
         }
         Command::EditBook(book, edits) => {
-            if book_view.make_selection_visible() {
-                table.regenerate_columns(book_view).await?;
+            if ui_state.book_view.make_selection_visible() {
+                ui_state
+                    .table_view
+                    .regenerate_columns(&ui_state.book_view)
+                    .await?;
             }
             match book {
                 BookIndex::Selected => {
-                    let ids: Vec<_> = book_view
+                    let ids: Vec<_> = ui_state
+                        .book_view
                         .get_selected_books()
                         .await?
                         .into_iter()
@@ -111,18 +113,18 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
         }
         Command::AddBooks(sources) => {
             app.add_books(sources).await;
-            book_view.refresh_db_size().await;
+            ui_state.book_view.refresh_db_size().await;
         }
         Command::ModifyColumns(columns) => {
-            app.modify_columns(columns, table, book_view).await?;
+            app.modify_columns(columns, &mut ui_state.table_view, &mut ui_state.book_view)
+                .await?;
         }
-        Command::SortColumns(sort_cols) => {
-            app.sort_cols(sort_cols.clone()).await;
-        }
+        Command::SortColumns(columns) => ui_state.sort_settings = SortSettings { columns },
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         Command::OpenBookInApp(book, index) => {
             let id = match book {
-                BookIndex::Selected => book_view
+                BookIndex::Selected => ui_state
+                    .book_view
                     .get_selected_books()
                     .await?
                     .into_iter()
@@ -137,7 +139,8 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         Command::OpenBookInExplorer(book, index) => {
             let id = match book {
-                BookIndex::Selected => book_view
+                BookIndex::Selected => ui_state
+                    .book_view
                     .get_selected_books()
                     .await?
                     .into_iter()
@@ -149,10 +152,10 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
             app.open_book(id, index, Target::FileManager).await;
         }
         Command::FilterMatches(searches) => {
-            book_view.push_scope(&searches).await?;
+            ui_state.book_view.push_scope(&searches).await?;
         }
         Command::JumpTo(searches) => {
-            book_view.jump_to(&searches).await?;
+            ui_state.book_view.jump_to(&searches).await?;
         }
         Command::Write => {
             app.save().await;
@@ -165,8 +168,10 @@ pub(crate) async fn run_command<D: IndexableDatabase + Send + Sync>(
             return Ok(ApplicationTask::Quit);
         }
         Command::TryMergeAllBooks => {
-            book_view.remove_books(&app.try_merge_all_books().await);
-            book_view.refresh_db_size().await;
+            ui_state
+                .book_view
+                .remove_books(&app.try_merge_all_books().await);
+            ui_state.book_view.refresh_db_size().await;
         }
         Command::Help(target) => {
             return Ok(ApplicationTask::SwitchView(AppView::Help(
@@ -703,14 +708,7 @@ impl<D: IndexableDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                         state.curr_command.clear();
 
                         return match parse_args(args) {
-                            Ok(command) => match run_command(
-                                app,
-                                command,
-                                &mut state.table_view,
-                                &mut state.book_view,
-                            )
-                            .await?
-                            {
+                            Ok(command) => match run_command(app, command, state).await? {
                                 ApplicationTask::DoNothing => Ok(ApplicationTask::UpdateUI),
                                 other => Ok(other),
                             },
@@ -749,13 +747,7 @@ impl<D: IndexableDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                         if state.curr_command.is_empty() {
                             log("User pressed delete.");
                             if !state.book_view.selected().is_none() {
-                                run_command(
-                                    app,
-                                    Command::DeleteSelected,
-                                    &mut state.table_view,
-                                    &mut state.book_view,
-                                )
-                                .await?;
+                                run_command(app, Command::DeleteSelected, state).await?;
                             }
                         } else {
                             state.curr_command.del();
@@ -818,14 +810,7 @@ impl<D: IndexableDatabase + Send + Sync> EditWidget<D> {
             )]
             .to_vec()
             .into_boxed_slice();
-            match run_command(
-                app,
-                Command::EditBook(BookIndex::Selected, edits),
-                &mut state.table_view,
-                &mut state.book_view,
-            )
-            .await
-            {
+            match run_command(app, Command::EditBook(BookIndex::Selected, edits), state).await {
                 Ok(_) => {}
                 // Catch immutable column error and discard changes.
                 Err(ApplicationError::Record(RecordError::ImmutableColumn)) => {}

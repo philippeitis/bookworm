@@ -113,7 +113,9 @@ impl<D: IndexableDatabase + Send + Sync> BookView<D> {
         self.scopes
             .iter_mut()
             .for_each(|scope| scope.books.sort_by(|_, a, _, b| b.cmp_columns(a, &cols)));
-
+        // TODO: should never write to underlying DB
+        //  fix this through pagination.
+        self.db.write().await.sort_books_by_cols(cols).await?;
         Ok(())
     }
 

@@ -17,12 +17,11 @@ use bookstore_database::{
     bookview::BookViewError, Book, BookView, DatabaseError, IndexableDatabase,
 };
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{BookError, BookVariant, ColumnOrder, Edit};
+use bookstore_records::{BookError, BookVariant, Edit};
 
 use crate::autocomplete::AutoCompleteError;
 use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::parser::{ModifyColumn, Source};
-use crate::settings::SortSettings;
 use crate::table_view::TableView;
 use crate::user_input::CommandStringError;
 
@@ -250,7 +249,6 @@ pub enum AppTask {
     Save,
     IsSaved,
     GetDbPath,
-    GetSortSettings,
     TakeUpdate,
     GetBookView,
     GetHelp(Option<String>),
@@ -259,9 +257,7 @@ pub enum AppTask {
     DeleteAll,
     EditBooks(Box<[BookID]>, Box<[(ColumnIdentifier, Edit)]>),
     AddBooks(Box<[Source]>),
-    SortColumns(Box<[(ColumnIdentifier, ColumnOrder)]>),
     TryMergeAllBooks,
-
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     OpenBookIn(BookID, usize, Target),
 }
@@ -271,7 +267,6 @@ pub enum AppResponse<D: IndexableDatabase> {
     HelpInformation(String),
     Updated(bool),
     DbPath(PathBuf),
-    SortSettings(SortSettings),
     BookView(BookView<D>),
     // DeleteMatching
     Deleted(HashSet<BookID>),
@@ -285,11 +280,9 @@ pub enum AppResponse<D: IndexableDatabase> {
 pub struct App<D: IndexableDatabase> {
     db: Arc<RwLock<D>>,
     active_help_string: Option<&'static str>,
-    sort_settings: SortSettings,
     updated: bool,
     event_receiver: Receiver<AppTask>,
     result_sender: Sender<AppResponse<D>>,
-    is_sorted: bool,
 }
 
 pub struct AppChannel<D: IndexableDatabase> {
@@ -362,14 +355,6 @@ impl<D: IndexableDatabase + Send + Sync> AppChannel<D> {
         }
     }
 
-    pub async fn sort_settings(&self) -> SortSettings {
-        self.send(AppTask::GetSortSettings).await;
-        match self.receive().await.unwrap() {
-            AppResponse::SortSettings(result) => result,
-            _ => panic!("Expected GetSortSettings response from application"),
-        }
-    }
-
     pub async fn new_book_view(&self) -> BookView<D> {
         self.send(AppTask::GetBookView).await;
         match self.receive().await.unwrap() {
@@ -419,14 +404,6 @@ impl<D: IndexableDatabase + Send + Sync> AppChannel<D> {
         }
     }
 
-    pub async fn sort_cols(&self, cols: Box<[(ColumnIdentifier, ColumnOrder)]>) {
-        self.send(AppTask::SortColumns(cols)).await;
-        match self.receive().await.unwrap() {
-            AppResponse::Empty => {}
-            _ => panic!("Expected Empty response from application"),
-        }
-    }
-
     pub async fn modify_columns(
         &self,
         columns: Box<[ModifyColumn]>,
@@ -451,15 +428,13 @@ impl<D: IndexableDatabase + Send + Sync> AppChannel<D> {
 }
 
 impl<D: IndexableDatabase + Send + Sync> App<D> {
-    pub fn new(db: D, sort_settings: SortSettings) -> (Self, AppChannel<D>) {
+    pub fn new(db: D) -> (Self, AppChannel<D>) {
         let (event_sender, event_receiver) = tokio::sync::mpsc::channel(100);
         let (result_sender, result_receiver) = tokio::sync::mpsc::channel(100);
 
         (
             App {
                 db: Arc::new(RwLock::new(db)),
-                is_sorted: sort_settings.columns.is_empty(),
-                sort_settings,
                 updated: true,
                 event_receiver,
                 active_help_string: None,
@@ -474,10 +449,6 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
 
     pub async fn db_path(&self) -> std::path::PathBuf {
         self.db.read().await.path().to_path_buf()
-    }
-
-    pub fn sort_settings(&self) -> &SortSettings {
-        &self.sort_settings
     }
 
     /// Returns a BookView, allowing reads of all available books.
@@ -519,17 +490,6 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
         async_write!(self, db, db.save().await)
     }
 
-    /// Updates the required sorting settings if the column changes.
-    ///
-    /// # Arguments
-    ///
-    /// * ` word ` - The column to sort the table on.
-    /// * ` reverse ` - Whether to reverse the sort.
-    fn update_selected_columns(&mut self, cols: Box<[(ColumnIdentifier, ColumnOrder)]>) {
-        self.sort_settings.columns = cols;
-        self.is_sorted = false;
-    }
-
     pub async fn event_loop(&mut self) -> Option<()> {
         loop {
             let val = match self.event_receiver.recv().await? {
@@ -539,7 +499,6 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
                     let _ = self.save().await;
                     AppResponse::IsSaved(self.saved().await)
                 }
-                AppTask::GetSortSettings => AppResponse::SortSettings(self.sort_settings.clone()),
                 AppTask::TakeUpdate => AppResponse::Updated(self.take_update()),
                 AppTask::GetBookView => AppResponse::BookView(self.new_book_view().await),
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -594,7 +553,6 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
                     for book in books.to_vec().into_iter() {
                         let _ = self.edit_book_with_id(book, &edits).await;
                     }
-                    self.is_sorted = false;
                     AppResponse::Empty
                 }
                 AppTask::AddBooks(sources) => {
@@ -636,19 +594,7 @@ impl<D: IndexableDatabase + Send + Sync> App<D> {
                         }
                     }
 
-                    self.is_sorted = false;
                     AppResponse::Created(ids)
-                }
-                AppTask::SortColumns(sort_cols) => {
-                    self.update_selected_columns(sort_cols);
-                    let _ = self
-                        .db
-                        .write()
-                        .await
-                        .sort_books_by_cols(&self.sort_settings.columns)
-                        .await;
-                    self.register_update();
-                    AppResponse::Empty
                 }
                 AppTask::TryMergeAllBooks => {
                     if let Ok(ids) = async_write!(self, db, db.merge_similar().await) {

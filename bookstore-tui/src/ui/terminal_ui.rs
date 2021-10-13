@@ -11,7 +11,7 @@ use tui::Terminal;
 
 use bookstore_app::app::AppChannel;
 use bookstore_app::settings::{
-    DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings,
+    DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings, SortSettings,
 };
 use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, EditState};
@@ -59,6 +59,7 @@ pub(crate) struct UIState<D: IndexableDatabase + Send + Sync> {
     pub(crate) selected_column: usize,
     pub(crate) table_view: TableView,
     pub(crate) book_view: BookView<D>,
+    pub(crate) sort_settings: SortSettings,
     // pub(crate) command_log: Vec<CommandString>,
 }
 
@@ -138,6 +139,7 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
         settings_path: Option<PathBuf>,
         app_channel: AppChannel<D>,
         event_receiver: EventStream,
+        sort_settings: SortSettings,
     ) -> AppInterface<'a, D, B> {
         let book_view = app_channel.new_book_view().await;
         let path = app_channel.db_path().await;
@@ -148,6 +150,7 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
             selected_column: 0,
             table_view: TableView::from(settings.columns),
             book_view,
+            sort_settings,
         };
         AppInterface {
             border_widget: BorderWidget::new(name.into(), path),
@@ -252,10 +255,9 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
         terminal: &mut Terminal<B>,
     ) -> Result<(), TuiError<D::Error>> {
         loop {
-            let res = self.app_channel.sort_settings().await;
             self.ui_state
                 .book_view
-                .sort_by_columns(&res.columns)
+                .sort_by_columns(&self.ui_state.sort_settings.columns)
                 .await?;
 
             if self.app_channel.take_update().await | self.take_update() {
@@ -303,7 +305,7 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
                     .iter()
                     .map(|s| s.clone().into_inner())
                     .collect(),
-                sort_settings: self.app_channel.sort_settings().await,
+                sort_settings: self.ui_state.sort_settings.clone(),
                 navigation_settings: self.ui_state.nav_settings,
                 database_settings: DatabaseSettings {
                     path: self.app_channel.db_path().await,
