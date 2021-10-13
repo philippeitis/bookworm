@@ -17,15 +17,15 @@ use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, CommandStringError, EditState};
 use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
+use bookstore_database::paged_cursor::RelativeSelection;
 use bookstore_database::{BookView, DatabaseError, IndexableDatabase};
 
+use crate::ui::log;
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::views::{
     AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
 };
 use crate::ui::widgets::{BorderWidget, Widget};
-
-use bookstore_database::paged_cursor::RelativeSelection;
 
 #[derive(Debug)]
 pub(crate) enum TuiError<DBError> {
@@ -278,6 +278,7 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
                 let chunk = {
                     let frame = terminal.get_frame();
                     let s = frame.size();
+                    log(format!("{:?}", s));
                     Rect::new(
                         s.x + 1,
                         s.y + 1,

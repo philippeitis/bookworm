@@ -18,36 +18,23 @@ use unicode_truncate::UnicodeTruncateStr;
 use clipboard::{ClipboardContext, ClipboardProvider};
 
 use bookstore_app::app::AppChannel;
+use bookstore_app::parser::Source;
 use bookstore_app::parser::Target;
 use bookstore_app::settings::{Color, SortSettings};
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
+use bookstore_database::paged_cursor::Selection;
 use bookstore_database::IndexableDatabase;
 use bookstore_records::book::{ColumnIdentifier, RecordError};
+use bookstore_records::Edit;
 
+use crate::ui::log;
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::terminal_ui::{TuiError, UIState};
 use crate::ui::tui_widgets::{ListItemX, MultiSelectList, MultiSelectListState};
 use crate::ui::widgets::{
     char_chunks_to_styled_text, BookWidget, CommandWidget, StyleRules, Widget,
 };
-
-use bookstore_app::parser::Source;
-use bookstore_database::paged_cursor::Selection;
-use bookstore_records::Edit;
-
-fn log(s: impl AsRef<str>) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(true)
-        .open("log.txt")
-    {
-        let _ = f.write_all(s.as_ref().as_bytes());
-        let _ = f.write_all(b"\n");
-    }
-}
 
 #[derive(Clone)]
 pub enum AppView {
@@ -496,9 +483,13 @@ impl<'b, D: IndexableDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> f
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
-        let window_size = usize::from(vchunks[0].height).saturating_sub(1);
+        // Subtract 1 for
+        let window_height = usize::from(vchunks[0].height).saturating_sub(1);
+        log(format!("{:?}", chunk));
+        log(format!("{:?}", vchunks));
+        log(format!("{}", window_height));
 
-        state.book_view.refresh_window_size(window_size);
+        state.book_view.refresh_window_size(window_height);
         let _ = state.update_column_data().await;
     }
 
