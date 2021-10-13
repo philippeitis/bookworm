@@ -7,7 +7,7 @@ use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::{Book, ColumnOrder};
 
 use crate::search::Matcher;
-use crate::{DatabaseError, IndexableDatabase};
+use crate::{AppDatabase, DatabaseError, IndexableDatabase};
 
 static ASCII_LOWER: [char; 26] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
@@ -386,16 +386,18 @@ impl<D: IndexableDatabase> Paginator<D> {
         &mut self,
         book: Option<B>,
     ) -> Result<(), DatabaseError<D::Error>> {
-        let book_ref = match &book {
-            None => None,
-            Some(b) => Some(b.as_ref()),
-        };
-        let (query, bindings) = QueryBuilder::default()
+        let builder = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Ascending)
             .include_id(true)
-            .limit(self.window_size)
-            .join_cols(book_ref);
+            .limit(self.window_size);
+        let (query, bindings) = match &book {
+            None => builder.join_cols(None),
+            Some(b) => match self.db.read().await.get_book(b.as_ref().id()).await {
+                Ok(fresh) => builder.join_cols(Some(&fresh)),
+                Err(_) => builder.join_cols(Some(b.as_ref())),
+            },
+        };
 
         self.books = self
             .db
@@ -472,4 +474,6 @@ impl<D: IndexableDatabase> Paginator<D> {
             .cloned();
         self.make_book_visible(target).await
     }
+
+    // https://github.com/rusqlite/rusqlite/blob/6a22bb7a56d4be48f5bea81c40ccc496fc74bb57/src/functions.rs#L844
 }
