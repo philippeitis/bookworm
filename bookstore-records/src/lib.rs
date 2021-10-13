@@ -1,3 +1,5 @@
+#![deny(unused_must_use)]
+
 pub use book::Book;
 pub use error::BookError;
 pub use variant::BookVariant;

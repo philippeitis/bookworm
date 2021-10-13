@@ -1,3 +1,5 @@
+#![deny(unused_must_use)]
+
 mod ui;
 
 use std::env;

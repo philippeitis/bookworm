@@ -1,3 +1,5 @@
+#![deny(unused_must_use)]
+
 pub use bookstore_records::book::Book;
 pub use bookview::BookView;
 pub use database::{AppDatabase, DatabaseError, IndexableDatabase};
