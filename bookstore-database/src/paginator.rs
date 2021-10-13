@@ -1,7 +1,8 @@
 use crate::search::{Matcher, Search};
-use crate::{AppDatabase, DatabaseError};
+use crate::{DatabaseError, IndexableDatabase};
 use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::{Book, ColumnOrder};
+use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -16,7 +17,7 @@ static ASCII_LOWER: [char; 26] = [
 /// The paginator stores information about existing matching and sorting rules, and when scrolled
 /// to the end, will automatically fetch new items, in the correct order, which match the internal
 /// rules.
-struct Paginator<D: AppDatabase> {
+pub struct Paginator<D: IndexableDatabase> {
     books: Vec<Arc<Book>>,
     window_size: usize,
     // relative to start of books
@@ -99,6 +100,8 @@ fn order_repr(primary: ColumnOrder, secondary: ColumnOrder) -> &'static str {
     }
 }
 
+/// Returns a query which returns the book ids, relative to the provided book.
+/// Results will not include the provided book.
 pub fn join_cols(
     book: Option<&Book>,
     sort_rules: &[(ColumnIdentifier, ColumnOrder)],
@@ -110,11 +113,39 @@ pub fn join_cols(
     let mut order_str = String::new();
     let mut num_ops = 0;
     let mut bind_vars = vec![];
+    // SELECT book_id, MIN(value) from multimap_tags WHERE name={} GROUP BY book_id
+    // or max
+    // multimap / description: use GROUP_CONCAT (+ sort) or just regular min to join authors in sorted order
+    // SELECT
+    //     all fields involved
+    // FROM
+    //     books
+    // INNER JOIN named_tags AS TAGS ON
+    // TAGS.book_id = books.book_id
+    // AND TAGS.name = {named_tag}
+    // WHERE (sort_start > ...)
+    // ORDER BY COL1 ASC, COL2 DESC
+    // LIMIT n;
+    // select all keys needed to sort
+    // need FROM () as below to select a particular mmap key
+    // Need rule for reading each multimap key
+    // Need rule for reading books if title
+    // Need rule for reading named tag
+    // SELECT books.book_id FROM (
+    //     SELECT book_id, MIN(value) as mvalue
+    //     FROM multimap_tags
+    //     WHERE name= "author"
+    //     GROUP BY book_id
+    // ) as A INNER JOIN books ON (A.book_id = books.book_id)
+    // WHERE (books.book_id > 291 AND mvalue >= "Alastair")
+    // ORDER BY mvalue ASC, ..., books.book_id ASC
+    // LIMIT 5;
+
+    // Add the id comparison to ensure pagination doesn't repeat items
     let id_rule = if !sort_rules
         .iter()
         .any(|(col_id, _)| matches!(col_id, ColumnIdentifier::ID))
     {
-        println!("ADDED ID_RULE");
         Some((ColumnIdentifier::ID, ColumnOrder::Ascending))
     } else {
         None
@@ -159,89 +190,153 @@ pub fn join_cols(
             }
         }
     }
+
+    // Clean up string.
     from.pop();
-    where_str.truncate(where_str.len() - 5);
+    if book.is_some() {
+        where_str.truncate(where_str.len() - 5);
+        where_str = format!("WHERE ({})", where_str);
+    }
     order_str.pop();
     order_str.pop();
-    bind_vars.push(Variable::Int(5));
     (
         format!(
-            "SELECT ATABLE.book_id FROM {} {} WHERE ({}) ORDER BY {} LIMIT ?;",
+            "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {} LIMIT ?;",
             from, join, where_str, order_str
         ),
         bind_vars,
     )
 }
 
-// /// Need to get value from book, and need to determine which table the column identifier belongs to.
-// fn sort_rule_to_sql(book: &Book, sort_rule: &(ColumnIdentifier, ColumnOrder), order: ColumnOrder) -> String {
-//     match &sort_rule.0 {
-//         ColumnIdentifier::Title => {} // books, "title"
-//         ColumnIdentifier::ID => {} // books, "book_id"
-//         ColumnIdentifier::Series => {} // books, "series_name", "series_id"
-//         ColumnIdentifier::Author => {} // ? how do you sort by author pl? multimap_tags, "author"
-//         ColumnIdentifier::NamedTag(_) => {} // named_tags / name, "value"
-//         ColumnIdentifier::Description => {} // variants / description
-//         ColumnIdentifier::MultiMap(_) => {} // unimplemented
-//         ColumnIdentifier::MultiMapExact(_, _) => {} // unimplemented
-//         ColumnIdentifier::Variants => {} // unsortable
-//         ColumnIdentifier::Tags => {} // unsortable
-//         ColumnIdentifier::ExactTag(_) => {} // unsortable
-//     }
-//
-//     // SELECT book_id, MIN(value) from multimap_tags WHERE name={} GROUP BY book_id
-//     // or max
-//     // multimap / description: use GROUP_CONCAT (+ sort) or just regular min to join authors in sorted order
-//     // SELECT
-//     //     all fields involved
-//     // FROM
-//     //     books
-//     // INNER JOIN named_tags AS TAGS ON
-//     // TAGS.book_id = books.book_id
-//     // AND TAGS.name = {named_tag}
-//     // WHERE (sort_start > ...)
-//     // ORDER BY COL1 ASC, COL2 DESC
-//     // LIMIT n;
-//     // select all keys needed to sort
-//     // need FROM () as below to select a particular mmap key
-//     // Need rule for reading each multimap key
-//     // Need rule for reading books if title
-//     // Need rule for reading named tag
-//     // SELECT books.book_id FROM (
-//     //     SELECT book_id, MIN(value) as mvalue
-//     //     FROM multimap_tags
-//     //     WHERE name= "author"
-//     //     GROUP BY book_id
-//     // ) as A INNER JOIN books ON (A.book_id = books.book_id)
-//     // WHERE (books.book_id > 291 AND mvalue >= "Alastair")
-//     // ORDER BY mvalue ASC, ..., books.book_id ASC
-//     // LIMIT 5;
-//     unimplemented!()
-// }
+impl<D: IndexableDatabase> Paginator<D> {
+    pub fn new(
+        db: Arc<RwLock<D>>,
+        window_size: usize,
+        sorting_rules: Box<[(ColumnIdentifier, ColumnOrder)]>,
+    ) -> Self {
+        Self {
+            books: vec![],
+            window_size,
+            window_top: 0,
+            sorting_rules,
+            matching_rules: vec![].into_boxed_slice(),
+            last_compared: None,
+            selected: Default::default(),
+            db,
+        }
+    }
 
-// /// Returns an SQL query which returns the next n books.
-// fn sort_rules_to_sql(book: &Book, sorting_rules: &[(ColumnIdentifier, ColumnOrder)], order: ColumnOrder) -> String {
-//     let unique_id_rule = if !sorting_rules.iter().any(|(col_id, col_ord)| col_id == ColumnIdentifier::ID) {
-//         Some((ColumnIdentifier::ID, ColumnOrder::Ascending))
-//     } else {
-//         None
-//     };
-//
-//     sorting_rules.iter().chain(unique_id_rule.as_ref().iter()).map(|x|
-//         sort_rule_to_sql(book, x, order)
-//     ).collect()
-// }
+    pub fn window(&self) -> &[Arc<Book>] {
+        &self.books[self.window_top..self.window_top + self.window_size]
+    }
 
-// impl<D: AppDatabase> Paginator<D> {
-//     async fn scroll_down(&mut self, len: usize) -> Result<(), D::Error> {
-//         if self.window_top + self.window_size + len > self.books.len() {
-//             // need items from top of window + len, covering window size items
-//             let start_from = self.window_top;
-//             let limit = self.window_size + len;
-//             let sort_rules = sort_rules_to_sql(&self.books[start_from], &self.sorting_rules, ColumnOrder::Ascending);
-//         } else {
-//             self.window_top += len;
-//             Ok(())
-//         }
-//     }
-// }
+    // TODO: Check that page is full & attempt to fill it by scrolling upwards.
+    pub async fn scroll_down(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
+        if self.window_top + self.window_size + len > self.books.len() {
+            // need items from top of window + len, covering window size items
+            let start_from = self.window_top;
+            let limit = self.window_size + len;
+            let (query, mut bindings) = join_cols(
+                self.books.get(start_from).map(|book| book.as_ref()),
+                &self.sorting_rules,
+                ColumnOrder::Descending,
+            );
+            // skip len items, read full window
+            bindings.push(Variable::Int((len + self.window_size) as i64));
+            let mut books = self
+                .db
+                .write()
+                .await
+                .perform_query(&query, &bindings)
+                .await?
+                .into_iter();
+            if let Some(slice) = self.books.get_mut(self.window_top + 1..) {
+                for old_book in slice {
+                    if let Some(new_book) = books.next() {
+                        *old_book = new_book;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            self.books.extend(books);
+            self.window_top += len;
+            Ok(())
+        } else {
+            self.window_top += len;
+            Ok(())
+        }
+    }
+
+    pub async fn home(&mut self) -> Result<(), DatabaseError<D::Error>> {
+        if self.selected.is_empty() {
+            self.window_top = 0;
+            self.books.clear();
+            self.scroll_down(0).await
+        } else {
+            unimplemented!()
+        }
+    }
+
+    pub async fn end(&mut self) -> Result<(), DatabaseError<D::Error>> {
+        if self.selected.is_empty() {
+            self.window_top = 0;
+            let (query, mut bindings) =
+                join_cols(None, &self.sorting_rules, ColumnOrder::Ascending);
+            bindings.push(Variable::Int(self.window_size as i64));
+            let mut books = self
+                .db
+                .write()
+                .await
+                .perform_query(&query, &bindings)
+                .await?;
+            books.reverse();
+            self.books = books;
+            Ok(())
+        } else {
+            unimplemented!()
+        }
+    }
+
+    // TODO: Check that page is full & attempt to fill it by scrolling downwards.
+    pub async fn scroll_up(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
+        match self.window_top.checked_sub(len) {
+            None => {
+                let start_from = self.window_top;
+                let (query, mut bindings) = join_cols(
+                    self.books.get(start_from).map(|book| book.as_ref()),
+                    &self.sorting_rules,
+                    ColumnOrder::Ascending,
+                );
+                // skip len items, read full window
+                bindings.push(Variable::Int((len - self.window_top) as i64));
+                let mut books = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bindings)
+                    .await?;
+                //
+                // need to prepend
+                if let Some(slice) = self.books.get_mut(..self.window_top) {
+                    for old_book in slice.iter_mut().rev() {
+                        if let Some(new_book) = books.pop() {
+                            *old_book = new_book;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                books.reverse();
+                books.extend_from_slice(&mut self.books);
+                self.books = books;
+                self.window_top = 0;
+                Ok(())
+            }
+            Some(window_top) => {
+                self.window_top = window_top;
+                Ok(())
+            }
+        }
+    }
+}

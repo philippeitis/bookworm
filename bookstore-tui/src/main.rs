@@ -69,29 +69,68 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
         app_settings.database_settings.path = path;
     }
 
-    let mut db = SQLiteDatabase::open(&app_settings.database_settings.path).await?;
+    let mut db = std::sync::Arc::new(tokio::sync::RwLock::new(
+        SQLiteDatabase::open(&app_settings.database_settings.path).await?,
+    ));
     use bookstore_database::paginator::join_cols;
     use bookstore_records::book::{BookID, ColumnIdentifier};
     use bookstore_records::{Book, BookVariant, ColumnOrder};
     use std::convert::TryFrom;
-    let (query, vars) = join_cols(
-        Some(&Book::from_variant(
-            BookID::try_from(1).unwrap(),
-            BookVariant::from_path("./temp/sample books/Airman - Eoin Colfer.epub").unwrap(),
-        )),
-        &[(ColumnIdentifier::Author, ColumnOrder::Descending)],
-        ColumnOrder::Descending,
-    );
 
-    println!("{}", query);
-    let books = db.perform_query(&query, &vars).await?;
-    for book in books.iter() {
+    let mut paginator = bookstore_database::paginator::Paginator::new(
+        db.clone(),
+        10,
+        vec![(ColumnIdentifier::ID, ColumnOrder::Ascending)].into_boxed_slice(),
+    );
+    paginator.scroll_down(0).await?;
+
+    for _ in 0..3 {
+        for book in paginator.window() {
+            println!(
+                "{}|{:?}|{:?}",
+                book.id(),
+                book.title,
+                book.authors().map(|x| x.first()).flatten()
+            );
+        }
+        println!("NEXT PAGE");
+        paginator.scroll_down(10).await?;
+    }
+
+    for _ in 0..5 {
+        for book in paginator.window() {
+            println!(
+                "{}|{:?}|{:?}",
+                book.id(),
+                book.title,
+                book.authors().map(|x| x.first()).flatten()
+            );
+        }
+        println!("NEXT PAGE");
+        paginator.scroll_up(10).await?;
+    }
+
+    paginator.end().await?;
+    println!("END");
+    for book in paginator.window() {
         println!(
             "{}|{:?}|{:?}",
             book.id(),
             book.title,
             book.authors().map(|x| x.first()).flatten()
         );
+    }
+    println!("NEXT PAGE");
+    for _ in 0..5 {
+        paginator.scroll_up(10).await?;
+        for book in paginator.window().iter().rev() {
+            println!(
+                "{}|{:?}|{:?}",
+                book.id(),
+                book.title,
+                book.authors().map(|x| x.first()).flatten()
+            );
+        }
     }
 
     Ok(())
