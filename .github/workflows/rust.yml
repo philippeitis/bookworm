@@ -50,7 +50,7 @@ jobs:
         toolchain: nightly
         override: true
     - name: Run install steps
-      run: sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      run: sudo apt-get update && sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
     - name: Environment Variables
       run: echo "DATABASE_URL=sqlite:$(echo "/${PWD##/}/reference.db")" >> $GITHUB_ENV
     - name: Test bookstore with copypaste
