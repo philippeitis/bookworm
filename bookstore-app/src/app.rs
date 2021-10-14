@@ -493,6 +493,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                 AppTask::AddBooks(sources) => {
                     // TODO: Handle failed reads.
                     let mut ids = vec![];
+                    let mut futs = vec![];
                     for source in sources.into_vec() {
                         match source {
                             Source::File(f) => {
@@ -506,26 +507,44 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                             }
                             Source::Dir(dir, depth) => {
                                 if let Ok(books) = books_in_dir(&dir, depth) {
-                                    if let Ok(new_ids) = async_write!(
-                                        self,
-                                        db,
-                                        db.insert_books(books.into_iter()).await
-                                    ) {
-                                        ids.extend(new_ids)
-                                    }
+                                    let db = self.db.clone();
+                                    futs.push(tokio::spawn(async move {
+                                        if let Ok(items) =
+                                            db.write().await.insert_books(books.into_iter()).await
+                                        {
+                                            items
+                                        } else {
+                                            vec![]
+                                        }
+                                    }));
                                 }
                             }
                             Source::Glob(glob) => {
                                 if let Ok(books) = books_globbed(&glob) {
-                                    if let Ok(new_ids) = async_write!(
-                                        self,
-                                        db,
-                                        db.insert_books(books.into_iter()).await
-                                    ) {
-                                        ids.extend(new_ids)
-                                    }
+                                    let db = self.db.clone();
+                                    futs.push(tokio::spawn(async move {
+                                        if let Ok(items) =
+                                            db.write().await.insert_books(books.into_iter()).await
+                                        {
+                                            items
+                                        } else {
+                                            vec![]
+                                        }
+                                    }));
                                 }
                             }
+                        }
+                    }
+
+                    // Minimal overhead when # of futures is small, but allows reading & inserting
+                    // in parallel when # of sources is large - very close to real read time when
+                    // reading many 100s of thousands of books.
+                    // (eg. if you're reading an entire file system).
+                    // We should provide a mechanism to stream books as they're read, and then
+                    // chunk these into a transaction-sized list
+                    for fut in futs {
+                        if let Ok(items) = fut.await {
+                            ids.extend(items);
                         }
                     }
 
