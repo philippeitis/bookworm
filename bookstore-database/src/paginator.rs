@@ -302,7 +302,7 @@ impl<D: AppDatabase> Paginator<D> {
     pub fn window(&self) -> &[Arc<Book>] {
         &self
             .books
-            .get(self.window_top..self.window_top + self.window_size)
+            .get(self.window_top..(self.window_top + self.window_size).min(self.books.len()))
             .unwrap_or(&[])
     }
 
