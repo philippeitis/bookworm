@@ -516,9 +516,6 @@ impl SQLiteDatabase {
                 .map_err(DatabaseError::Backend)?;
         }
 
-        if db_exists {
-            db.load_books().await?;
-        }
         Ok(db)
     }
 

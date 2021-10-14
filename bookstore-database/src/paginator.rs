@@ -23,6 +23,7 @@ struct QueryBuilder {
     limit: usize,
 }
 
+// TODO: Rapid scrolling is slow
 impl Default for QueryBuilder {
     fn default() -> Self {
         Self {
