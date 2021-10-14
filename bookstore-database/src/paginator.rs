@@ -20,7 +20,6 @@ struct QueryBuilder {
     order: ColumnOrder,
     sort_rules: Vec<(ColumnIdentifier, ColumnOrder)>,
     id_inclusive: bool,
-    limit: usize,
 }
 
 // TODO: Rapid scrolling is slow
@@ -30,7 +29,6 @@ impl Default for QueryBuilder {
             order: ColumnOrder::Descending,
             sort_rules: vec![(ColumnIdentifier::ID, ColumnOrder::Ascending)],
             id_inclusive: false,
-            limit: 0,
         }
     }
 }
@@ -56,11 +54,6 @@ impl QueryBuilder {
 
     fn include_id(mut self, include_id: bool) -> Self {
         self.id_inclusive = include_id;
-        self
-    }
-
-    fn limit(mut self, limit: usize) -> Self {
-        self.limit = limit;
         self
     }
 
@@ -155,7 +148,6 @@ impl QueryBuilder {
         }
         order_str.pop();
         order_str.pop();
-        bind_vars.push(Variable::Int(self.limit as i64));
         (
             format!(
                 "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {} LIMIT ?;",
@@ -164,6 +156,66 @@ impl QueryBuilder {
             bind_vars,
         )
     }
+
+    // fn select(&self, book: Option<&Book>) -> Select {
+    //     let mut select = Select::default();
+    //     let mut num_ops = 0;
+    //     for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ASCII_LOWER.iter()) {
+    //         let alias = alias.to_string();
+    //         match column_select(col_id, alias.clone()) {
+    //             None => {}
+    //             Some(sub_select) => {
+    //                 let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
+    //                 let table = Table::from(sub_select).alias(&table_alias);
+    //
+    //                 if num_ops == 0 {
+    //                     select = Select::from_table(table)
+    //                         .column(Column::from("book_id").table(table_alias.clone()));
+    //                 } else {
+    //                     select = select.inner_join(
+    //                         table.on(Column::new("book_id")
+    //                             .table(table_alias.clone())
+    //                             .equals(Column::new("book_id").table("ATABLE"))),
+    //                     );
+    //                 }
+    //
+    //                 if let Some(book) = book {
+    //                     if matches!(col_id, ColumnIdentifier::ID) {
+    //                         let cmp_key = u64::from(book.id()) as i64;
+    //                         let column = Column::new(&alias).table(table_alias.clone());
+    //                         let compare = match (self.id_inclusive, col_ord == &self.order) {
+    //                             (false, false) => column.greater_than(cmp_key),
+    //                             (false, true) => column.less_than(cmp_key),
+    //                             (true, false) => column.greater_than_or_equals(cmp_key),
+    //                             (true, true) => column.less_than_or_equals(cmp_key),
+    //                         };
+    //                         select = select.and_where(compare);
+    //                     } else if let Some(cmp_key) = book.get_column(col_id) {
+    //                         let cmp_key = cmp_key.to_string();
+    //                         let column = Column::new(&alias).table(table_alias.clone());
+    //                         let compare = if col_ord == &self.order {
+    //                             column.less_than_or_equals(cmp_key)
+    //                         } else {
+    //                             column.greater_than_or_equals(cmp_key)
+    //                         };
+    //
+    //                         select = select.and_where(compare);
+    //                     }
+    //                 }
+    //                 let ordering = match (col_ord, self.order) {
+    //                     (ColumnOrder::Ascending, ColumnOrder::Ascending) => alias.descend(),
+    //                     (ColumnOrder::Ascending, ColumnOrder::Descending) => alias.ascend(),
+    //                     (ColumnOrder::Descending, ColumnOrder::Ascending) => alias.ascend(),
+    //                     (ColumnOrder::Descending, ColumnOrder::Descending) => alias.descend(),
+    //                 };
+    //
+    //                 select = select.order_by(ordering);
+    //                 num_ops += 1;
+    //             }
+    //         }
+    //     }
+    //     select
+    // }
 }
 
 /// Paginator provides a fast way to scroll through book databases which allow both sorting
@@ -235,6 +287,42 @@ fn read_column(column: &ColumnIdentifier, id: String) -> Option<(String, Option<
         ColumnIdentifier::ExactTag(_) => None, // unsortable
     }
 }
+
+// fn column_select(column: &ColumnIdentifier, id: String) -> Option<Select> {
+//     match column {
+//         ColumnIdentifier::Title => Some(
+//             Select::from_table("books")
+//                 .column("book_id")
+//                 .column(Column::from("title").alias(id)),
+//         ),
+//         ColumnIdentifier::ID => Some(
+//             Select::from_table("books")
+//                 .column("book_id")
+//                 .column(Column::from("book_id").alias(id)),
+//         ),
+//         ColumnIdentifier::Series => None,
+//         ColumnIdentifier::Author => Some(
+//             Select::from_table("multimap_tags")
+//                 .column("book_id")
+//                 .column(Column::from("MIN(value)").alias(id))
+//                 .and_where("name".equals("author"))
+//                 .group_by("book_id"),
+//         ),
+//         ColumnIdentifier::NamedTag(tag_name) => Some(
+//             Select::from_table("named_tags")
+//                 .column("book_id")
+//                 .column(Column::from("value").alias(id))
+//                 .and_where("name".equals(tag_name.clone()))
+//                 .group_by("book_id"),
+//         ),
+//         ColumnIdentifier::Description => None, // variants / description
+//         ColumnIdentifier::MultiMap(_) => None, // unimplemented
+//         ColumnIdentifier::MultiMapExact(_, _) => None, // unimplemented
+//         ColumnIdentifier::Variants => None,    // unsortable
+//         ColumnIdentifier::Tags => None,        // unsortable
+//         ColumnIdentifier::ExactTag(_) => None, // unsortable
+//     }
+// }
 
 fn order_to_cmp(primary: ColumnOrder, secondary: ColumnOrder) -> &'static str {
     match (primary, secondary) {
@@ -316,13 +404,12 @@ impl<D: AppDatabase> Paginator<D> {
         let (query, bindings) = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Descending)
-            .limit(num_books)
             .join_cols(self.books.last().map(|x| x.as_ref()));
         let books = self
             .db
             .write()
             .await
-            .perform_query(&query, &bindings)
+            .perform_query(&query, &bindings, num_books)
             .await?;
         self.books.extend(books);
         Ok(())
@@ -340,7 +427,6 @@ impl<D: AppDatabase> Paginator<D> {
         let (query, bindings) = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Ascending)
-            .limit(num_books)
             .join_cols(self.books.first().map(|x| x.as_ref()));
         // Read only the number of items needed to fill top.
         // TODO: If len is a large jump, we should do an OFFSET instead of loading
@@ -350,7 +436,7 @@ impl<D: AppDatabase> Paginator<D> {
             .db
             .write()
             .await
-            .perform_query(&query, &bindings)
+            .perform_query(&query, &bindings, num_books)
             .await?;
 
         if !books.is_empty() {
@@ -418,8 +504,7 @@ impl<D: AppDatabase> Paginator<D> {
         let builder = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Ascending)
-            .include_id(true)
-            .limit(self.window_size);
+            .include_id(true);
         let (query, bindings) = match &book {
             None => builder.join_cols(None),
             Some(b) => match self.db.read().await.get_book(b.as_ref().id()).await {
@@ -432,7 +517,7 @@ impl<D: AppDatabase> Paginator<D> {
             .db
             .write()
             .await
-            .perform_query(&query, &bindings)
+            .perform_query(&query, &bindings, self.window_size)
             .await?;
         self.window_top = 0;
         let limit = self.window_size - self.books.len();
@@ -463,14 +548,13 @@ impl<D: AppDatabase> Paginator<D> {
             let (query, bindings) = QueryBuilder::default()
                 .sort_rules(&self.sorting_rules)
                 .order(ColumnOrder::Ascending)
-                .limit(self.window_size)
                 .join_cols(None);
 
             self.books = self
                 .db
                 .write()
                 .await
-                .perform_query(&query, &bindings)
+                .perform_query(&query, &bindings, self.window_size)
                 .await?;
             self.books.reverse();
             Ok(())

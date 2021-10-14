@@ -518,9 +518,9 @@ impl SQLiteDatabase {
                 .map_err(DatabaseError::Backend)?;
         }
 
-        if db_exists {
-            db.load_books().await?;
-        }
+        // if db_exists {
+        //     db.load_books().await?;
+        // }
         Ok(db)
     }
 
@@ -1131,23 +1131,67 @@ impl AppDatabase for SQLiteDatabase {
         unimplemented!("bookstore does not currently support updating book paths.")
     }
 
+    // async fn perform_query(
+    //     &mut self,
+    //     mut query: Select,
+    //     limit: usize,
+    // ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
+    //     #[derive(sqlx::FromRow, Debug)]
+    //     struct SqlxBookId {
+    //         book_id: i64,
+    //     }
+    //
+    //     let lookahead_limit = limit * 5;
+    //     let query = query.limit(lookahead_limit);
+    //     let (query, bound_variables) = Sqlite::build(query);
+    //     let mut query = sqlx::query_as(&query);
+    //     for value in bound_variables {
+    //         match value {
+    //             ParameterizedValue::Null => unimplemented!(),
+    //             ParameterizedValue::Integer(value) => query.bind(value),
+    //             ParameterizedValue::Real(_value) => unimplemented!(),
+    //             ParameterizedValue::Text(value) => query.bind(value.as_ref()),
+    //             ParameterizedValue::Enum(_) => unimplemented!(),
+    //             ParameterizedValue::Boolean(value) => query.bind(value),
+    //             ParameterizedValue::Char(value) => query.bind(value.to_string()),
+    //         };
+    //     }
+    //
+    //     let ids: Vec<SqlxBookId> = query
+    //         .fetch_all(&self.backend)
+    //         .await
+    //         .map_err(DatabaseError::Backend)?;
+    //     let ids: Vec<BookID> = ids
+    //         .into_iter()
+    //         .map(|id| BookID::try_from(id.book_id as u64).unwrap())
+    //         .collect();
+    //
+    //     let books = self.load_book_ids(&ids).await?;
+    //     Ok(ids
+    //         .iter()
+    //         .map(|id| books.get(id).unwrap().clone())
+    //         .collect())
+    // }
+
     async fn perform_query(
         &mut self,
         query: &str,
         bound_variables: &[Variable],
+        limit: usize,
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
         #[derive(sqlx::FromRow, Debug)]
         struct SqlxBookId {
             book_id: i64,
         }
-        let mut query = sqlx::query_as(query);
+
+        let mut query = sqlx::query_as(&query);
         for value in bound_variables {
             query = match value {
                 Variable::Int(i) => query.bind(i),
                 Variable::Str(s) => query.bind(s),
             };
         }
-
+        let query = query.bind((limit * 5) as i64);
         let ids: Vec<SqlxBookId> = query
             .fetch_all(&self.backend)
             .await
@@ -1160,7 +1204,9 @@ impl AppDatabase for SQLiteDatabase {
         let books = self.load_book_ids(&ids).await?;
         Ok(ids
             .iter()
+            .take(limit)
             .map(|id| books.get(id).unwrap().clone())
             .collect())
     }
+
 }

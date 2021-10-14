@@ -206,5 +206,6 @@ pub trait AppDatabase {
         &mut self,
         query: &str,
         bound_variables: &[Variable],
+        limit: usize,
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
 }
