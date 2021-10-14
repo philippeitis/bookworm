@@ -500,9 +500,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
         log(format!("{:?}", vchunks));
         log(format!("{}", vchunks[0].height));
 
+        // Account for top table row
         let _ = state
             .book_view
-            .refresh_window_size(usize::from(vchunks[0].height))
+            .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
             .await;
         let _ = state.update_column_data().await;
     }
@@ -816,9 +817,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
+        // Account for top table row.
         let _ = state
             .book_view
-            .refresh_window_size(usize::from(vchunks[0].height))
+            .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
             .await;
         let _ = state.update_column_data().await;
     }
@@ -1062,7 +1064,8 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Hel
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        self.text.refresh_window_height(vchunks[0].height as usize);
+        self.text
+            .refresh_window_height(usize::from(vchunks[0].height));
     }
 
     fn render_into_frame(&self, f: &mut Frame<B>, _state: &UIState<D>, chunk: Rect) {
