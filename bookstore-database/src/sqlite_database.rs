@@ -1208,5 +1208,4 @@ impl AppDatabase for SQLiteDatabase {
             .map(|id| books.get(id).unwrap().clone())
             .collect())
     }
-
 }
