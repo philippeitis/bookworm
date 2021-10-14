@@ -1,4 +1,5 @@
 #![deny(unused_must_use)]
+#![deny(unused_imports)]
 #[allow(clippy::module_inception)]
 pub mod app;
 pub mod autocomplete;

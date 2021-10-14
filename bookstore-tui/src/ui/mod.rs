@@ -1,3 +1,5 @@
+#![deny(unused_imports)]
+
 mod scrollable_text;
 pub(crate) mod terminal_ui;
 mod tui_widgets;

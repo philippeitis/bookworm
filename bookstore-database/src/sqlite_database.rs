@@ -3,7 +3,6 @@ use std::convert::{TryFrom, TryInto};
 use std::ffi::OsString;
 use std::fmt::Formatter;
 use std::num::NonZeroU64;
-use std::ops::{Bound, RangeBounds};
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 #[cfg(windows)]
@@ -20,12 +19,12 @@ use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::series::Series;
-use bookstore_records::{Book, BookVariant, ColumnOrder, Edit};
+use bookstore_records::{Book, BookVariant, Edit};
 
 use crate::bookmap::BookCache;
 use crate::paginator::Variable;
 use crate::search::Search;
-use crate::{AppDatabase, DatabaseError, IndexableDatabase};
+use crate::{AppDatabase, DatabaseError};
 
 // CREATE VIRTUAL TABLE table_fts USING FTS5 (
 //     fields,
@@ -369,7 +368,19 @@ impl SQLiteDatabase {
     ) -> Result<HashMap<BookID, Arc<Book>>, DatabaseError<<SQLiteDatabase as AppDatabase>::Error>>
     {
         // TODO: Benchmark this for large databases with complex books.
-        let where_ = format!("IN ({})", ids.iter().map(|x| x.to_string()).join(", "));
+        let mut books: HashMap<BookID, Option<Arc<Book>>> = ids
+            .iter()
+            .map(|id| (*id, self.local_cache.get_book(*id)))
+            .collect();
+
+        let where_ = format!(
+            "IN ({})",
+            books
+                .iter()
+                .filter(|(_, book)| book.is_none())
+                .map(|(id, _)| id.to_string())
+                .join(", ")
+        );
         let raw_books = sqlx::query_as(&format!(
             "SELECT * FROM books WHERE books.book_id {}",
             where_
@@ -406,7 +417,7 @@ impl SQLiteDatabase {
         .await
         .map_err(DatabaseError::Backend)?;
 
-        let (books, columns) = SQLiteDatabase::books_from_sql(
+        let (new_books, columns) = SQLiteDatabase::books_from_sql(
             raw_books,
             raw_variants,
             raw_named_tags,
@@ -414,11 +425,17 @@ impl SQLiteDatabase {
             raw_multimap_tags,
         );
 
-        books
+        new_books
             .iter()
             .for_each(|(_, book)| self.local_cache.insert_book(book.clone()));
         self.local_cache.insert_columns(columns);
-        Ok(books.into_iter().collect())
+        new_books
+            .into_iter()
+            .for_each(|(id, book)| drop(books.insert(id, Some(book))));
+        Ok(books
+            .into_iter()
+            .filter_map(|(id, book)| book.map(|book| (id, book)))
+            .collect())
     }
 
     async fn load_books(
@@ -1096,21 +1113,6 @@ impl AppDatabase for SQLiteDatabase {
         Ok(self.local_cache.find_matches(searches)?)
     }
 
-    async fn find_book_index(
-        &self,
-        searches: &[Search],
-    ) -> Result<Option<usize>, DatabaseError<Self::Error>> {
-        Ok(self.local_cache.find_book_index(searches)?)
-    }
-
-    async fn sort_books_by_cols(
-        &mut self,
-        columns: &[(ColumnIdentifier, ColumnOrder)],
-    ) -> Result<(), DatabaseError<Self::Error>> {
-        self.local_cache.sort_books_by_cols(columns);
-        Ok(())
-    }
-
     async fn size(&self) -> usize {
         // "SELECT COUNT(*) FROM books;"
         self.local_cache.len()
@@ -1125,50 +1127,6 @@ impl AppDatabase for SQLiteDatabase {
         _books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
         unimplemented!("bookstore does not currently support updating book paths.")
-    }
-}
-
-#[async_trait]
-impl IndexableDatabase for SQLiteDatabase {
-    async fn get_books_indexed<I: RangeBounds<usize> + Send>(
-        &self,
-        indices: I,
-    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
-        // NOTE: The query below would require a paginated search.
-        //  Jumping to end is possible with the reverse search pattern,
-        //  BUT: for searches, finding all results can be expensive
-        // SELECT * FROM books WHERE book_id > last_id ORDER BY {} [} LIMIT {};
-        let size = self.size().await;
-        let start = match indices.start_bound() {
-            Bound::Included(i) => *i,
-            Bound::Excluded(i) => *i + 1,
-            Bound::Unbounded => 0,
-        }
-        .min(size.saturating_sub(1));
-
-        let end = match indices.end_bound() {
-            Bound::Included(i) => *i + 1,
-            Bound::Excluded(i) => *i,
-            Bound::Unbounded => usize::MAX,
-        }
-        .min(size);
-
-        // let offset = start;
-        // let len = end.saturating_sub(start);
-
-        Ok((start..end)
-            .filter_map(|i| self.local_cache.get_book_indexed(i))
-            .collect())
-    }
-
-    async fn get_book_indexed(
-        &self,
-        index: usize,
-    ) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
-        // "SELECT * FROM {} ORDER BY {} {} LIMIT 1 OFFSET {};"
-        self.local_cache
-            .get_book_indexed(index)
-            .ok_or(DatabaseError::IndexOutOfBounds(index))
     }
 
     async fn perform_query(

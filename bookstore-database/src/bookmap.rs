@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use indexmap::map::IndexMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{Book, ColumnOrder, Edit};
+use bookstore_records::{Book, Edit};
 
 use crate::search::{Error, Search};
 
@@ -17,14 +16,14 @@ use crate::search::{Error, Search};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 pub(crate) struct BookCache {
-    books: IndexMap<BookID, Arc<Book>>,
+    books: HashMap<BookID, Arc<Book>>,
     cols: HashSet<UniCase<String>>,
 }
 
 impl Default for BookCache {
     fn default() -> Self {
         BookCache {
-            books: IndexMap::default(),
+            books: HashMap::default(),
             cols: ["title", "authors", "series", "id", "description"]
                 .iter()
                 .map(|s| s.to_string())
@@ -36,7 +35,7 @@ impl Default for BookCache {
 
 impl BookCache {
     pub(crate) fn from_values_unchecked(
-        books: IndexMap<BookID, Arc<Book>>,
+        books: HashMap<BookID, Arc<Book>>,
         cols: HashSet<UniCase<String>>,
     ) -> Self {
         BookCache { books, cols }
@@ -55,7 +54,7 @@ impl BookCache {
     }
 
     pub fn remove_book(&mut self, id: BookID) {
-        self.books.shift_remove(&id);
+        self.books.remove(&id);
     }
 
     pub fn remove_books(&mut self, ids: &HashSet<BookID>) {
@@ -68,10 +67,6 @@ impl BookCache {
 
     pub fn get_book(&self, id: BookID) -> Option<Arc<Book>> {
         self.books.get(&id).cloned()
-    }
-
-    pub fn get_book_indexed(&self, index: usize) -> Option<Arc<Book>> {
-        self.books.get_index(index).map(|(_, book)| book.clone())
     }
 
     pub fn get_all_books(&self) -> Vec<Arc<Book>> {
@@ -145,32 +140,6 @@ impl BookCache {
             results.retain(|book| matcher.is_match(book));
         }
         Ok(results)
-    }
-
-    pub fn find_book_index(&self, searches: &[Search]) -> Result<Option<usize>, Error> {
-        let mut results: Vec<_> = self.books.values().cloned().collect();
-        for search in searches {
-            let matcher = search.clone().into_matcher()?;
-            results.retain(|book| matcher.is_match(book));
-        }
-
-        // get_index_of should not fail - book ID is immutable, and books should not be changed.
-        Ok(results.first().map(|book| {
-            self.books
-                .get_index_of(&book.id())
-                .expect("Reference to existing book was invalidated during search.")
-        }))
-    }
-
-    pub fn sort_books_by_cols(&mut self, cols: &[(ColumnIdentifier, ColumnOrder)]) {
-        // Use some heuristic to sort in parallel when it would offer speedup -
-        // parallel threads are slower for small sorts.
-        if self.books.len() < 2500 {
-            self.books.sort_by(|_, a, _, b| a.cmp_columns(&b, &cols))
-        } else {
-            self.books
-                .par_sort_by(|_, a, _, b| a.cmp_columns(&b, &cols))
-        }
     }
 
     pub(crate) fn has_column(&self, col: &UniCase<String>) -> bool {

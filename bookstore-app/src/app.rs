@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 use unicase::UniCase;
 
 use bookstore_database::search::Search;
-use bookstore_database::{Book, BookView, DatabaseError, IndexableDatabase};
+use bookstore_database::{AppDatabase, Book, BookView, DatabaseError};
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant, Edit};
 
@@ -204,7 +204,7 @@ pub enum AppTask {
     OpenBookIn(BookID, usize, Target),
 }
 
-pub enum AppResponse<D: IndexableDatabase> {
+pub enum AppResponse<D: AppDatabase> {
     IsSaved(bool),
     HelpInformation(String),
     Updated(bool),
@@ -219,7 +219,7 @@ pub enum AppResponse<D: IndexableDatabase> {
     Empty,
 }
 
-pub struct App<D: IndexableDatabase> {
+pub struct App<D: AppDatabase> {
     db: Arc<RwLock<D>>,
     active_help_string: Option<&'static str>,
     updated: bool,
@@ -227,12 +227,12 @@ pub struct App<D: IndexableDatabase> {
     result_sender: Sender<AppResponse<D>>,
 }
 
-pub struct AppChannel<D: IndexableDatabase> {
+pub struct AppChannel<D: AppDatabase> {
     sender: Sender<AppTask>,
     receiver: Arc<RwLock<Receiver<AppResponse<D>>>>,
 }
 
-impl<D: IndexableDatabase + Send + Sync> AppChannel<D> {
+impl<D: AppDatabase + Send + Sync> AppChannel<D> {
     pub async fn send(&self, app_task: AppTask) -> bool {
         self.sender.send(app_task).await.is_ok()
     }
@@ -369,7 +369,7 @@ impl<D: IndexableDatabase + Send + Sync> AppChannel<D> {
     }
 }
 
-impl<D: IndexableDatabase + Send + Sync> App<D> {
+impl<D: AppDatabase + Send + Sync> App<D> {
     pub fn new(db: D) -> (Self, AppChannel<D>) {
         let (event_sender, event_receiver) = tokio::sync::mpsc::channel(100);
         let (result_sender, result_receiver) = tokio::sync::mpsc::channel(100);

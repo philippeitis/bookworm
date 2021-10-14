@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use unicase::UniCase;
 
 use bookstore_database::bookview::BookViewError;
-use bookstore_database::{BookView, IndexableDatabase};
+use bookstore_database::{AppDatabase, BookView};
 use bookstore_records::book::ColumnIdentifier;
 
 /// TableView acts as a way to avoid errors in the rendering step - by pre-loading all
@@ -18,7 +18,7 @@ pub struct TableView {
 impl TableView {
     /// Refreshes the table data according to the currently selected columns and the books
     /// in the BookView's cursor.
-    pub async fn regenerate_columns<D: IndexableDatabase + Send + Sync>(
+    pub async fn regenerate_columns<D: AppDatabase + Send + Sync>(
         &mut self,
         bv: &BookView<D>,
     ) -> Result<(), BookViewError<D::Error>> {

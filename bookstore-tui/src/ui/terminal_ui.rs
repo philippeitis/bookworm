@@ -17,10 +17,8 @@ use bookstore_app::table_view::TableView;
 use bookstore_app::user_input::{CommandString, CommandStringError, EditState};
 use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
-use bookstore_database::paged_cursor::RelativeSelection;
-use bookstore_database::{BookView, DatabaseError, IndexableDatabase};
+use bookstore_database::{AppDatabase, BookView, DatabaseError};
 
-use crate::ui::log;
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::views::{
     AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
@@ -65,7 +63,7 @@ impl<DBError> From<CommandStringError> for TuiError<DBError> {
         TuiError::CommandString(e)
     }
 }
-pub(crate) struct UIState<D: IndexableDatabase + Send + Sync> {
+pub(crate) struct UIState<D: AppDatabase + Send + Sync> {
     pub(crate) style: InterfaceStyle,
     pub(crate) nav_settings: NavigationSettings,
     pub(crate) curr_command: CommandString,
@@ -76,11 +74,7 @@ pub(crate) struct UIState<D: IndexableDatabase + Send + Sync> {
     // pub(crate) command_log: Vec<CommandString>,
 }
 
-impl<D: IndexableDatabase + Send + Sync> UIState<D> {
-    pub(crate) fn modify_bv(&mut self, f: impl Fn(&mut BookView<D>) -> bool) -> bool {
-        f(&mut self.book_view)
-    }
-
+impl<D: AppDatabase + Send + Sync> UIState<D> {
     pub(crate) async fn update_column_data(&mut self) -> Result<(), BookViewError<D::Error>> {
         self.table_view.regenerate_columns(&self.book_view).await
     }
@@ -89,8 +83,8 @@ impl<D: IndexableDatabase + Send + Sync> UIState<D> {
         let selected_column = self.table_view.get_column(self.selected_column);
         Some(
             self.book_view
-                .relative_selections()?
-                .iter()
+                .relative_selections()
+                .into_iter()
                 .map(|x| selected_column[x].as_str())
                 .collect(),
         )
@@ -100,32 +94,31 @@ impl<D: IndexableDatabase + Send + Sync> UIState<D> {
         self.table_view.selected_cols().len()
     }
 
-    pub(crate) fn selected(&self) -> Option<(usize, RelativeSelection)> {
-        Some((self.selected_column, self.book_view.relative_selections()?))
+    pub(crate) fn selected(&self) -> Option<(usize, Vec<usize>)> {
+        Some((self.selected_column, self.book_view.relative_selections()))
     }
 
     pub(crate) async fn make_selection_visible(&mut self) -> Result<(), BookViewError<D::Error>> {
-        if self.book_view.make_selection_visible() {
-            self.table_view.regenerate_columns(&self.book_view).await?;
-        }
-        Ok(())
+        // Will refresh db size.
+        self.book_view.refresh().await?;
+        self.table_view.regenerate_columns(&self.book_view).await
     }
 }
 
-trait ViewHandler<D: IndexableDatabase + Send + Sync, B: Backend>:
+trait ViewHandler<D: AppDatabase + Send + Sync, B: Backend>:
     ResizableWidget<D, B> + InputHandler<D>
 {
 }
 
-impl<D: IndexableDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for ColumnWidget<D> {}
+impl<D: AppDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for ColumnWidget<D> {}
 
-impl<D: IndexableDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for EditWidget<D> {}
+impl<D: AppDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for EditWidget<D> {}
 
-impl<D: IndexableDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for HelpWidget<D> {}
+impl<D: AppDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for HelpWidget<D> {}
 
 // TODO: Use channels to allow CTRL+Q when application freezes
 //          Also, allow text input / waiting animation
-pub(crate) struct AppInterface<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> {
+pub(crate) struct AppInterface<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> {
     border_widget: BorderWidget,
     active_view: Box<dyn ViewHandler<D, B> + 'a>,
     ui_state: UIState<D>,
@@ -135,7 +128,7 @@ pub(crate) struct AppInterface<'a, D: 'a + IndexableDatabase + Send + Sync, B: B
     app_channel: AppChannel<D>,
 }
 
-impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
+impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
     /// Returns a new database, instantiated with the provided settings and database.
     ///
     /// # Arguments
@@ -268,11 +261,6 @@ impl<'a, D: 'a + IndexableDatabase + Send + Sync, B: Backend> AppInterface<'a, D
         terminal: &mut Terminal<B>,
     ) -> Result<(), TuiError<D::Error>> {
         loop {
-            self.ui_state
-                .book_view
-                .sort_by_columns(&self.ui_state.sort_settings.columns)
-                .await?;
-
             if self.app_channel.take_update().await | self.take_update() {
                 self.border_widget.saved = self.app_channel.saved().await;
                 {

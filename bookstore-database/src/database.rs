@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::ops::RangeBounds;
 use std::path;
 use std::sync::Arc;
 
@@ -7,7 +6,7 @@ use async_trait::async_trait;
 use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{Book, BookVariant, ColumnOrder, Edit};
+use bookstore_records::{Book, BookVariant, Edit};
 
 use crate::paginator::Variable;
 use crate::search::{Error as SearchError, Search};
@@ -190,30 +189,6 @@ pub trait AppDatabase {
         searches: &[Search],
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
 
-    /// Finds the first book to match all criteria specified by searches.
-    ///
-    /// # Arguments
-    /// * ` searches ` - Some number of search queries.
-    ///
-    /// # Errors
-    /// This function will return an error if the database fails.
-    async fn find_book_index(
-        &self,
-        searches: &[Search],
-    ) -> Result<Option<usize>, DatabaseError<Self::Error>>;
-
-    /// Sorts books by comparing the specified column, and sorting in order of `reverse`.
-    ///
-    /// # Arguments
-    /// * ` columns ` - A collection of (Column, bool) pairs, specifying a column to sort on, and
-    /// whether the column should be reversed or not.
-    /// # Errors
-    /// This function will return an error if the database fails.
-    async fn sort_books_by_cols(
-        &mut self,
-        columns: &[(ColumnIdentifier, ColumnOrder)],
-    ) -> Result<(), DatabaseError<Self::Error>>;
-
     /// Returns the number of books stored internally.
     async fn size(&self) -> usize;
 
@@ -226,33 +201,6 @@ pub trait AppDatabase {
         &mut self,
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;
-}
-
-#[async_trait]
-pub trait IndexableDatabase: AppDatabase + Sized {
-    /// Gets the books in self as specified by absolute indices, respecting the current
-    /// ordering.
-    ///
-    /// # Arguments
-    /// * ` indices ` - the indices of the books to fetch
-    ///
-    /// # Errors
-    /// This function will return an error if reading the database fails.
-    async fn get_books_indexed<I: RangeBounds<usize> + Send>(
-        &self,
-        indices: I,
-    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
-
-    /// Get the book at the current index, respecting the current ordering.
-    ///
-    /// # Arguments
-    /// * ` index ` - the index of the book to fetch
-    ///
-    /// # Errors
-    /// This function will return an error if reading the database fails or the given index does not
-    /// exist.
-    async fn get_book_indexed(&self, index: usize)
-        -> Result<Arc<Book>, DatabaseError<Self::Error>>;
 
     async fn perform_query(
         &mut self,

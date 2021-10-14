@@ -1,4 +1,5 @@
 #![deny(unused_must_use)]
+#![deny(unused_imports)]
 
 pub use book::Book;
 pub use error::BookError;

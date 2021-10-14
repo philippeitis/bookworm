@@ -19,8 +19,8 @@ use tui::Terminal;
 use bookstore_app::table_view::TableView;
 use bookstore_app::{parse_args, App, Settings};
 use bookstore_database::paginator::Variable;
+use bookstore_database::AppDatabase;
 use bookstore_database::SQLiteDatabase;
-use bookstore_database::{AppDatabase, IndexableDatabase};
 
 use crate::ui::terminal_ui::UIState;
 use crate::ui::views::{run_command, AppView, ApplicationTask};

@@ -7,12 +7,14 @@ use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::{Book, ColumnOrder};
 
 use crate::search::Matcher;
-use crate::{AppDatabase, DatabaseError, IndexableDatabase};
+use crate::{AppDatabase, DatabaseError};
 
 static ASCII_LOWER: [char; 26] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
     't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
+
+type PaginatorResult<E> = Result<(), DatabaseError<E>>;
 
 struct QueryBuilder {
     order: ColumnOrder,
@@ -168,14 +170,14 @@ impl QueryBuilder {
 /// The paginator stores information about existing matching and sorting rules, and when scrolled
 /// to the end, will automatically fetch new items, in the correct order, which match the internal
 /// rules.
-pub struct Paginator<D: IndexableDatabase> {
+pub struct Paginator<D: AppDatabase> {
     books: Vec<Arc<Book>>,
     window_size: usize,
     // relative to start of books
     window_top: usize,
     // Some set of sorting rules.
     sorting_rules: Box<[(ColumnIdentifier, ColumnOrder)]>,
-    matching_rules: Box<[Box<dyn Matcher>]>,
+    matching_rules: Box<[Box<dyn Matcher + Send + Sync>]>,
     // Used to make sure that we don't endlessly retry matches.
     last_compared: Option<Arc<Book>>,
     // Store selected values (no relative indices).
@@ -251,32 +253,49 @@ fn order_repr(primary: ColumnOrder, secondary: ColumnOrder) -> &'static str {
     }
 }
 
-impl<D: IndexableDatabase> Paginator<D> {
+fn add_id(
+    sorting_rules: Box<[(ColumnIdentifier, ColumnOrder)]>,
+) -> Box<[(ColumnIdentifier, ColumnOrder)]> {
+    if !sorting_rules
+        .iter()
+        .any(|(col_id, _)| matches!(col_id, ColumnIdentifier::ID))
+    {
+        let mut sorting_rules = sorting_rules.to_vec();
+        sorting_rules.push((ColumnIdentifier::ID, ColumnOrder::Ascending));
+        sorting_rules.into_boxed_slice()
+    } else {
+        sorting_rules
+    }
+}
+
+impl<D: AppDatabase> Paginator<D> {
     pub fn new(
         db: Arc<RwLock<D>>,
         window_size: usize,
         sorting_rules: Box<[(ColumnIdentifier, ColumnOrder)]>,
     ) -> Self {
-        let sorting_rules = if !sorting_rules
-            .iter()
-            .any(|(col_id, _)| matches!(col_id, ColumnIdentifier::ID))
-        {
-            let mut sorting_rules = sorting_rules.to_vec();
-            sorting_rules.push((ColumnIdentifier::ID, ColumnOrder::Ascending));
-            sorting_rules.into_boxed_slice()
-        } else {
-            sorting_rules
-        };
         Self {
             books: vec![],
             window_size,
             window_top: 0,
-            sorting_rules,
+            sorting_rules: add_id(sorting_rules),
             matching_rules: vec![].into_boxed_slice(),
             last_compared: None,
             selected: Default::default(),
             db,
         }
+    }
+
+    pub fn selected(&self) -> Vec<Arc<Book>> {
+        self.selected.values().cloned().collect()
+    }
+
+    pub async fn sort_by(
+        &mut self,
+        sorting_rules: &[(ColumnIdentifier, ColumnOrder)],
+    ) -> Result<(), DatabaseError<D::Error>> {
+        self.sorting_rules = add_id(sorting_rules.to_vec().into_boxed_slice());
+        self.make_book_visible(self.window().first().cloned()).await
     }
 
     pub fn window(&self) -> &[Arc<Book>] {
@@ -287,6 +306,9 @@ impl<D: IndexableDatabase> Paginator<D> {
         &mut self,
         num_books: usize,
     ) -> Result<(), DatabaseError<D::Error>> {
+        if num_books == 0 {
+            return Ok(());
+        }
         let (query, bindings) = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Descending)
@@ -307,6 +329,10 @@ impl<D: IndexableDatabase> Paginator<D> {
         &mut self,
         num_books: usize,
     ) -> Result<(), DatabaseError<D::Error>> {
+        if num_books == 0 {
+            return Ok(());
+        }
+
         let (query, bindings) = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Ascending)
@@ -333,6 +359,10 @@ impl<D: IndexableDatabase> Paginator<D> {
 
     pub async fn scroll_down(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
         match (self.window_top + self.window_size + len).checked_sub(self.books.len()) {
+            None => {
+                self.window_top += len;
+                Ok(())
+            }
             Some(limit) => {
                 // TODO If len is a large jump, we should do an OFFSET instead of loading
                 //  everything in-between (check if len > some multiple of window size),
@@ -347,12 +377,7 @@ impl<D: IndexableDatabase> Paginator<D> {
                     Some(window_top) => self.window_top = window_top,
                 }
                 Ok(())
-            }
-            // checked above that it will contain enough books to fill a window.
-            None => {
-                self.window_top += len;
-                Ok(())
-            }
+            } // checked above that it will contain enough books to fill a window.
         }
     }
 
@@ -475,5 +500,71 @@ impl<D: IndexableDatabase> Paginator<D> {
         self.make_book_visible(target).await
     }
 
+    pub fn window_size(&self) -> usize {
+        self.window_size
+    }
+
+    pub fn deselect(&mut self) {
+        self.selected.clear();
+    }
     // https://github.com/rusqlite/rusqlite/blob/6a22bb7a56d4be48f5bea81c40ccc496fc74bb57/src/functions.rs#L844
+
+    pub fn relative_selections(&self) -> Vec<usize> {
+        self.window()
+            .iter()
+            .enumerate()
+            .filter(|(i, book)| self.selected.contains_key(&book.id()))
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    pub fn sort_rules(&self) -> &[(ColumnIdentifier, ColumnOrder)] {
+        &self.sorting_rules
+    }
+}
+
+impl<D: AppDatabase> Paginator<D> {
+    pub async fn page_up(&mut self) -> PaginatorResult<D::Error> {
+        self.scroll_up(self.window_size).await
+    }
+
+    pub async fn page_down(&mut self) -> PaginatorResult<D::Error> {
+        self.scroll_down(self.window_size).await
+    }
+
+    pub async fn up(&mut self) -> PaginatorResult<D::Error> {
+        self.scroll_up(1).await
+    }
+
+    pub async fn down(&mut self) -> PaginatorResult<D::Error> {
+        self.scroll_down(1).await
+    }
+
+    pub async fn select_up(&mut self, len: usize) -> PaginatorResult<D::Error> {
+        unimplemented!()
+    }
+
+    pub async fn select_down(&mut self, len: usize) -> PaginatorResult<D::Error> {
+        unimplemented!()
+    }
+
+    pub async fn select_all(&mut self) -> PaginatorResult<D::Error> {
+        unimplemented!()
+    }
+
+    pub async fn select_page_up(&mut self) -> PaginatorResult<D::Error> {
+        unimplemented!()
+    }
+
+    pub async fn select_page_down(&mut self) -> PaginatorResult<D::Error> {
+        unimplemented!()
+    }
+
+    pub async fn select_to_start(&mut self) -> PaginatorResult<D::Error> {
+        unimplemented!()
+    }
+
+    pub async fn select_to_end(&mut self) -> PaginatorResult<D::Error> {
+        unimplemented!()
+    }
 }
