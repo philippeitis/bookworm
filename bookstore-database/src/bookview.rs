@@ -9,21 +9,7 @@ use bookstore_records::{Book, ColumnOrder};
 
 use crate::paginator::Paginator;
 use crate::search::{Error as SearchError, Search};
-use crate::{AppDatabase, DatabaseError};
-
-fn log(s: impl AsRef<str>) {
-    use std::io::Write;
-
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(true)
-        .open("log.txt")
-    {
-        let _ = f.write_all(s.as_ref().as_bytes());
-        let _ = f.write_all(b"\n");
-    }
-}
+use crate::{log, AppDatabase, DatabaseError};
 
 #[derive(Debug)]
 pub enum BookViewError<DBError> {
@@ -56,7 +42,7 @@ impl<DBError> From<RecordError> for BookViewError<DBError> {
     }
 }
 
-pub struct BookView<D: AppDatabase> {
+pub struct BookView<D: AppDatabase + 'static> {
     scopes: Vec<Paginator<D>>,
     // The "root" scope.
     root_cursor: Paginator<D>,
@@ -72,7 +58,7 @@ impl<D: AppDatabase> BookView<D> {
     }
 }
 
-impl<D: AppDatabase + Send + Sync> BookView<D> {
+impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
     pub async fn new(db: Arc<RwLock<D>>) -> Self {
         Self {
             scopes: vec![],

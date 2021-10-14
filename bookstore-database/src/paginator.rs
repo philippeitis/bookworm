@@ -7,7 +7,7 @@ use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::{Book, ColumnOrder};
 
 use crate::search::Matcher;
-use crate::{AppDatabase, DatabaseError};
+use crate::{log, AppDatabase, DatabaseError};
 
 static ASCII_LOWER: [char; 26] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
@@ -223,7 +223,7 @@ impl QueryBuilder {
 /// The paginator stores information about existing matching and sorting rules, and when scrolled
 /// to the end, will automatically fetch new items, in the correct order, which match the internal
 /// rules.
-pub struct Paginator<D: AppDatabase> {
+pub struct Paginator<D: AppDatabase + 'static> {
     books: Vec<Arc<Book>>,
     window_size: usize,
     // relative to start of books
@@ -357,7 +357,7 @@ fn add_id(
     }
 }
 
-impl<D: AppDatabase> Paginator<D> {
+impl<D: AppDatabase + Send + Sync> Paginator<D> {
     pub fn new(
         db: Arc<RwLock<D>>,
         window_size: usize,
@@ -411,6 +411,19 @@ impl<D: AppDatabase> Paginator<D> {
             .await
             .perform_query(&query, &bindings, num_books)
             .await?;
+
+        let db = self.db.clone();
+        tokio::spawn(async move {
+            let start = std::time::Instant::now();
+            let _ = db
+                .write()
+                .await
+                .perform_query(&query, &bindings, num_books * 5)
+                .await;
+            let end = std::time::Instant::now();
+            log(format!("Took {}s to prefetch", (end - start).as_secs_f32()));
+        });
+
         self.books.extend(books);
         Ok(())
     }
@@ -438,6 +451,18 @@ impl<D: AppDatabase> Paginator<D> {
             .await
             .perform_query(&query, &bindings, num_books)
             .await?;
+
+        let db = self.db.clone();
+        tokio::spawn(async move {
+            let start = std::time::Instant::now();
+            let _ = db
+                .write()
+                .await
+                .perform_query(&query, &bindings, num_books * 5)
+                .await;
+            let end = std::time::Instant::now();
+            log(format!("Took {}s to prefetch", (end - start).as_secs_f32()));
+        });
 
         if !books.is_empty() {
             books.reverse();
@@ -611,7 +636,7 @@ impl<D: AppDatabase> Paginator<D> {
     }
 }
 
-impl<D: AppDatabase> Paginator<D> {
+impl<D: AppDatabase + Send + Sync> Paginator<D> {
     pub async fn page_up(&mut self) -> PaginatorResult<D::Error> {
         self.scroll_up(self.window_size).await
     }

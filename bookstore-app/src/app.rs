@@ -204,7 +204,7 @@ pub enum AppTask {
     OpenBookIn(BookID, usize, Target),
 }
 
-pub enum AppResponse<D: AppDatabase> {
+pub enum AppResponse<D: AppDatabase + 'static> {
     IsSaved(bool),
     HelpInformation(String),
     Updated(bool),
@@ -219,15 +219,14 @@ pub enum AppResponse<D: AppDatabase> {
     Empty,
 }
 
-pub struct App<D: AppDatabase> {
+pub struct App<D: AppDatabase + 'static> {
     db: Arc<RwLock<D>>,
-    active_help_string: Option<&'static str>,
     updated: bool,
     event_receiver: Receiver<AppTask>,
     result_sender: Sender<AppResponse<D>>,
 }
 
-pub struct AppChannel<D: AppDatabase> {
+pub struct AppChannel<D: AppDatabase + 'static> {
     sender: Sender<AppTask>,
     receiver: Arc<RwLock<Receiver<AppResponse<D>>>>,
 }
@@ -379,7 +378,6 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                 db: Arc::new(RwLock::new(db)),
                 updated: true,
                 event_receiver,
-                active_help_string: None,
                 result_sender,
             },
             AppChannel {
@@ -554,14 +552,6 @@ impl<D: AppDatabase + Send + Sync> App<D> {
 
     async fn saved(&mut self) -> bool {
         self.db.read().await.saved().await
-    }
-
-    pub fn has_help_string(&self) -> bool {
-        self.active_help_string.is_some()
-    }
-
-    pub fn take_help_string(&mut self) -> &'static str {
-        std::mem::take(&mut self.active_help_string).unwrap_or(GENERAL_HELP)
     }
 }
 

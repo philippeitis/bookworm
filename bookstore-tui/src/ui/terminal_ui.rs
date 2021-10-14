@@ -19,6 +19,7 @@ use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
 use bookstore_database::{AppDatabase, BookView, DatabaseError};
 
+use crate::ui::log;
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::views::{
     AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
@@ -63,7 +64,7 @@ impl<DBError> From<CommandStringError> for TuiError<DBError> {
         TuiError::CommandString(e)
     }
 }
-pub(crate) struct UIState<D: AppDatabase + Send + Sync> {
+pub(crate) struct UIState<D: AppDatabase + Send + Sync + 'static> {
     pub(crate) style: InterfaceStyle,
     pub(crate) nav_settings: NavigationSettings,
     pub(crate) curr_command: CommandString,
@@ -118,7 +119,7 @@ impl<D: AppDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for HelpWidget<
 
 // TODO: Use channels to allow CTRL+Q when application freezes
 //          Also, allow text input / waiting animation
-pub(crate) struct AppInterface<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> {
+pub(crate) struct AppInterface<'a, D: 'a + AppDatabase + Send + Sync + 'static, B: Backend> {
     border_widget: BorderWidget,
     active_view: Box<dyn ViewHandler<D, B> + 'a>,
     ui_state: UIState<D>,
@@ -185,6 +186,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
     async fn read_user_input(&mut self) -> Result<bool, TuiError<D::Error>> {
         loop {
             if let Some(Ok(event)) = self.event_receiver.next().fuse().await {
+                log(format!("HIT EVENT {:?}", event));
                 match event {
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('q'),

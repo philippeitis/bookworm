@@ -1,18 +1,6 @@
 use std::collections::BTreeSet;
 use std::io::Write;
 
-fn log(s: impl AsRef<str>) {
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(true)
-        .open("log.txt")
-    {
-        let _ = f.write_all(s.as_ref().as_bytes());
-        let _ = f.write_all(b"\n");
-    }
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Direction {
     Up,
