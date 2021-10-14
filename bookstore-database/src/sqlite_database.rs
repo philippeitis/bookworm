@@ -381,42 +381,39 @@ impl SQLiteDatabase {
                 .map(|(id, _)| id.to_string())
                 .join(", ")
         );
-        let raw_books = sqlx::query_as(&format!(
-            "SELECT * FROM books WHERE books.book_id {}",
-            where_
-        ))
-        .fetch_all(&self.backend)
-        .await
-        .map_err(DatabaseError::Backend)?;
-        let raw_variants = sqlx::query_as(&format!(
-            "SELECT * FROM variants WHERE variants.book_id {}",
-            where_
-        ))
-        .fetch_all(&self.backend)
-        .await
-        .map_err(DatabaseError::Backend)?;
-        let raw_named_tags = sqlx::query_as(&format!(
+        let raw_book_query = format!("SELECT * FROM books WHERE books.book_id {}", where_);
+        let raw_variant_query = format!("SELECT * FROM variants WHERE variants.book_id {}", where_);
+        let raw_named_tag_query = format!(
             "SELECT * FROM named_tags WHERE named_tags.book_id {}",
             where_
-        ))
-        .fetch_all(&self.backend)
-        .await
-        .map_err(DatabaseError::Backend)?;
-        let raw_free_tags = sqlx::query_as(&format!(
-            "SELECT * FROM free_tags WHERE free_tags.book_id {}",
-            where_
-        ))
-        .fetch_all(&self.backend)
-        .await
-        .map_err(DatabaseError::Backend)?;
-        let raw_multimap_tags = sqlx::query_as(&format!(
+        );
+        let raw_free_tag_query =
+            format!("SELECT * FROM free_tags WHERE free_tags.book_id {}", where_);
+        let raw_multimap_tag_query = format!(
             "SELECT * FROM multimap_tags WHERE multimap_tags.book_id {}",
             where_
-        ))
-        .fetch_all(&self.backend)
-        .await
-        .map_err(DatabaseError::Backend)?;
+        );
+        let raw_books = sqlx::query_as(&raw_book_query).fetch_all(&self.backend);
+        let raw_variants = sqlx::query_as(&raw_variant_query).fetch_all(&self.backend);
+        let raw_named_tags = sqlx::query_as(&raw_named_tag_query).fetch_all(&self.backend);
+        let raw_free_tags = sqlx::query_as(&raw_free_tag_query).fetch_all(&self.backend);
 
+        let raw_multimap_tags = sqlx::query_as(&raw_multimap_tag_query).fetch_all(&self.backend);
+
+        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = tokio::join!(
+            raw_books,
+            raw_variants,
+            raw_named_tags,
+            raw_free_tags,
+            raw_multimap_tags
+        );
+        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
+            raw_books.map_err(DatabaseError::Backend)?,
+            raw_variants.map_err(DatabaseError::Backend)?,
+            raw_named_tags.map_err(DatabaseError::Backend)?,
+            raw_free_tags.map_err(DatabaseError::Backend)?,
+            raw_multimap_tags.map_err(DatabaseError::Backend)?,
+        );
         let (new_books, columns) = SQLiteDatabase::books_from_sql(
             raw_books,
             raw_variants,
@@ -442,26 +439,31 @@ impl SQLiteDatabase {
         &mut self,
     ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
         // TODO: Benchmark this for large databases with complex books.
-        let raw_books = sqlx::query_as!(BookData, "SELECT * FROM books")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let raw_variants = sqlx::query_as!(VariantData, "SELECT * FROM variants")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let raw_named_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM named_tags")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let raw_free_tags = sqlx::query_as!(FreeTagData, "SELECT * FROM free_tags")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let raw_multimap_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM multimap_tags")
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
+        let raw_books = sqlx::query_as!(BookData, "SELECT * FROM books").fetch_all(&self.backend);
+        let raw_variants =
+            sqlx::query_as!(VariantData, "SELECT * FROM variants").fetch_all(&self.backend);
+        let raw_named_tags =
+            sqlx::query_as!(NamedTagData, "SELECT * FROM named_tags").fetch_all(&self.backend);
+        let raw_free_tags =
+            sqlx::query_as!(FreeTagData, "SELECT * FROM free_tags").fetch_all(&self.backend);
+        let raw_multimap_tags =
+            sqlx::query_as!(NamedTagData, "SELECT * FROM multimap_tags").fetch_all(&self.backend);
+
+        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = tokio::join!(
+            raw_books,
+            raw_variants,
+            raw_named_tags,
+            raw_free_tags,
+            raw_multimap_tags
+        );
+
+        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
+            raw_books.map_err(DatabaseError::Backend)?,
+            raw_variants.map_err(DatabaseError::Backend)?,
+            raw_named_tags.map_err(DatabaseError::Backend)?,
+            raw_free_tags.map_err(DatabaseError::Backend)?,
+            raw_multimap_tags.map_err(DatabaseError::Backend)?,
+        );
 
         let (books, columns) = SQLiteDatabase::books_from_sql(
             raw_books,
@@ -516,6 +518,9 @@ impl SQLiteDatabase {
                 .map_err(DatabaseError::Backend)?;
         }
 
+        if db_exists {
+            db.load_books().await?;
+        }
         Ok(db)
     }
 
