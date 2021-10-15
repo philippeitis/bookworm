@@ -264,7 +264,7 @@ impl SQLiteDatabase {
             .collect();
 
         for variant in raw_variants.into_iter() {
-            let id = NonZeroU64::try_from(variant.book_id as u64).unwrap();
+            let id = NonZeroU64::try_from(variant.book_id as u64).expect("book_id is non-null");
             let variant = match BookVariant::try_from(variant) {
                 Ok(variant) => variant,
                 Err(e) => {
@@ -291,7 +291,7 @@ impl SQLiteDatabase {
         }
 
         for tag in raw_named_tags.into_iter() {
-            let id = NonZeroU64::try_from(tag.book_id as u64).unwrap();
+            let id = NonZeroU64::try_from(tag.book_id as u64).expect("book_id is non-null");
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
@@ -306,13 +306,13 @@ impl SQLiteDatabase {
                     }
 
                     book.extend_column(&ColumnIdentifier::NamedTag(tag.name), tag.value)
-                        .unwrap();
+                        .expect("Inserting tags is infallible");
                 }
             }
         }
 
         for tag in raw_free_tags.into_iter() {
-            let id = NonZeroU64::try_from(tag.book_id as u64).unwrap();
+            let id = NonZeroU64::try_from(tag.book_id as u64).expect("book_id is non-null");
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
@@ -329,7 +329,7 @@ impl SQLiteDatabase {
         }
 
         for tag in raw_multimap_tags.into_iter() {
-            let id = NonZeroU64::try_from(tag.book_id as u64).unwrap();
+            let id = NonZeroU64::try_from(tag.book_id as u64).expect("book_id is non-null");
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
@@ -341,7 +341,7 @@ impl SQLiteDatabase {
                 Some(book) => match tag.name.as_str() {
                     "author" => book
                         .extend_column(&ColumnIdentifier::Author, tag.value)
-                        .unwrap(),
+                        .expect("Extending author is infallible."),
                     name => {
                         if !prime_cols.contains(name) {
                             prime_cols.insert(name.to_string());
@@ -350,7 +350,7 @@ impl SQLiteDatabase {
                             &ColumnIdentifier::MultiMap(name.to_string()),
                             tag.value,
                         )
-                        .unwrap();
+                        .expect("Extending multimap is infallible");
                     }
                 },
             }
@@ -1255,7 +1255,9 @@ impl AppDatabase for SQLiteDatabase {
             .map_err(DatabaseError::Backend)?;
         let ids: Vec<BookID> = ids
             .into_iter()
-            .map(|id| BookID::try_from(id.book_id as u64).unwrap())
+            .map(|id| {
+                BookID::try_from(id.book_id as u64).expect("book_id is specified to be non-null.")
+            })
             .collect();
         let end = std::time::Instant::now();
         log(format!("Took {}s to read ids", (end - start).as_secs_f32()));
@@ -1264,7 +1266,12 @@ impl AppDatabase for SQLiteDatabase {
 
         Ok(ids
             .iter()
-            .map(|id| books.get(id).unwrap().clone())
+            .map(|id| {
+                books
+                    .get(id)
+                    .expect("failed to load all books from SQLite")
+                    .clone()
+            })
             .collect())
     }
 }

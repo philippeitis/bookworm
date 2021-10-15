@@ -117,7 +117,13 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         Command::OpenBookIn(book, index, target) => {
             let id = match book {
-                BookIndex::Selected => ui_state.book_view.selected_books().front().unwrap().id(),
+                BookIndex::Selected => {
+                    if let Some(book) = ui_state.book_view.selected_books().front() {
+                        book.id()
+                    } else {
+                        return Ok(ApplicationTask::DoNothing);
+                    }
+                }
                 BookIndex::ID(id) => id,
             };
 
@@ -885,7 +891,12 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
             }
 
             let mut selected_row = MultiSelectListState::default();
-            selected_row.select(*srows.iter().next().unwrap());
+            selected_row.select(
+                *srows
+                    .iter()
+                    .next()
+                    .expect("Edit widget should always have one or more items selected"),
+            );
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
         CommandWidget::new(&state.curr_command).render_into_frame(f, vchunks[1]);
