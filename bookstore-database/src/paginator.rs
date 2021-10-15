@@ -106,6 +106,16 @@ impl Selection {
     }
 }
 
+pub fn range_select_query(
+    start: &Book,
+    end: &Book,
+    sort: &[(ColumnIdentifier, ColumnOrder)],
+) -> (String, Vec<Variable>) {
+    QueryBuilder::default()
+        .sort_rules(sort)
+        .between_books(start, end)
+}
+
 struct QueryBuilder {
     order: ColumnOrder,
     sort_rules: Vec<(ColumnIdentifier, ColumnOrder)>,
@@ -149,7 +159,11 @@ impl QueryBuilder {
 
     /// Returns a query which returns the book ids, relative to the provided book.
     /// Results will not include the provided book.
-    fn join_cols(&self, book: Option<&Book>) -> (String, Vec<Variable>) {
+    fn join_cols(
+        &self,
+        book: Option<&Book>,
+        match_rules: &Box<[Box<dyn Matcher + Send + Sync>]>,
+    ) -> (String, Vec<Variable>) {
         let mut from = String::new();
         let mut where_str = String::new();
         let mut join = String::new();
@@ -185,7 +199,8 @@ impl QueryBuilder {
         // LIMIT 5;
 
         // Add the id comparison to ensure pagination doesn't repeat items
-        for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ASCII_LOWER.iter()) {
+        let mut ascii_iter = ASCII_LOWER.iter();
+        for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ascii_iter.by_ref()) {
             match read_column(col_id, alias.to_string()) {
                 None => {}
                 Some((select, bound)) => {
@@ -230,17 +245,145 @@ impl QueryBuilder {
             }
         }
 
+        for (match_rule, alias) in match_rules.iter().zip(ascii_iter) {
+            let (col_id, query_str, var) = match_rule.sql_query();
+            match read_column(col_id, alias.to_string()) {
+                None => {}
+                Some((select, bound)) => {
+                    bind_vars.extend(bound.map(Variable::Str).into_iter());
+                    let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
+                    if num_ops == 0 {
+                        from.push_str(&select);
+                        from.push_str(&format!(" as {}TABLE ", alias.to_ascii_uppercase()));
+                    } else {
+                        join.push_str(&format!(
+                            "INNER JOIN {} as {} ON {}.book_id = ATABLE.book_id ",
+                            select, table_alias, table_alias
+                        ));
+                    }
+                    where_str.push_str(&format!("{}.{} {} AND ", table_alias, alias, query_str));
+                    bind_vars.extend(var.into_iter());
+                    num_ops += 1;
+                }
+            }
+        }
         // Clean up string.
         from.pop();
-        if book.is_some() {
+        if !where_str.is_empty() {
             where_str.truncate(where_str.len() - 5);
             where_str = format!("WHERE ({})", where_str);
         }
         order_str.pop();
         order_str.pop();
+        let query = format!(
+            "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {} LIMIT ?;",
+            from, join, where_str, order_str
+        );
+        log(&query);
+        (query, bind_vars)
+    }
+
+    fn between_books(&self, start: &Book, end: &Book) -> (String, Vec<Variable>) {
+        let mut from = String::new();
+        let mut where_str = String::new();
+        let mut join = String::new();
+        let mut order_str = String::new();
+        let mut num_ops = 0;
+        let mut bind_vars = vec![];
+        // SELECT book_id, MIN(value) from multimap_tags WHERE name={} GROUP BY book_id
+        // or max
+        // multimap / description: use GROUP_CONCAT (+ sort) or just regular min to join authors in sorted order
+        // SELECT
+        //     all fields involved
+        // FROM
+        //     books
+        // INNER JOIN named_tags AS TAGS ON
+        // TAGS.book_id = books.book_id
+        // AND TAGS.name = {named_tag}
+        // WHERE (sort_start > ...)
+        // ORDER BY COL1 ASC, COL2 DESC
+        // LIMIT n;
+        // select all keys needed to sort
+        // need FROM () as below to select a particular mmap key
+        // Need rule for reading each multimap key
+        // Need rule for reading books if title
+        // Need rule for reading named tag
+        // SELECT books.book_id FROM (
+        //     SELECT book_id, MIN(value) as mvalue
+        //     FROM multimap_tags
+        //     WHERE name= "author"
+        //     GROUP BY book_id
+        // ) as A INNER JOIN books ON (A.book_id = books.book_id)
+        // WHERE (books.book_id > 291 AND mvalue >= "Alastair")
+        // ORDER BY mvalue ASC, ..., books.book_id ASC
+        // LIMIT 5;
+
+        let op_order = match self.order {
+            ColumnOrder::Ascending => ColumnOrder::Descending,
+            ColumnOrder::Descending => ColumnOrder::Ascending,
+        };
+        // Add the id comparison to ensure pagination doesn't repeat items
+        for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ASCII_LOWER.iter()) {
+            match read_column(col_id, alias.to_string()) {
+                None => {}
+                Some((select, bound)) => {
+                    bind_vars.extend(bound.map(Variable::Str).into_iter());
+                    let start_cmp = order_to_cmp(col_ord.clone(), self.order.clone());
+                    let end_cmp = order_to_cmp(col_ord.clone(), op_order.clone());
+                    let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
+                    if num_ops == 0 {
+                        from.push_str(&select);
+                        from.push_str(&format!(" as {}TABLE ", alias.to_ascii_uppercase()));
+                    } else {
+                        join.push_str(&format!(
+                            "INNER JOIN {} as {} ON {}.book_id = ATABLE.book_id ",
+                            select, table_alias, table_alias
+                        ));
+                    }
+                    if matches!(col_id, ColumnIdentifier::ID) {
+                        for (id, cmp) in [(start.id(), &start_cmp), (end.id(), &end_cmp)] {
+                            if self.id_inclusive {
+                                where_str.push_str(&format!(
+                                    "{}.{} {}= ? AND ",
+                                    table_alias, alias, cmp
+                                ));
+                            } else {
+                                where_str
+                                    .push_str(&format!("{}.{} {} ? AND ", table_alias, alias, cmp));
+                            }
+                            bind_vars.push(Variable::Int(u64::from(id) as i64));
+                        }
+                    } else {
+                        for (book, cmp) in [(&start, &start_cmp), (&end, &end_cmp)] {
+                            if let Some(cmp_key) = book.get_column(col_id) {
+                                where_str.push_str(&format!(
+                                    "{}.{} {}= ? AND ",
+                                    table_alias, alias, cmp
+                                ));
+                                bind_vars.push(Variable::Str(cmp_key.to_string()));
+                            }
+                        }
+                    }
+
+                    order_str.push_str(&format!(
+                        "{} {}, ",
+                        alias,
+                        order_repr(col_ord.clone(), self.order.clone())
+                    ));
+                    num_ops += 1;
+                }
+            }
+        }
+
+        // Clean up string.
+        from.pop();
+        where_str.truncate(where_str.len() - 5);
+        where_str = format!("WHERE ({})", where_str);
+        order_str.pop();
+        order_str.pop();
         (
             format!(
-                "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {} LIMIT ?;",
+                "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {};",
                 from, join, where_str, order_str
             ),
             bind_vars,
@@ -469,12 +612,24 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         &self.selected
     }
 
+    pub fn bind_match(mut self, matching_rules: Box<[Box<dyn Matcher + Send + Sync>]>) -> Self {
+        self.matching_rules = matching_rules;
+        self
+    }
+
+    pub fn matchers(&self) -> &Box<[Box<dyn Matcher + Send + Sync>]> {
+        &self.matching_rules
+    }
+
     pub async fn sort_by(
         &mut self,
         sorting_rules: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>> {
         self.sorting_rules = add_id(sorting_rules.to_vec().into_boxed_slice());
-        self.make_book_visible(self.window().first().cloned()).await
+        log(format!("{:?}", self.sorting_rules));
+        let target = self.window().first().cloned();
+        self.books.clear();
+        self.make_book_visible(target).await
     }
 
     pub fn window(&self) -> &[Arc<Book>] {
@@ -494,7 +649,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         let (query, bindings) = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Descending)
-            .join_cols(self.books.last().map(|x| x.as_ref()));
+            .join_cols(self.books.last().map(|x| x.as_ref()), &self.matching_rules);
         let books = self
             .db
             .write()
@@ -530,7 +685,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         let (query, bindings) = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Ascending)
-            .join_cols(self.books.first().map(|x| x.as_ref()));
+            .join_cols(self.books.first().map(|x| x.as_ref()), &self.matching_rules);
         // Read only the number of items needed to fill top.
         // TODO: If len is a large jump, we should do an OFFSET instead of loading
         //  everything in-between (check if len > some multiple of window size),
@@ -572,7 +727,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             .include_id(true);
 
         let (query, bindings) = match &book {
-            None => builder.join_cols(None),
+            None => builder.join_cols(None, &self.matching_rules),
             Some(b) => {
                 if self
                     .window()
@@ -583,8 +738,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 }
 
                 match self.db.read().await.get_book(b.as_ref().id()).await {
-                    Ok(fresh) => builder.join_cols(Some(&fresh)),
-                    Err(_) => builder.join_cols(Some(b.as_ref())),
+                    Ok(fresh) => builder.join_cols(Some(&fresh), &self.matching_rules),
+                    Err(_) => builder.join_cols(Some(b.as_ref()), &self.matching_rules),
                 }
             }
         };
@@ -625,7 +780,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bindings) = QueryBuilder::default()
                     .sort_rules(&self.sorting_rules)
                     .order(ColumnOrder::Ascending)
-                    .join_cols(Some(target.as_ref()));
+                    .join_cols(Some(target.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
@@ -659,7 +814,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bindings) = QueryBuilder::default()
                     .sort_rules(&self.sorting_rules)
                     .order(ColumnOrder::Descending)
-                    .join_cols(Some(target.as_ref()));
+                    .join_cols(Some(target.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
@@ -766,7 +921,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bindings) = QueryBuilder::default()
                     .sort_rules(&self.sorting_rules)
                     .order(ColumnOrder::Ascending)
-                    .join_cols(None);
+                    .join_cols(None, &self.matching_rules);
 
                 self.books = self
                     .db
@@ -869,7 +1024,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Ascending)
                     .sort_rules(&self.sorting_rules)
-                    .join_cols(Some(end.as_ref()));
+                    .join_cols(Some(end.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
@@ -902,7 +1057,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Ascending)
                     .sort_rules(&self.sorting_rules)
-                    .join_cols(Some(start.as_ref()));
+                    .join_cols(Some(start.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
@@ -925,7 +1080,10 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     .order(ColumnOrder::Ascending)
                     .sort_rules(&self.sorting_rules)
                     .include_id(true)
-                    .join_cols(self.window().last().map(|x| x.as_ref()));
+                    .join_cols(
+                        self.window().last().map(|x| x.as_ref()),
+                        &self.matching_rules,
+                    );
                 let book = self
                     .db
                     .write()
@@ -983,7 +1141,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Descending)
                     .sort_rules(&self.sorting_rules)
-                    .join_cols(Some(end.as_ref()));
+                    .join_cols(Some(end.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
@@ -1011,7 +1169,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Descending)
                     .sort_rules(&self.sorting_rules)
-                    .join_cols(Some(start.as_ref()));
+                    .join_cols(Some(start.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
@@ -1039,7 +1197,10 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     .order(ColumnOrder::Descending)
                     .sort_rules(&self.sorting_rules)
                     .include_id(true)
-                    .join_cols(self.window().first().map(|x| x.as_ref()));
+                    .join_cols(
+                        self.window().first().map(|x| x.as_ref()),
+                        &self.matching_rules,
+                    );
                 let book = self
                     .db
                     .write()

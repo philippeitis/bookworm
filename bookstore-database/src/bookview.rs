@@ -147,38 +147,49 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
 
 impl<D: AppDatabase + Send + Sync> BookView<D> {
     pub async fn push_scope(&mut self, searches: &[Search]) -> Result<(), BookViewError<D::Error>> {
-        self.scopes.push(Paginator::new(
-            self.db.clone(),
-            self.root_cursor.window_size(),
-            self.root_cursor.sort_rules().to_vec().into_boxed_slice(),
-        ));
-        match self.scopes.last() {
-            None => {
-                // Read from DB until window is full.
-                unimplemented!()
-            }
-
-            Some(scope) => {
-                // Read from paginator until window is full.
-                unimplemented!()
-            }
-        };
-
-        // self.scopes.push(Paginator::new());
-
+        self.scopes.push(self.create_paginator(searches));
         Ok(())
     }
 
     pub fn pop_scope(&mut self) -> bool {
         self.scopes.pop().is_some()
     }
-}
 
-impl<D: AppDatabase + Send + Sync> BookView<D> {
+    fn create_paginator(&self, searches: &[Search]) -> Paginator<D> {
+        let mut matchers = vec![];
+        for scope in &self.scopes {
+            matchers.extend(scope.matchers().iter().map(|x| x.box_clone()));
+        }
+        for item in searches
+            .iter()
+            .cloned()
+            .map(Search::into_matcher)
+            .filter_map(Result::ok)
+        {
+            matchers.push(item);
+        }
+        Paginator::new(
+            self.db.clone(),
+            self.root_cursor.window_size(),
+            self.root_cursor.sort_rules().to_vec().into_boxed_slice(),
+        )
+        .bind_match(matchers.into_boxed_slice())
+    }
+
     pub async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
         // Create temporary paginator with window size of 1
         // and make discovered book visible.
-        unimplemented!()
+        let mut paginator = self.create_paginator(searches);
+        paginator.update_window_size(1).await?;
+        if let Some(book) = paginator.window().first().cloned() {
+            match self.scopes.last_mut() {
+                None => &mut self.root_cursor,
+                Some(cursor) => cursor,
+            }
+            .make_book_visible(Some(book))
+            .await?;
+        }
+        Ok(true)
     }
 
     pub async fn scroll_up(&mut self, scroll: usize) -> Result<(), DatabaseError<D::Error>> {

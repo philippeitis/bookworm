@@ -6,6 +6,8 @@ use sublime_fuzzy::best_match;
 use bookstore_records::book::ColumnIdentifier;
 use bookstore_records::Book;
 
+use crate::paginator::Variable;
+
 // TODO: If search is too expensive, could sort searches by relative cost
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -35,7 +37,7 @@ pub struct Search {
 }
 
 impl Search {
-    pub(crate) fn into_matcher(self) -> Result<Box<dyn Matcher>, Error> {
+    pub(crate) fn into_matcher(self) -> Result<Box<dyn Matcher + Send + Sync>, Error> {
         Ok(match self.mode {
             SearchMode::Regex => Box::new(RegexMatcher::new(self.column, self.search)?),
             SearchMode::ExactSubstring => {
@@ -49,7 +51,7 @@ impl Search {
 
 /// Provides a mechanism to determine if a particular book matches a particular search string,
 /// using some internally defined comparison method.
-pub trait Matcher {
+pub trait Matcher: Send + Sync {
     /// Creates a new Matcher instance over the given search string.
     fn new(column: ColumnIdentifier, search: String) -> Result<Self, Error>
     where
@@ -57,8 +59,13 @@ pub trait Matcher {
 
     /// Determines if the book matches the internal match rules.
     fn is_match(&self, book: &Book) -> bool;
+
+    fn sql_query(&self) -> (&ColumnIdentifier, String, Option<Variable>);
+
+    fn box_clone(&self) -> Box<dyn Matcher + Send + Sync>;
 }
 
+#[derive(Clone)]
 pub struct RegexMatcher {
     column: ColumnIdentifier,
     regex: Regex,
@@ -85,8 +92,17 @@ impl Matcher for RegexMatcher {
             Some(Cow::Owned(value)) => self.regex.is_match(&value),
         }
     }
+
+    fn sql_query(&self) -> (&ColumnIdentifier, String, Option<Variable>) {
+        unimplemented!()
+    }
+
+    fn box_clone(&self) -> Box<dyn Matcher + Send + Sync> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Clone)]
 pub struct ExactSubstringMatcher {
     column: ColumnIdentifier,
     regex: Regex,
@@ -113,8 +129,16 @@ impl Matcher for ExactSubstringMatcher {
             Some(Cow::Owned(value)) => self.regex.is_match(&value),
         }
     }
-}
 
+    fn sql_query(&self) -> (&ColumnIdentifier, String, Option<Variable>) {
+        unimplemented!()
+    }
+
+    fn box_clone(&self) -> Box<dyn Matcher + Send + Sync> {
+        Box::new(self.clone())
+    }
+}
+#[derive(Clone)]
 pub struct ExactStringMatcher {
     column: ColumnIdentifier,
     string: String,
@@ -140,8 +164,17 @@ impl Matcher for ExactStringMatcher {
             Some(Cow::Owned(value)) => self.string == value,
         }
     }
+
+    fn sql_query(&self) -> (&ColumnIdentifier, String, Option<Variable>) {
+        unimplemented!()
+    }
+
+    fn box_clone(&self) -> Box<dyn Matcher + Send + Sync> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Clone)]
 pub struct DefaultMatcher {
     column: ColumnIdentifier,
     string: String,
@@ -171,5 +204,17 @@ impl Matcher for DefaultMatcher {
             Some(Cow::Owned(value)) => best_match(&self.string, &value),
         }
         .is_some()
+    }
+
+    fn sql_query(&self) -> (&ColumnIdentifier, String, Option<Variable>) {
+        (
+            &self.column,
+            format!("LIKE '%' || ? || '%'"),
+            Some(Variable::Str(self.string.clone())),
+        )
+    }
+
+    fn box_clone(&self) -> Box<dyn Matcher + Send + Sync> {
+        Box::new(self.clone())
     }
 }

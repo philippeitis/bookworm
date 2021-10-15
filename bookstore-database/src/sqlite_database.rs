@@ -1146,6 +1146,8 @@ impl AppDatabase for SQLiteDatabase {
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>> {
+        // eg.
+        // UPDATE {} SET X = SUBSTR(..) || "aaa" || SUBSTR (..)
         // "UPDATE {} SET {} = {} WHERE book_id = {};"
         self.edit_book_by_id_async(id, edits).await
     }

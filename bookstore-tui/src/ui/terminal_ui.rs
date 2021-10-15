@@ -19,7 +19,6 @@ use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
 use bookstore_database::{AppDatabase, BookView, DatabaseError};
 
-use crate::ui::log;
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::views::{
     AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
@@ -186,7 +185,6 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
     async fn read_user_input(&mut self) -> Result<bool, TuiError<D::Error>> {
         loop {
             if let Some(Ok(event)) = self.event_receiver.next().fuse().await {
-                log(format!("HIT EVENT {:?}", event));
                 match event {
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('q'),

@@ -22,7 +22,7 @@ use bookstore_app::parser::Source;
 use bookstore_app::settings::{Color, SortSettings};
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
-use bookstore_database::paginator::Selection;
+use bookstore_database::paginator::{range_select_query, Selection};
 use bookstore_database::{AppDatabase, DatabaseError};
 use bookstore_records::book::{ColumnIdentifier, RecordError};
 use bookstore_records::Edit;
@@ -71,6 +71,8 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
                     app.delete_ids(books.keys().cloned().collect()).await;
                 }
                 Selection::Range(start, end, sort_rules, _) => {
+                    let (query, variables) =
+                        range_select_query(start.as_ref(), end.as_ref(), sort_rules);
                     unimplemented!();
                 }
                 Selection::Empty => {}
@@ -97,6 +99,8 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
                         .await;
                     }
                     Selection::Range(start, end, sort_rules, _) => {
+                        let (query, variables) =
+                            range_select_query(start.as_ref(), end.as_ref(), sort_rules);
                         unimplemented!();
                     }
                     Selection::Empty => {}
@@ -113,7 +117,12 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
             app.modify_columns(columns, &mut ui_state.table_view, &mut ui_state.book_view)
                 .await?;
         }
-        Command::SortColumns(columns) => ui_state.sort_settings = SortSettings { columns },
+        Command::SortColumns(columns) => {
+            log("SORTING");
+            log(format!("{:?}", columns));
+            ui_state.book_view.sort_by_columns(&columns).await?;
+            ui_state.sort_settings = SortSettings { columns };
+        }
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         Command::OpenBookIn(book, index, target) => {
             let id = match book {
