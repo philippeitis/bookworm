@@ -158,8 +158,6 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
                 app.help(None).await,
             )));
         }
-        #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
-        _ => return Ok(ApplicationTask::DoNothing),
     }
     Ok(ApplicationTask::DoNothing)
 }
