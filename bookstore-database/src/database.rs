@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Debug;
 use std::path;
 use std::sync::Arc;
 
@@ -41,7 +42,7 @@ impl<DBError> From<SearchError> for DatabaseError<DBError> {
 
 #[async_trait]
 pub trait AppDatabase {
-    type Error: Send;
+    type Error: Send + Debug;
     /// Opens the database at the path if it exists.
     ///
     /// # Arguments

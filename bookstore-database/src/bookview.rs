@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
@@ -80,6 +81,7 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
     ) -> Result<(), DatabaseError<D::Error>> {
         for scope in std::iter::once(&mut self.root_cursor).chain(self.scopes.iter_mut()) {
             // Required to maintain sort order.
+            log("SORTING SCOPE");
             scope.sort_by(&cols).await?;
         }
         Ok(())
@@ -179,9 +181,11 @@ impl<D: AppDatabase + Send + Sync> BookView<D> {
     pub async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
         // Create temporary paginator with window size of 1
         // and make discovered book visible.
+        log("JUMPING");
         let mut paginator = self.create_paginator(searches);
         paginator.update_window_size(1).await?;
         if let Some(book) = paginator.window().first().cloned() {
+            log(format!("FOUND MATCH {}", book.id()));
             match self.scopes.last_mut() {
                 None => &mut self.root_cursor,
                 Some(cursor) => cursor,

@@ -296,7 +296,10 @@ impl QueryBuilder {
                             select, table_alias, table_alias
                         ));
                     }
-                    where_str.push_str(&format!("{}.{} {} AND ", table_alias, alias, query_str));
+                    if !where_str.is_empty() {
+                        where_str += " AND ";
+                    }
+                    where_str.push_str(&format!(" {}.{} {}", table_alias, alias, query_str));
                     bind_vars.extend(var.into_iter());
                     num_ops += 1;
                 }
@@ -305,10 +308,7 @@ impl QueryBuilder {
         // Clean up string.
         from.pop();
         if !where_str.is_empty() {
-            where_str = format!(
-                "WHERE ({})",
-                where_str.strip_prefix(" AND ").unwrap_or(&where_str)
-            );
+            where_str = format!("WHERE ({})", where_str);
         }
         order_str.pop();
         order_str.pop();
