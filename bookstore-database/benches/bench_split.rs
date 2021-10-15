@@ -6,7 +6,6 @@ use unicase::UniCase;
 use std::collections::{HashMap, HashSet};
 use std::path;
 
-use indexmap::IndexMap;
 use rand::distributions::Alphanumeric;
 use rand::prelude::ThreadRng;
 use rand::{seq::IteratorRandom, thread_rng, Rng};
@@ -104,10 +103,10 @@ fn generate_random_book(rng: &mut ThreadRng, cols: &[String], id: u32) -> Book {
     b
 }
 
-fn generate_random_dataset() -> IndexMap<u32, Book> {
+fn generate_random_dataset() -> HashMap<u32, Book> {
     let mut rng = thread_rng();
     let mut rand_cols = vec![];
-    let mut books = IndexMap::new();
+    let mut books = HashMap::new();
     for _ in 0..100 {
         let len = rng.gen_range(3..15);
         rand_cols.push(generate_random_string(&mut rng, len));

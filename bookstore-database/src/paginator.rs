@@ -853,8 +853,118 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         self.scroll_down_move_select(1).await
     }
 
+    async fn select_up_on(
+        &mut self,
+        len: usize,
+        selection: Selection,
+    ) -> Result<Selection, DatabaseError<D::Error>> {
+        match selection {
+            Selection::All => {
+                self.scroll_up(len).await?;
+                Ok(Selection::All)
+            }
+            Selection::Partial(books, rules) => Ok(Selection::Partial(books, rules)),
+            Selection::Range(start, end, sorting_rules, Direction::Down) => {
+                // Need to get end + len'th book.
+                let (query, bound_variables) = QueryBuilder::default()
+                    .order(ColumnOrder::Ascending)
+                    .sort_rules(&self.sorting_rules)
+                    .join_cols(Some(end.as_ref()));
+                let book = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bound_variables, len)
+                    .await?
+                    .pop();
+                if let Some(book) = book {
+                    // need to flip
+                    if !self.window().iter().any(|x| x.id() == book.id()) {
+                        self.scroll_up(len).await?;
+                    }
+
+                    if book.cmp_columns(&start, &sorting_rules).is_lt() {
+                        Ok(Selection::Range(book, start, sorting_rules, Direction::Up))
+                    } else {
+                        Ok(Selection::Range(
+                            start,
+                            book,
+                            sorting_rules,
+                            Direction::Down,
+                        ))
+                    }
+                } else {
+                    Ok(Selection::Range(start, end, sorting_rules, Direction::Down))
+                }
+            }
+            Selection::Range(start, end, sorting_rules, Direction::Up) => {
+                // Need to get end + len'th book.
+                let (query, bound_variables) = QueryBuilder::default()
+                    .order(ColumnOrder::Ascending)
+                    .sort_rules(&self.sorting_rules)
+                    .join_cols(Some(start.as_ref()));
+                let book = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bound_variables, len)
+                    .await?
+                    .pop();
+                if let Some(book) = book {
+                    if !self.window().iter().any(|x| x.id() == book.id()) {
+                        self.scroll_up(len).await?;
+                    }
+
+                    Ok(Selection::Range(book, end, sorting_rules, Direction::Up))
+                } else {
+                    Ok(Selection::Range(start, end, sorting_rules, Direction::Up))
+                }
+            }
+            Selection::Empty => {
+                let (query, bound_variables) = QueryBuilder::default()
+                    .order(ColumnOrder::Ascending)
+                    .sort_rules(&self.sorting_rules)
+                    .include_id(true)
+                    .join_cols(self.window().last().map(|x| x.as_ref()));
+                let book = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bound_variables, len)
+                    .await?
+                    .pop();
+                if let Some(book) = book {
+                    let end = self
+                        .window()
+                        .last()
+                        .cloned()
+                        .unwrap_or_else(|| book.clone());
+                    if !self.window().iter().any(|x| x.id() == book.id()) {
+                        self.scroll_up(len).await?;
+                    }
+                    Ok(Selection::Range(
+                        book,
+                        end,
+                        self.sorting_rules.clone(),
+                        Direction::Down,
+                    ))
+                } else {
+                    Ok(Selection::Empty)
+                }
+            }
+        }
+    }
+
     pub async fn select_up(&mut self, len: usize) -> PaginatorResult<D::Error> {
-        unimplemented!()
+        let selection = std::mem::replace(&mut self.selected, Selection::Empty);
+        let candidate = self.select_up_on(len, selection).await;
+        match candidate {
+            Ok(selection) => {
+                self.selected = selection;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     async fn select_down_on(
@@ -908,8 +1018,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     .await
                     .perform_query(&query, &bound_variables, len)
                     .await?
-                    .into_iter()
-                    .next();
+                    .pop();
                 if let Some(book) = book {
                     // need to flip
                     if !self.window().iter().any(|x| x.id() == book.id()) {
@@ -959,6 +1068,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             }
         }
     }
+
     pub async fn select_down(&mut self, len: usize) -> PaginatorResult<D::Error> {
         let selection = std::mem::replace(&mut self.selected, Selection::Empty);
         let candidate = self.select_down_on(len, selection).await;
