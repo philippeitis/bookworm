@@ -7,7 +7,7 @@ use unicase::UniCase;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, ColumnOrder};
 
-use crate::paginator::Paginator;
+use crate::paginator::{Paginator, Selection};
 use crate::search::{Error as SearchError, Search};
 use crate::{log, AppDatabase, DatabaseError};
 
@@ -89,7 +89,7 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         self.db.read().await.get_book(id).await
     }
 
-    pub fn get_selected_books(&self) -> Vec<Arc<Book>> {
+    pub fn selected_books(&self) -> &Selection {
         match self.scopes.last() {
             None => self.root_cursor.selected(),
             Some(cursor) => cursor.selected(),
@@ -134,7 +134,6 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         log("refreshing db size.");
         let db_size = self.db.read().await.size().await;
         log(format!("size is {}.", db_size));
-        log(format!("selection is {:?}.", self.root_cursor.selected()));
         for cursor in std::iter::once(&mut self.root_cursor).chain(self.scopes.iter_mut()) {
             cursor.refresh().await?;
         }

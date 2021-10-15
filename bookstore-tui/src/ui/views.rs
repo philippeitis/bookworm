@@ -22,6 +22,7 @@ use bookstore_app::parser::Source;
 use bookstore_app::settings::{Color, SortSettings};
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
+use bookstore_database::paginator::Selection;
 use bookstore_database::{AppDatabase, DatabaseError};
 use bookstore_records::book::{ColumnIdentifier, RecordError};
 use bookstore_records::Edit;
@@ -64,13 +65,16 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
 ) -> Result<ApplicationTask, TuiError<D::Error>> {
     match command {
         Command::DeleteSelected => {
-            let books = ui_state
-                .book_view
-                .get_selected_books()
-                .into_iter()
-                .map(|x| x.id())
-                .collect();
-            app.delete_ids(books).await;
+            match ui_state.book_view.selected_books() {
+                Selection::All => app.delete_all().await,
+                Selection::Partial(books, _) => {
+                    app.delete_ids(books.keys().cloned().collect()).await;
+                }
+                Selection::Range(start, end, sort_rules, _) => {
+                    unimplemented!();
+                }
+                Selection::Empty => {}
+            }
             ui_state.book_view.refresh().await?;
         }
         Command::DeleteMatching(matches) => {
@@ -83,13 +87,21 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
         }
         Command::EditBook(book, edits) => match book {
             BookIndex::Selected => {
-                let ids: Vec<_> = ui_state
-                    .book_view
-                    .get_selected_books()
-                    .into_iter()
-                    .map(|x| x.id())
-                    .collect();
-                app.edit_books(ids.into_boxed_slice(), edits).await;
+                match ui_state.book_view.selected_books() {
+                    Selection::All => unimplemented!(),
+                    Selection::Partial(books, _) => {
+                        app.edit_books(
+                            books.keys().cloned().collect::<Vec<_>>().into_boxed_slice(),
+                            edits,
+                        )
+                        .await;
+                    }
+                    Selection::Range(start, end, sort_rules, _) => {
+                        unimplemented!();
+                    }
+                    Selection::Empty => {}
+                }
+                ui_state.book_view.refresh().await?;
             }
             BookIndex::ID(id) => app.edit_books(vec![id].into_boxed_slice(), edits).await,
         },
@@ -105,13 +117,7 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         Command::OpenBookIn(book, index, target) => {
             let id = match book {
-                BookIndex::Selected => ui_state
-                    .book_view
-                    .get_selected_books()
-                    .into_iter()
-                    .map(|x| x.id())
-                    .next()
-                    .unwrap(),
+                BookIndex::Selected => ui_state.book_view.selected_books().front().unwrap().id(),
                 BookIndex::ID(id) => id,
             };
 
@@ -317,9 +323,9 @@ pub(crate) struct ColumnWidget<D> {
 
 impl<D: AppDatabase + Send + Sync> ColumnWidget<D> {
     async fn refresh_book_widget(&mut self, state: &UIState<D>) {
-        let books = state.book_view.get_selected_books();
+        let books = state.book_view.selected_books();
         self.book_widget = books
-            .first()
+            .front()
             .map(|book| BookWidget::new(Rect::default(), book.clone()));
     }
 
@@ -608,7 +614,7 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                 // Text input
                 match event.code {
                     KeyCode::F(2) => {
-                        if !state.book_view.get_selected_books().is_empty() {
+                        if !state.book_view.selected_books().is_empty() {
                             return Ok(ApplicationTask::SwitchView(AppView::Edit));
                         }
                     }
@@ -667,7 +673,7 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                     }
                     KeyCode::Enter => {
                         if state.curr_command.is_empty() {
-                            return if !state.book_view.get_selected_books().is_empty() {
+                            return if !state.book_view.selected_books().is_empty() {
                                 Ok(ApplicationTask::SwitchView(AppView::Edit))
                             } else {
                                 self.command_widget_selected = true;
@@ -723,7 +729,7 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                     KeyCode::Delete => {
                         if state.curr_command.is_empty() {
                             log("User pressed delete.");
-                            if !state.book_view.get_selected_books().is_empty() {
+                            if !state.book_view.selected_books().is_empty() {
                                 run_command(app, Command::DeleteSelected, state).await?;
                             }
                         } else {
@@ -738,7 +744,7 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                     KeyCode::Home => self.home(state, event.modifiers).await?,
                     KeyCode::End => self.end(state, event.modifiers).await?,
                     KeyCode::Right => {
-                        if state.book_view.get_selected_books().is_empty() {
+                        if state.book_view.selected_books().is_empty() {
                             self.command_widget_selected = true;
                             if event.modifiers.intersects(KeyModifiers::SHIFT) {
                                 state.curr_command.key_shift_right();
@@ -748,7 +754,7 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                         }
                     }
                     KeyCode::Left => {
-                        if state.book_view.get_selected_books().is_empty() {
+                        if state.book_view.selected_books().is_empty() {
                             self.command_widget_selected = true;
                             if event.modifiers.intersects(KeyModifiers::SHIFT) {
                                 state.curr_command.key_shift_left();

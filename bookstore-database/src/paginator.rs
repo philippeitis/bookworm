@@ -16,6 +16,96 @@ static ASCII_LOWER: [char; 26] = [
 
 type PaginatorResult<E> = Result<(), DatabaseError<E>>;
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Direction {
+    Up,
+    Down,
+}
+
+pub enum Selection {
+    All,
+    Partial(
+        HashMap<BookID, Arc<Book>>,
+        Box<[(ColumnIdentifier, ColumnOrder)]>,
+    ),
+    Range(
+        Arc<Book>,
+        Arc<Book>,
+        Box<[(ColumnIdentifier, ColumnOrder)]>,
+        Direction,
+    ),
+    Empty,
+}
+
+impl Selection {
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Selection::All => false,
+            Selection::Partial(books, _) => books.is_empty(),
+            Selection::Range(_, _, _, _) => false,
+            Selection::Empty => true,
+        }
+    }
+
+    fn contains(&self, book: &Book) -> bool {
+        match self {
+            Selection::All => true,
+            Selection::Partial(books, _) => books.contains_key(&book.id()),
+            Selection::Range(start, stop, cols, _) => {
+                start.cmp_columns(book, cols).is_le() && stop.cmp_columns(book, cols).is_ge()
+            }
+            Selection::Empty => false,
+        }
+    }
+
+    fn clear(&mut self) {
+        *self = Selection::Empty;
+    }
+
+    pub fn front(&self) -> Option<&Arc<Book>> {
+        match self {
+            Selection::All => None,
+            Selection::Partial(books, sorting_rules) => books
+                .values()
+                .min_by(|a, b| a.cmp_columns(b, sorting_rules)),
+            Selection::Range(start, _, _, Direction::Up) => Some(start),
+            Selection::Range(_, end, _, Direction::Down) => Some(end),
+            Selection::Empty => None,
+        }
+    }
+
+    pub fn first(&self) -> Option<&Arc<Book>> {
+        match self {
+            Selection::All => None,
+            Selection::Partial(books, sorting_rules) => books
+                .values()
+                .min_by(|a, b| a.cmp_columns(b, sorting_rules)),
+            Selection::Range(start, _, _, _) => Some(start),
+            Selection::Empty => None,
+        }
+    }
+
+    fn last(&self) -> Option<&Arc<Book>> {
+        match self {
+            Selection::All => None,
+            Selection::Partial(books, sorting_rules) => books
+                .values()
+                .max_by(|a, b| a.cmp_columns(b, sorting_rules)),
+            Selection::Range(_, end, _, _) => Some(end),
+            Selection::Empty => None,
+        }
+    }
+
+    fn is_single(&self) -> bool {
+        match self {
+            Selection::All => false,
+            Selection::Partial(books, sorting_rules) => books.len() == 1,
+            Selection::Range(start, end, _, _) => start.id() == end.id(),
+            Selection::Empty => false,
+        }
+    }
+}
+
 struct QueryBuilder {
     order: ColumnOrder,
     sort_rules: Vec<(ColumnIdentifier, ColumnOrder)>,
@@ -235,7 +325,7 @@ pub struct Paginator<D: AppDatabase + 'static> {
     last_compared: Option<Arc<Book>>,
     // Store selected values (no relative indices).
     // When up/down etc is called, find first selected value based on ordering scheme & scroll from there.
-    selected: HashMap<BookID, Arc<Book>>,
+    selected: Selection,
     db: Arc<RwLock<D>>,
 }
 
@@ -370,13 +460,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             sorting_rules: add_id(sorting_rules),
             matching_rules: vec![].into_boxed_slice(),
             last_compared: None,
-            selected: Default::default(),
+            selected: Selection::Empty,
             db,
         }
     }
 
-    pub fn selected(&self) -> Vec<Arc<Book>> {
-        self.selected.values().cloned().collect()
+    pub fn selected(&self) -> &Selection {
+        &self.selected
     }
 
     pub async fn sort_by(
@@ -472,6 +562,131 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         Ok(())
     }
 
+    pub async fn make_book_visible<B: AsRef<Book>>(
+        &mut self,
+        book: Option<B>,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        let builder = QueryBuilder::default()
+            .sort_rules(&self.sorting_rules)
+            .order(ColumnOrder::Descending)
+            .include_id(true);
+
+        let (query, bindings) = match &book {
+            None => builder.join_cols(None),
+            Some(b) => {
+                if self
+                    .window()
+                    .iter()
+                    .any(|book| book.id() == b.as_ref().id())
+                {
+                    return Ok(());
+                }
+
+                match self.db.read().await.get_book(b.as_ref().id()).await {
+                    Ok(fresh) => builder.join_cols(Some(&fresh)),
+                    Err(_) => builder.join_cols(Some(b.as_ref())),
+                }
+            }
+        };
+
+        self.books = self
+            .db
+            .write()
+            .await
+            .perform_query(&query, &bindings, self.window_size)
+            .await?;
+        self.window_top = 0;
+        let limit = self.window_size - self.books.len();
+        if limit != 0 {
+            self.load_books_before_start(limit).await?;
+        }
+        Ok(())
+    }
+
+    async fn select_and_make_visible(
+        &mut self,
+        target: Arc<Book>,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        self.make_book_visible(Some(target.clone())).await?;
+
+        self.selected = Selection::Range(
+            target.clone(),
+            target.clone(),
+            self.sorting_rules.clone(),
+            Direction::Down,
+        );
+
+        Ok(())
+    }
+
+    async fn scroll_up_move_select(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
+        if let Some(target) = self.selected.first().cloned() {
+            return if self.selected.is_single() {
+                let (query, bindings) = QueryBuilder::default()
+                    .sort_rules(&self.sorting_rules)
+                    .order(ColumnOrder::Ascending)
+                    .join_cols(Some(target.as_ref()));
+                let book = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bindings, len)
+                    .await?
+                    .pop()
+                    .unwrap_or_else(|| target.clone());
+                if !self.window().iter().any(|x| x.id() == book.id()) {
+                    self.scroll_up(len).await?;
+                }
+
+                self.selected = Selection::Range(
+                    book.clone(),
+                    book.clone(),
+                    self.sorting_rules.clone(),
+                    Direction::Down,
+                );
+                Ok(())
+            } else {
+                self.select_and_make_visible(target).await
+            };
+        }
+
+        self.scroll_up(len).await
+    }
+
+    async fn scroll_down_move_select(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
+        if let Some(target) = self.selected.last().cloned() {
+            return if self.selected.is_single() {
+                let (query, bindings) = QueryBuilder::default()
+                    .sort_rules(&self.sorting_rules)
+                    .order(ColumnOrder::Descending)
+                    .join_cols(Some(target.as_ref()));
+                let book = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bindings, len)
+                    .await?
+                    .pop()
+                    .unwrap_or_else(|| target.clone());
+                if !self.window().iter().any(|x| x.id() == book.id()) {
+                    self.scroll_down(len).await?;
+                }
+
+                self.selected = Selection::Range(
+                    book.clone(),
+                    book.clone(),
+                    self.sorting_rules.clone(),
+                    Direction::Down,
+                );
+                Ok(())
+            } else {
+                self.select_and_make_visible(target).await
+            };
+        }
+
+        self.scroll_down(len).await
+    }
+
     pub async fn scroll_down(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
         match (self.window_top + self.window_size + len).checked_sub(self.books.len()) {
             None => {
@@ -522,75 +737,59 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         }
     }
 
-    pub async fn make_book_visible<B: AsRef<Book>>(
-        &mut self,
-        book: Option<B>,
-    ) -> Result<(), DatabaseError<D::Error>> {
-        let builder = QueryBuilder::default()
-            .sort_rules(&self.sorting_rules)
-            .order(ColumnOrder::Ascending)
-            .include_id(true);
-        let (query, bindings) = match &book {
-            None => builder.join_cols(None),
-            Some(b) => match self.db.read().await.get_book(b.as_ref().id()).await {
-                Ok(fresh) => builder.join_cols(Some(&fresh)),
-                Err(_) => builder.join_cols(Some(b.as_ref())),
-            },
-        };
-
-        self.books = self
-            .db
-            .write()
-            .await
-            .perform_query(&query, &bindings, self.window_size)
-            .await?;
-        self.window_top = 0;
-        let limit = self.window_size - self.books.len();
-        if limit != 0 {
-            self.load_books_before_start(limit).await?;
-        }
-        Ok(())
-    }
-
     pub async fn home(&mut self) -> Result<(), DatabaseError<D::Error>> {
-        if self.selected.is_empty() {
-            self.window_top = 0;
-            self.books.clear();
-            self.scroll_down(0).await
-        } else {
-            let target = self
-                .selected
-                .values()
-                .min_by(|a, b| a.cmp_columns(b, &self.sorting_rules))
-                .cloned();
-            self.make_book_visible(target).await
+        match (self.selected.first().cloned(), self.selected.is_single()) {
+            (None, _) | (Some(_), true) => {
+                self.window_top = 0;
+                self.books.clear();
+                self.scroll_down(0).await?;
+                if self.selected.is_single() {
+                    if let Some(target) = self.window().first().cloned() {
+                        self.selected = Selection::Range(
+                            target.clone(),
+                            target,
+                            self.sorting_rules.clone(),
+                            Direction::Down,
+                        );
+                    }
+                }
+                Ok(())
+            }
+            (Some(target), false) => self.select_and_make_visible(target).await,
         }
     }
 
     pub async fn end(&mut self) -> Result<(), DatabaseError<D::Error>> {
-        if self.selected.is_empty() {
-            self.window_top = 0;
-            let (query, bindings) = QueryBuilder::default()
-                .sort_rules(&self.sorting_rules)
-                .order(ColumnOrder::Ascending)
-                .join_cols(None);
+        match (self.selected.last().cloned(), self.selected.is_single()) {
+            (None, _) | (Some(_), true) => {
+                self.window_top = 0;
+                let (query, bindings) = QueryBuilder::default()
+                    .sort_rules(&self.sorting_rules)
+                    .order(ColumnOrder::Ascending)
+                    .join_cols(None);
 
-            self.books = self
-                .db
-                .write()
-                .await
-                .perform_query(&query, &bindings, self.window_size)
-                .await?;
-            self.books.reverse();
-            Ok(())
-        } else {
-            // Go to last selected item. Need to use ID w/ GEQ
-            let target = self
-                .selected
-                .values()
-                .max_by(|a, b| a.cmp_columns(b, &self.sorting_rules))
-                .cloned();
-            self.make_book_visible(target).await
+                self.books = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bindings, self.window_size)
+                    .await?;
+                self.books.reverse();
+
+                if self.selected.is_single() {
+                    if let Some(target) = self.window().last().cloned() {
+                        self.selected = Selection::Range(
+                            target.clone(),
+                            target,
+                            self.sorting_rules.clone(),
+                            Direction::Down,
+                        );
+                    }
+                }
+
+                Ok(())
+            }
+            (Some(target), false) => self.select_and_make_visible(target).await,
         }
     }
 
@@ -607,9 +806,10 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         let target = self
             .window()
             .iter()
-            .find(|x| self.selected.contains_key(&x.id()))
+            .find(|x| self.selected.contains(&x))
             .or_else(|| self.window().first())
             .cloned();
+        self.books.clear();
         self.make_book_visible(target).await
     }
 
@@ -626,7 +826,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         self.window()
             .iter()
             .enumerate()
-            .filter(|(i, book)| self.selected.contains_key(&book.id()))
+            .filter(|(i, book)| self.selected.contains(book.as_ref()))
             .map(|(i, _)| i)
             .collect()
     }
@@ -638,46 +838,186 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
 
 impl<D: AppDatabase + Send + Sync> Paginator<D> {
     pub async fn page_up(&mut self) -> PaginatorResult<D::Error> {
-        self.scroll_up(self.window_size).await
+        self.scroll_up_move_select(self.window_size).await
     }
 
     pub async fn page_down(&mut self) -> PaginatorResult<D::Error> {
-        self.scroll_down(self.window_size).await
+        self.scroll_down_move_select(self.window_size).await
     }
 
     pub async fn up(&mut self) -> PaginatorResult<D::Error> {
-        self.scroll_up(1).await
+        self.scroll_up_move_select(1).await
     }
 
     pub async fn down(&mut self) -> PaginatorResult<D::Error> {
-        self.scroll_down(1).await
+        self.scroll_down_move_select(1).await
     }
 
     pub async fn select_up(&mut self, len: usize) -> PaginatorResult<D::Error> {
         unimplemented!()
     }
 
+    async fn select_down_on(
+        &mut self,
+        len: usize,
+        selection: Selection,
+    ) -> Result<Selection, DatabaseError<D::Error>> {
+        match selection {
+            Selection::All => {
+                self.scroll_down(len).await?;
+                Ok(Selection::All)
+            }
+            Selection::Partial(books, rules) => Ok(Selection::Partial(books, rules)),
+            Selection::Range(start, end, sorting_rules, Direction::Down) => {
+                // Need to get end + len'th book.
+                let (query, bound_variables) = QueryBuilder::default()
+                    .order(ColumnOrder::Descending)
+                    .sort_rules(&self.sorting_rules)
+                    .join_cols(Some(end.as_ref()));
+                let book = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bound_variables, len)
+                    .await?
+                    .pop();
+                if let Some(book) = book {
+                    if !self.window().iter().any(|x| x.id() == book.id()) {
+                        self.scroll_down(len).await?;
+                    }
+
+                    Ok(Selection::Range(
+                        start,
+                        book,
+                        sorting_rules,
+                        Direction::Down,
+                    ))
+                } else {
+                    Ok(Selection::Range(start, end, sorting_rules, Direction::Down))
+                }
+            }
+            Selection::Range(start, end, sorting_rules, Direction::Up) => {
+                // Need to get end + len'th book.
+                let (query, bound_variables) = QueryBuilder::default()
+                    .order(ColumnOrder::Descending)
+                    .sort_rules(&self.sorting_rules)
+                    .join_cols(Some(start.as_ref()));
+                let book = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bound_variables, len)
+                    .await?
+                    .into_iter()
+                    .next();
+                if let Some(book) = book {
+                    // need to flip
+                    if !self.window().iter().any(|x| x.id() == book.id()) {
+                        self.scroll_down(len).await?;
+                    }
+
+                    if book.cmp_columns(&end, &sorting_rules).is_gt() {
+                        Ok(Selection::Range(end, book, sorting_rules, Direction::Down))
+                    } else {
+                        Ok(Selection::Range(book, end, sorting_rules, Direction::Up))
+                    }
+                } else {
+                    Ok(Selection::Range(start, end, sorting_rules, Direction::Up))
+                }
+            }
+            Selection::Empty => {
+                let (query, bound_variables) = QueryBuilder::default()
+                    .order(ColumnOrder::Descending)
+                    .sort_rules(&self.sorting_rules)
+                    .include_id(true)
+                    .join_cols(self.window().first().map(|x| x.as_ref()));
+                let book = self
+                    .db
+                    .write()
+                    .await
+                    .perform_query(&query, &bound_variables, len)
+                    .await?
+                    .pop();
+                if let Some(book) = book {
+                    let start = self
+                        .window()
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| book.clone());
+                    if !self.window().iter().any(|x| x.id() == book.id()) {
+                        self.scroll_down(len).await?;
+                    }
+                    Ok(Selection::Range(
+                        start,
+                        book,
+                        self.sorting_rules.clone(),
+                        Direction::Down,
+                    ))
+                } else {
+                    Ok(Selection::Empty)
+                }
+            }
+        }
+    }
     pub async fn select_down(&mut self, len: usize) -> PaginatorResult<D::Error> {
-        unimplemented!()
+        let selection = std::mem::replace(&mut self.selected, Selection::Empty);
+        let candidate = self.select_down_on(len, selection).await;
+        match candidate {
+            Ok(selection) => {
+                self.selected = selection;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn select_all(&mut self) -> PaginatorResult<D::Error> {
-        unimplemented!()
+        self.selected = Selection::All;
+        Ok(())
     }
 
     pub async fn select_page_up(&mut self) -> PaginatorResult<D::Error> {
-        unimplemented!()
+        self.select_up(self.window_size).await
     }
 
     pub async fn select_page_down(&mut self) -> PaginatorResult<D::Error> {
-        unimplemented!()
+        self.select_down(self.window_size).await
     }
 
     pub async fn select_to_start(&mut self) -> PaginatorResult<D::Error> {
-        unimplemented!()
+        match self.selected.last().cloned() {
+            None => Ok(()),
+            Some(book) => {
+                self.selected = Selection::Empty;
+                self.home().await?;
+                self.selected = Selection::Range(
+                    book.clone(),
+                    self.window().last().cloned().unwrap_or(book),
+                    self.sorting_rules.clone(),
+                    Direction::Up,
+                );
+                Ok(())
+            }
+        }
     }
 
     pub async fn select_to_end(&mut self) -> PaginatorResult<D::Error> {
-        unimplemented!()
+        match self.selected.first().cloned() {
+            None => Ok(()),
+            Some(book) => {
+                self.selected = Selection::Empty;
+                self.end().await?;
+                self.selected = Selection::Range(
+                    self.window()
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| book.clone()),
+                    book,
+                    self.sorting_rules.clone(),
+                    Direction::Down,
+                );
+                Ok(())
+            }
+        }
     }
 }
