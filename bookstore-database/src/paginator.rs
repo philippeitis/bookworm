@@ -197,9 +197,11 @@ impl QueryBuilder {
         // WHERE (books.book_id > 291 AND mvalue >= "Alastair")
         // ORDER BY mvalue ASC, ..., books.book_id ASC
         // LIMIT 5;
-
+        let mut where_rhs = vec![];
+        let mut where_lhs = vec![];
         // Add the id comparison to ensure pagination doesn't repeat items
         let mut ascii_iter = ASCII_LOWER.iter();
+
         for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ascii_iter.by_ref()) {
             match read_column(col_id, alias.to_string()) {
                 None => {}
@@ -217,24 +219,27 @@ impl QueryBuilder {
                         ));
                     }
                     if let Some(book) = book {
-                        if matches!(col_id, ColumnIdentifier::ID) {
-                            if self.id_inclusive {
-                                where_str.push_str(&format!(
-                                    "{}.{} {}= ? AND ",
-                                    table_alias, alias, cmp
-                                ));
-                            } else {
-                                where_str
-                                    .push_str(&format!("{}.{} {} ? AND ", table_alias, alias, cmp));
-                            }
-                            bind_vars.push(Variable::Int(u64::from(book.id()) as i64));
+                        let cmp_key = if matches!(col_id, ColumnIdentifier::ID) {
+                            Some(Variable::Int(u64::from(book.id()) as i64))
                         } else {
-                            let cmp_key = book.get_column(col_id).unwrap_or_default();
-                            where_str
-                                .push_str(&format!("{}.{} {}= ? AND ", table_alias, alias, cmp));
-                            bind_vars.push(Variable::Str(cmp_key.to_string()));
+                            if let Some(cmp_key) = book.get_column(col_id) {
+                                Some(Variable::Str(cmp_key.to_string()))
+                            } else {
+                                None
+                            }
+                        };
+
+                        if let Some(cmp_key) = cmp_key {
+                            if cmp == ">" {
+                                where_lhs.push((format!("{}.{}", table_alias, alias), None));
+                                where_rhs.push(("?".to_string(), Some(cmp_key)));
+                            } else {
+                                where_lhs.push(("?".to_string(), Some(cmp_key)));
+                                where_rhs.push((format!("{}.{}", table_alias, alias), None));
+                            }
                         }
                     }
+
                     order_str.push_str(&format!(
                         "{} {}, ",
                         alias,
@@ -243,6 +248,36 @@ impl QueryBuilder {
                     num_ops += 1;
                 }
             }
+        }
+
+        let mut where_lhs_str = String::new();
+        for (s, key) in where_lhs {
+            where_lhs_str += &s;
+            where_lhs_str += ", ";
+            if let Some(val) = key {
+                bind_vars.push(val);
+            }
+        }
+        let mut where_rhs_str = String::new();
+        for (s, key) in where_rhs {
+            where_rhs_str += &s;
+            where_rhs_str += ", ";
+            if let Some(val) = key {
+                bind_vars.push(val);
+            }
+        }
+        match (
+            where_lhs_str.strip_suffix(", "),
+            where_rhs_str.strip_suffix(", "),
+        ) {
+            (Some(where_lhs_str), Some(where_rhs_str)) => {
+                if self.id_inclusive {
+                    where_str = format!("({}) >= ({})", where_lhs_str, where_rhs_str);
+                } else {
+                    where_str = format!("({}) > ({})", where_lhs_str, where_rhs_str)
+                }
+            }
+            _ => {}
         }
 
         for (match_rule, alias) in match_rules.iter().zip(ascii_iter) {
@@ -270,8 +305,10 @@ impl QueryBuilder {
         // Clean up string.
         from.pop();
         if !where_str.is_empty() {
-            where_str.truncate(where_str.len() - 5);
-            where_str = format!("WHERE ({})", where_str);
+            where_str = format!(
+                "WHERE ({})",
+                where_str.strip_prefix(" AND ").unwrap_or(&where_str)
+            );
         }
         order_str.pop();
         order_str.pop();
@@ -280,6 +317,12 @@ impl QueryBuilder {
             from, join, where_str, order_str
         );
         log(&query);
+        for var in &bind_vars {
+            match var {
+                Variable::Int(i) => log(i.to_string()),
+                Variable::Str(s) => log(s.to_string()),
+            }
+        }
         (query, bind_vars)
     }
 
@@ -322,6 +365,7 @@ impl QueryBuilder {
             ColumnOrder::Ascending => ColumnOrder::Descending,
             ColumnOrder::Descending => ColumnOrder::Ascending,
         };
+
         // Add the id comparison to ensure pagination doesn't repeat items
         for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ASCII_LOWER.iter()) {
             match read_column(col_id, alias.to_string()) {
