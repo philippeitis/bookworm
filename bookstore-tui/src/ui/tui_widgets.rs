@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::BTreeSet;
 use tui::buffer::Buffer;
 use tui::layout::{Corner, Rect};
@@ -7,16 +9,10 @@ use tui::widgets::{Block, StatefulWidget, Widget};
 
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, Copy, Clone)]
-enum Direction {
-    Up,
-    Down,
-}
-
 #[derive(Debug, Clone)]
 pub struct MultiSelectListState {
     offset: usize,
-    direction: Direction,
+    target: Option<usize>,
     selected: BTreeSet<usize>,
 }
 
@@ -24,7 +20,7 @@ impl Default for MultiSelectListState {
     fn default() -> MultiSelectListState {
         MultiSelectListState {
             offset: 0,
-            direction: Direction::Down,
+            target: None,
             selected: BTreeSet::new(),
         }
     }
@@ -40,11 +36,10 @@ impl MultiSelectListState {
     }
 
     pub fn front_selection(&mut self) -> Option<usize> {
-        match self.direction {
-            Direction::Up => self.selected.iter().next(),
-            Direction::Down => self.selected.iter().next_back(),
+        match self.target {
+            None => self.selected.iter().next().cloned(),
+            Some(target) => Some(target),
         }
-        .cloned()
     }
 
     pub fn deselect(&mut self, index: usize) {

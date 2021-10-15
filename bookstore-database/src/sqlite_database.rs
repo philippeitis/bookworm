@@ -537,7 +537,7 @@ impl SQLiteDatabase {
             .await
             .map_err(DatabaseError::Backend)?;
 
-        let mut db = Self {
+        let db = Self {
             backend: database,
             local_cache: BookCache::default(),
             path: file_path.as_ref().to_path_buf(),

@@ -20,20 +20,6 @@ use crate::open::open_in_dir;
 use crate::parser::{ModifyColumn, Source, Target};
 use crate::table_view::TableView;
 
-fn log(s: impl AsRef<str>) {
-    use std::io::Write;
-
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(true)
-        .open("log.txt")
-    {
-        let _ = f.write_all(s.as_ref().as_bytes());
-        let _ = f.write_all(b"\n");
-    }
-}
-
 macro_rules! async_write {
     ($self:ident, $id: ident, $op:expr) => {{
         let value = {
