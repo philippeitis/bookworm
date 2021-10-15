@@ -4,6 +4,7 @@
 pub mod app;
 pub mod autocomplete;
 mod help_strings;
+mod open;
 pub mod parser;
 pub mod settings;
 pub mod table_view;
