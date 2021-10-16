@@ -3,6 +3,7 @@
 #[allow(clippy::module_inception)]
 pub mod app;
 pub mod autocomplete;
+mod edit;
 mod help_strings;
 mod open;
 pub mod parser;
