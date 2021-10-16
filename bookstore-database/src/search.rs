@@ -166,7 +166,11 @@ impl Matcher for ExactStringMatcher {
     }
 
     fn sql_query(&self) -> (&ColumnIdentifier, String, Option<Variable>) {
-        unimplemented!()
+        (
+            &self.column,
+            format!("= ?"),
+            Some(Variable::Str(self.string.clone())),
+        )
     }
 
     fn box_clone(&self) -> Box<dyn Matcher + Send + Sync> {

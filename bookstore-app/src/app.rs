@@ -400,6 +400,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                     AppResponse::Empty
                 }
                 AppTask::DeleteMatching(matches) => {
+                    // TODO: use a query here (DELETE WHERE IN QUERY)
                     let res = self.db.read().await.find_matches(&matches).await;
                     if let Ok(targets) = res {
                         let ids = targets.into_iter().map(|target| target.id()).collect();
@@ -421,6 +422,9 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                 }
                 AppTask::AddBooks(sources) => {
                     // TODO: Handle failed reads.
+                    // TODO: Provide feedback about duplicated books
+                    //  and some method to resolve duplicates, and add flag to
+                    //  check if duplicates exist before inserting (enabled by default)
                     let mut ids = vec![];
                     let mut futs = vec![];
                     for source in sources.into_vec() {
@@ -479,6 +483,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
 
                     AppResponse::Created(ids)
                 }
+                // Add details about strategies (eg. which types of books, what to do on conflict)
                 AppTask::TryMergeAllBooks => {
                     if let Ok(ids) = async_write!(self, db, db.merge_similar().await) {
                         AppResponse::MergeRefresh(ids)
@@ -506,21 +511,3 @@ impl<D: AppDatabase + Send + Sync> App<D> {
 // TODO: UI should update immediately, but have a ... in the corner
 //  Maybe ... updates
 //  to indicate that background tasks are running
-//  Wait until all expected messages are received to remove
-//  When adding books:
-//  Return an appropriately sorted list of book ids for each scope
-//  -> app needs to maintain scopes?
-//  Local copy of BookView needs to do the following:
-//  Maintain selections
-//  Maintain position:
-//  eg. top of window, or currently selected item?
-//  Update underlying size
-//  Need to make sure that sorting and scopes are maintained
-//  When editing:
-//  Changes can be made locally
-//  When deleting books:
-//  Return a hashset of all bookids to remove
-//  If selections, remove all selections. No other changes made.
-//  If schematic, need to remove own book indices.
-//  > Make sure to update table view & top cursor position
-//  > make sure all scopes are updated

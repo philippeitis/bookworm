@@ -107,6 +107,7 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON UPDATE CASCADE
     ON DELETE CASCADE
 );"#;
+
 #[derive(sqlx::FromRow)]
 struct BookData {
     book_id: i64,
@@ -240,11 +241,67 @@ pub struct SQLiteDatabase {
     path: PathBuf,
 }
 
-// TODO:
-//  Start up is slow with lots of books - at 1M, 20S to open (+1s per 50k) - fix through lazy loading
-//  Deletion of many book ids is very slow for large numbers - fix through lazy loading, using SQL queries?
-//
+// TODO: Measure performance of deletion with current changes, and check if issues are still present.
 impl SQLiteDatabase {
+    async fn deduplicate(
+        &mut self,
+        merges: &[(BookID, BookID)],
+    ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
+        #[derive(sqlx::FromRow, Debug)]
+        struct SqlxBookId {
+            book_id: i64,
+        }
+
+        enum ConflictResolution {
+            Skip,
+            KeepOriginal,
+            Return,
+        }
+
+        enum DetectionStrategy {
+            VariantHash,
+            AuthorOverlap,
+            Title,
+        }
+
+        struct MergeConflict {
+            book1: Arc<Book>,
+            book2: Arc<Book>,
+            conflicts: Vec<ColumnIdentifier>,
+        }
+        let conflict = ConflictResolution::KeepOriginal;
+        let detection = DetectionStrategy::VariantHash;
+
+        // let conflicts = vec![];
+
+        let ids = sqlx::query_as!(
+            SqlxBookId,
+            "SELECT book_id
+            FROM `variants`
+            GROUP BY hash
+            HAVING COUNT(*) > 1"
+        )
+        .fetch_all(&self.backend)
+        .await
+        .map_err(DatabaseError::Backend)?;
+        let ids: Vec<_> = ids
+            .into_iter()
+            .map(|x| x.book_id as u64)
+            .map(BookID::try_from)
+            .filter_map(Result::ok)
+            .collect();
+
+        let books = self.load_book_ids(&ids).await?;
+        // titles, authors
+        // variant by variant: identical hashmaps
+        // SELECT hash
+        // FROM variants
+        // GROUP BY hash
+        // HAVING COUNT(*) > 1
+        // ORDER BY hash DESC;
+        Ok(())
+    }
+
     fn books_from_sql(
         raw_books: Vec<BookData>,
         raw_variants: Vec<VariantData>,
@@ -276,7 +333,8 @@ impl SQLiteDatabase {
             if let Some(book) = books.get_mut(&id) {
                 book.push_variant(variant);
             } else {
-                // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
+                // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book,
+                //  and this means that database is wrong
                 eprintln!(
                     "SQLite database may be corrupted. Found orphan variant for {}.",
                     id
@@ -739,6 +797,8 @@ impl SQLiteDatabase {
     }
 
     async fn merge_by_ids(&mut self, merges: &[(BookID, BookID)]) -> Result<(), sqlx::Error> {
+        // titles, authors
+        // variant by variant: identical hashmaps
         let mut tx = self.backend.begin().await?;
         for (merged_into, merged_from) in merges.iter().cloned() {
             let merged_into = u64::from(merged_into) as i64;

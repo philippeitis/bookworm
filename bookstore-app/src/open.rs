@@ -2,6 +2,8 @@ use std::path::Path;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use std::process::Command;
 
+// TODO: when opener updates, switch over to using that to open files in a robust fashion.
+
 #[cfg(target_os = "windows")]
 const OPEN_BOOK_IN_DIR_PY: &str = r#"import sys
 import subprocess
