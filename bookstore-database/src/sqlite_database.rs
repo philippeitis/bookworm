@@ -1215,6 +1215,10 @@ impl AppDatabase for SQLiteDatabase {
     async fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
         // SELECT title, book_id FROM books GROUP BY LOWER(title) HAVING COUNT(*) > 1;
         // Then, for authors ??
+        // TODO: This isn't a particularly complete solution, and we should
+        //  move to a more robust deduplication strategy with the possibility
+        //  of user feedback.
+        self.load_books().await?;
         let merged = self.local_cache.merge_similar_merge_ids();
         self.merge_by_ids(&merged)
             .await
