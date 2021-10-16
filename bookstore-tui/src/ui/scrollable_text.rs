@@ -94,9 +94,8 @@ impl BlindOffset {
         self.offset = usize::MAX;
     }
 
-    pub(crate) fn fit_offset_in_height(&mut self, height: usize) -> usize {
+    pub(crate) fn fit_offset_in_height(&mut self, height: usize) {
         self.offset = height.saturating_sub(self.window_height).min(self.offset);
-        self.offset
     }
 
     pub(crate) fn offset(&self) -> usize {
