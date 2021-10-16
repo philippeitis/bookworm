@@ -15,7 +15,6 @@ use bookstore_database::{AppDatabase, Book, BookView, DatabaseError};
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant, Edit};
 
-use crate::help_strings::{help_strings, GENERAL_HELP};
 use crate::open::open_in_dir;
 use crate::parser::{ModifyColumn, Source, Target};
 use crate::table_view::TableView;
@@ -122,7 +121,6 @@ pub enum AppTask {
     GetDbPath,
     TakeUpdate,
     GetBookView,
-    GetHelp(Option<String>),
     DeleteIds(HashSet<BookID>),
     DeleteMatching(Box<[Search]>),
     DeleteAll,
@@ -135,7 +133,6 @@ pub enum AppTask {
 
 pub enum AppResponse<D: AppDatabase + 'static> {
     IsSaved(bool),
-    HelpInformation(String),
     Updated(bool),
     DbPath(PathBuf),
     BookView(BookView<D>),
@@ -233,19 +230,11 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
         }
     }
 
-    pub async fn help(&self, target: Option<String>) -> String {
-        self.send(AppTask::GetHelp(target)).await;
-        match self.receive().await.unwrap() {
-            AppResponse::HelpInformation(result) => result,
-            _ => panic!("Expected HelpInformation response from application"),
-        }
-    }
-
     pub async fn edit_books(&self, books: Box<[BookID]>, edits: Box<[(ColumnIdentifier, Edit)]>) {
         self.send(AppTask::EditBooks(books, edits)).await;
         match self.receive().await.unwrap() {
             AppResponse::Empty => {}
-            _ => panic!("Expected HelpInformation response from application"),
+            _ => panic!("Expected Empty response from application"),
         }
     }
 
@@ -253,7 +242,7 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
         self.send(AppTask::AddBooks(sources)).await;
         match self.receive().await.unwrap() {
             AppResponse::Created(result) => result,
-            _ => panic!("Expected HelpInformation response from application"),
+            _ => panic!("Expected Created response from application"),
         }
     }
 
@@ -387,14 +376,6 @@ impl<D: AppDatabase + Send + Sync> App<D> {
 
                     AppResponse::Empty
                 }
-                AppTask::GetHelp(Some(target)) => {
-                    if let Some(s) = help_strings(&target) {
-                        AppResponse::HelpInformation(s.to_string())
-                    } else {
-                        AppResponse::HelpInformation(GENERAL_HELP.to_string())
-                    }
-                }
-                AppTask::GetHelp(None) => AppResponse::HelpInformation(GENERAL_HELP.to_string()),
                 AppTask::DeleteIds(ids) => {
                     let _ = self.remove_books(&ids).await;
                     AppResponse::Empty

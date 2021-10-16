@@ -27,6 +27,7 @@ use bookstore_database::{AppDatabase, DatabaseError};
 use bookstore_records::book::{ColumnIdentifier, RecordError};
 use bookstore_records::Edit;
 
+use crate::ui::help_strings::{help_strings, GENERAL_HELP};
 use crate::ui::log;
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::terminal_ui::{TuiError, UIState};
@@ -161,12 +162,12 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
         }
         Command::Help(target) => {
             return Ok(ApplicationTask::SwitchView(AppView::Help(
-                app.help(Some(target)).await,
+                help_strings(&target).unwrap_or(GENERAL_HELP).to_string(),
             )));
         }
         Command::GeneralHelp => {
             return Ok(ApplicationTask::SwitchView(AppView::Help(
-                app.help(None).await,
+                GENERAL_HELP.to_string(),
             )));
         }
     }
