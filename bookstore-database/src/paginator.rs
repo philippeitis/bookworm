@@ -120,6 +120,7 @@ struct QueryBuilder {
     order: ColumnOrder,
     sort_rules: Vec<(ColumnIdentifier, ColumnOrder)>,
     id_inclusive: bool,
+    limit: Option<i64>,
 }
 
 // TODO: Rapid scrolling is slow
@@ -129,6 +130,7 @@ impl Default for QueryBuilder {
             order: ColumnOrder::Descending,
             sort_rules: vec![(ColumnIdentifier::ID, ColumnOrder::Ascending)],
             id_inclusive: false,
+            limit: None,
         }
     }
 }
@@ -144,6 +146,11 @@ impl QueryBuilder {
             self.sort_rules
                 .push((ColumnIdentifier::ID, ColumnOrder::Ascending));
         };
+        self
+    }
+
+    fn limit(mut self, limit: usize) -> Self {
+        self.limit = Some(limit as i64);
         self
     }
 
@@ -312,10 +319,16 @@ impl QueryBuilder {
         }
         order_str.pop();
         order_str.pop();
-        let query = format!(
-            "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {} LIMIT ?;",
+        let mut query = format!(
+            "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {}",
             from, join, where_str, order_str
         );
+        if let Some(limit) = self.limit {
+            query += " LIMIT ?;";
+            bind_vars.push(Variable::Int(limit));
+        } else {
+            query += ";";
+        }
         log(&query);
         for var in &bind_vars {
             match var {
@@ -508,8 +521,6 @@ pub struct Paginator<D: AppDatabase + 'static> {
     // Some set of sorting rules.
     sorting_rules: Box<[(ColumnIdentifier, ColumnOrder)]>,
     matching_rules: Box<[Box<dyn Matcher + Send + Sync>]>,
-    // Used to make sure that we don't endlessly retry matches.
-    last_compared: Option<Arc<Book>>,
     // Store selected values (no relative indices).
     // When up/down etc is called, find first selected value based on ordering scheme & scroll from there.
     selected: Selection,
@@ -646,7 +657,6 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             window_top: 0,
             sorting_rules: add_id(sorting_rules),
             matching_rules: vec![].into_boxed_slice(),
-            last_compared: None,
             selected: Selection::Empty,
             db,
         }
@@ -690,16 +700,23 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         if num_books == 0 {
             return Ok(());
         }
-        let (query, bindings) = QueryBuilder::default()
+        let query_builder = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Descending)
-            .join_cols(self.books.last().map(|x| x.as_ref()), &self.matching_rules);
+            .limit(num_books);
+
+        let (query, bindings) =
+            query_builder.join_cols(self.books.last().map(|x| x.as_ref()), &self.matching_rules);
         let books = self
             .db
             .write()
             .await
-            .perform_query(&query, &bindings, num_books)
+            .read_selected_books(&query, &bindings)
             .await?;
+
+        let (query, bindings) = query_builder
+            .limit(num_books * 5)
+            .join_cols(self.books.last().map(|x| x.as_ref()), &self.matching_rules);
 
         let db = self.db.clone();
         tokio::spawn(async move {
@@ -707,7 +724,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             let _ = db
                 .write()
                 .await
-                .perform_query(&query, &bindings, num_books * 5)
+                .read_selected_books(&query, &bindings)
                 .await;
             let end = std::time::Instant::now();
             log(format!("Took {}s to prefetch", (end - start).as_secs_f32()));
@@ -726,10 +743,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             return Ok(());
         }
 
-        let (query, bindings) = QueryBuilder::default()
+        let query_builder = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Ascending)
-            .join_cols(self.books.first().map(|x| x.as_ref()), &self.matching_rules);
+            .limit(num_books);
+
+        let (query, bindings) =
+            query_builder.join_cols(self.books.first().map(|x| x.as_ref()), &self.matching_rules);
         // Read only the number of items needed to fill top.
         // TODO: If len is a large jump, we should do an OFFSET instead of loading
         //  everything in-between (check if len > some multiple of window size),
@@ -738,8 +758,12 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             .db
             .write()
             .await
-            .perform_query(&query, &bindings, num_books)
+            .read_selected_books(&query, &bindings)
             .await?;
+
+        let (query, bindings) = query_builder
+            .limit(num_books * 5)
+            .join_cols(self.books.last().map(|x| x.as_ref()), &self.matching_rules);
 
         let db = self.db.clone();
         tokio::spawn(async move {
@@ -747,7 +771,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             let _ = db
                 .write()
                 .await
-                .perform_query(&query, &bindings, num_books * 5)
+                .read_selected_books(&query, &bindings)
                 .await;
             let end = std::time::Instant::now();
             log(format!("Took {}s to prefetch", (end - start).as_secs_f32()));
@@ -768,6 +792,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         let builder = QueryBuilder::default()
             .sort_rules(&self.sorting_rules)
             .order(ColumnOrder::Descending)
+            .limit(self.window_size)
             .include_id(true);
 
         let (query, bindings) = match &book {
@@ -792,7 +817,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             .db
             .write()
             .await
-            .perform_query(&query, &bindings, self.window_size)
+            .read_selected_books(&query, &bindings)
             .await?;
         self.window_top = 0;
         let limit = self.window_size - self.books.len();
@@ -824,12 +849,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bindings) = QueryBuilder::default()
                     .sort_rules(&self.sorting_rules)
                     .order(ColumnOrder::Ascending)
+                    .limit(len)
                     .join_cols(Some(target.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bindings, len)
+                    .read_selected_books(&query, &bindings)
                     .await?
                     .pop()
                     .unwrap_or_else(|| target.clone());
@@ -858,12 +884,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bindings) = QueryBuilder::default()
                     .sort_rules(&self.sorting_rules)
                     .order(ColumnOrder::Descending)
+                    .limit(len)
                     .join_cols(Some(target.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bindings, len)
+                    .read_selected_books(&query, &bindings)
                     .await?
                     .pop()
                     .unwrap_or_else(|| target.clone());
@@ -965,13 +992,14 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bindings) = QueryBuilder::default()
                     .sort_rules(&self.sorting_rules)
                     .order(ColumnOrder::Ascending)
+                    .limit(self.window_size)
                     .join_cols(None, &self.matching_rules);
 
                 self.books = self
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bindings, self.window_size)
+                    .read_selected_books(&query, &bindings)
                     .await?;
                 self.books.reverse();
 
@@ -1068,12 +1096,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Ascending)
                     .sort_rules(&self.sorting_rules)
+                    .limit(len)
                     .join_cols(Some(end.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bound_variables, len)
+                    .read_selected_books(&query, &bound_variables)
                     .await?
                     .pop();
                 if let Some(book) = book {
@@ -1101,12 +1130,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Ascending)
                     .sort_rules(&self.sorting_rules)
+                    .limit(len)
                     .join_cols(Some(start.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bound_variables, len)
+                    .read_selected_books(&query, &bound_variables)
                     .await?
                     .pop();
                 if let Some(book) = book {
@@ -1124,6 +1154,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     .order(ColumnOrder::Ascending)
                     .sort_rules(&self.sorting_rules)
                     .include_id(true)
+                    .limit(len)
                     .join_cols(
                         self.window().last().map(|x| x.as_ref()),
                         &self.matching_rules,
@@ -1132,7 +1163,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bound_variables, len)
+                    .read_selected_books(&query, &bound_variables)
                     .await?
                     .pop();
                 if let Some(book) = book {
@@ -1185,12 +1216,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Descending)
                     .sort_rules(&self.sorting_rules)
+                    .limit(len)
                     .join_cols(Some(end.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bound_variables, len)
+                    .read_selected_books(&query, &bound_variables)
                     .await?
                     .pop();
                 if let Some(book) = book {
@@ -1213,12 +1245,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Descending)
                     .sort_rules(&self.sorting_rules)
+                    .limit(len)
                     .join_cols(Some(start.as_ref()), &self.matching_rules);
                 let book = self
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bound_variables, len)
+                    .read_selected_books(&query, &bound_variables)
                     .await?
                     .pop();
                 if let Some(book) = book {
@@ -1241,6 +1274,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     .order(ColumnOrder::Descending)
                     .sort_rules(&self.sorting_rules)
                     .include_id(true)
+                    .limit(len)
                     .join_cols(
                         self.window().first().map(|x| x.as_ref()),
                         &self.matching_rules,
@@ -1249,7 +1283,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     .db
                     .write()
                     .await
-                    .perform_query(&query, &bound_variables, len)
+                    .read_selected_books(&query, &bound_variables)
                     .await?
                     .pop();
                 if let Some(book) = book {

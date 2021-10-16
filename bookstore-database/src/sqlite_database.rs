@@ -243,15 +243,43 @@ pub struct SQLiteDatabase {
 
 // TODO: Measure performance of deletion with current changes, and check if issues are still present.
 impl SQLiteDatabase {
-    async fn deduplicate(
-        &mut self,
-        merges: &[(BookID, BookID)],
-    ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
+    async fn read_book_ids(
+        &self,
+        query: &str,
+        bound_variables: &[Variable],
+    ) -> Result<Vec<BookID>, DatabaseError<<Self as AppDatabase>::Error>> {
         #[derive(sqlx::FromRow, Debug)]
         struct SqlxBookId {
             book_id: i64,
         }
 
+        let mut query = sqlx::query_as(&query);
+        for value in bound_variables {
+            query = match value {
+                Variable::Int(i) => query.bind(i),
+                Variable::Str(s) => query.bind(s),
+            };
+        }
+        let start = std::time::Instant::now();
+        let ids: Vec<SqlxBookId> = query
+            .fetch_all(&self.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        let ids: Vec<BookID> = ids
+            .into_iter()
+            .map(|id| {
+                BookID::try_from(id.book_id as u64).expect("book_id is specified to be non-null.")
+            })
+            .collect();
+        let end = std::time::Instant::now();
+        log(format!("Took {}s to read ids", (end - start).as_secs_f32()));
+        Ok(ids)
+    }
+
+    async fn deduplicate(
+        &mut self,
+        merges: &[(BookID, BookID)],
+    ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
         enum ConflictResolution {
             Skip,
             KeepOriginal,
@@ -274,24 +302,15 @@ impl SQLiteDatabase {
 
         // let conflicts = vec![];
 
-        let ids = sqlx::query_as!(
-            SqlxBookId,
-            "SELECT book_id
+        let books = self
+            .read_selected_books(
+                "SELECT book_id
             FROM `variants`
             GROUP BY hash
-            HAVING COUNT(*) > 1"
-        )
-        .fetch_all(&self.backend)
-        .await
-        .map_err(DatabaseError::Backend)?;
-        let ids: Vec<_> = ids
-            .into_iter()
-            .map(|x| x.book_id as u64)
-            .map(BookID::try_from)
-            .filter_map(Result::ok)
-            .collect();
-
-        let books = self.load_book_ids(&ids).await?;
+            HAVING COUNT(*) > 1",
+                &[],
+            )
+            .await?;
         // titles, authors
         // variant by variant: identical hashmaps
         // SELECT hash
@@ -787,7 +806,7 @@ impl SQLiteDatabase {
             .map(u64::from)
             .map(|x| (x as i64).to_string())
             .join(", ");
-        sqlx::query(&format!("DELETE FROM books where book_id in ({})", s))
+        sqlx::query(&format!("DELETE FROM books WHERE book_id IN ({})", s))
             .execute(&mut tx)
             .await?;
         sqlx::query!("PRAGMA cache_size = 2000")
@@ -1229,11 +1248,12 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     async fn find_matches(
-        &self,
+        &mut self,
         searches: &[Search],
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
         // "SELECT * FROM {} WHERE {} REGEXP {};"
         // FIND_MATCHES_* - look at SQLite FTS5.
+        self.load_books().await?;
         Ok(self.local_cache.find_matches(searches)?)
     }
 
@@ -1295,39 +1315,12 @@ impl AppDatabase for SQLiteDatabase {
     //         .collect())
     // }
 
-    async fn perform_query(
+    async fn read_selected_books(
         &mut self,
         query: &str,
         bound_variables: &[Variable],
-        limit: usize,
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
-        #[derive(sqlx::FromRow, Debug)]
-        struct SqlxBookId {
-            book_id: i64,
-        }
-
-        let mut query = sqlx::query_as(&query);
-        for value in bound_variables {
-            query = match value {
-                Variable::Int(i) => query.bind(i),
-                Variable::Str(s) => query.bind(s),
-            };
-        }
-        let query = query.bind(limit as i64);
-        let start = std::time::Instant::now();
-        let ids: Vec<SqlxBookId> = query
-            .fetch_all(&self.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        let ids: Vec<BookID> = ids
-            .into_iter()
-            .map(|id| {
-                BookID::try_from(id.book_id as u64).expect("book_id is specified to be non-null.")
-            })
-            .collect();
-        let end = std::time::Instant::now();
-        log(format!("Took {}s to read ids", (end - start).as_secs_f32()));
-
+        let ids = self.read_book_ids(query, bound_variables).await?;
         let books = self.load_book_ids(&ids).await?;
 
         Ok(ids
@@ -1339,5 +1332,19 @@ impl AppDatabase for SQLiteDatabase {
                     .clone()
             })
             .collect())
+    }
+
+    async fn delete_selected_books(
+        &mut self,
+        query: &str,
+        bound_variables: &[Variable],
+    ) -> Result<(), DatabaseError<Self::Error>> {
+        let ids: HashSet<_> = self
+            .read_book_ids(query, bound_variables)
+            .await?
+            .into_iter()
+            .collect();
+        // Need to remove local copies
+        self.remove_books(&ids).await
     }
 }

@@ -186,7 +186,7 @@ pub trait AppDatabase {
     /// This function will return an error if the database fails, or if a member of `searches`
     /// is malformed.
     async fn find_matches(
-        &self,
+        &mut self,
         searches: &[Search],
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
 
@@ -203,10 +203,15 @@ pub trait AppDatabase {
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;
 
-    async fn perform_query(
+    async fn read_selected_books(
         &mut self,
         query: &str,
         bound_variables: &[Variable],
-        limit: usize,
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
+
+    async fn delete_selected_books(
+        &mut self,
+        query: &str,
+        bound_variables: &[Variable],
+    ) -> Result<(), DatabaseError<Self::Error>>;
 }

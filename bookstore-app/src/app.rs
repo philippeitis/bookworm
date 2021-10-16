@@ -401,7 +401,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                 }
                 AppTask::DeleteMatching(matches) => {
                     // TODO: use a query here (DELETE WHERE IN QUERY)
-                    let res = self.db.read().await.find_matches(&matches).await;
+                    let res = self.db.write().await.find_matches(&matches).await;
                     if let Ok(targets) = res {
                         let ids = targets.into_iter().map(|target| target.id()).collect();
                         let _ = self.remove_books(&ids).await;
