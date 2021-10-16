@@ -66,7 +66,7 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
     match command {
         Command::DeleteSelected => {
             match ui_state.book_view.selected_books() {
-                Selection::All => app.delete_all().await,
+                Selection::All => unimplemented!(),
                 Selection::Partial(books, _) => {
                     app.delete_ids(books.keys().cloned().collect()).await;
                 }
@@ -80,6 +80,8 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
             ui_state.book_view.refresh().await?;
         }
         Command::DeleteMatching(matches) => {
+            // TODO: This will be changed to a set of merge conflicts, which the
+            //  UI layer will resolve.
             let targets = app.delete_matching(matches).await;
             ui_state.book_view.refresh().await?;
         }
