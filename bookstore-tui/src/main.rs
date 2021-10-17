@@ -8,7 +8,7 @@ use std::io::stdout;
 use std::path::PathBuf;
 use std::process::exit;
 
-use clap::Clap;
+use clap::Parser;
 use crossterm::event::EventStream;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{cursor, event::DisableMouseCapture, event::EnableMouseCapture, execute};
@@ -24,7 +24,7 @@ use crate::ui::terminal_ui::UIState;
 use crate::ui::views::{run_command, AppView, ApplicationTask};
 use crate::ui::{AppInterface, TuiError};
 
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "0.1", author = "?")]
 struct Opts {
     #[clap(short, long)]

@@ -15,7 +15,7 @@ bookstore-database = { version = "0.1.0", path = "../bookstore-database" }
 bookstore-records = { version = "0.1.0", path = "../bookstore-records" }
 
 dirs = "4.0.0"
-clap = "3.0.0-beta.4"
+clap = "3.0.0-beta.5"
 tui = { version = "0.16", default-features = false, features = ['crossterm'] }
 unicode-truncate = "0.2.0"
 crossterm = { version = "0.21.0", features = ["event-stream"] }
