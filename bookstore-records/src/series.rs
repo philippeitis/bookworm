@@ -21,7 +21,7 @@ impl FromStr for Series {
     /// the entire string is returned as `SeriesName`, with no associated `SeriesIndex`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.ends_with(']') {
-            if let Some((id, name)) = s.rsplit_once(char::is_whitespace) {
+            if let Some((name, id)) = s.rsplit_once(char::is_whitespace) {
                 if id.starts_with('[') {
                     if let Ok(id) = f32::from_str(&id[1..id.len() - 1]) {
                         return Ok(Self {
@@ -77,8 +77,8 @@ impl std::cmp::Ord for Series {
                         (false, false) => unreachable!(
                             "Both can not be non-nan, otherwise partial_cmp would succeed"
                         ),
-                        (true, false) => Ordering::Greater,
-                        (false, true) => Ordering::Less,
+                        (true, false) => Ordering::Less,
+                        (false, true) => Ordering::Greater,
                         (true, true) => Ordering::Equal,
                     },
                 },
@@ -91,6 +91,37 @@ impl std::cmp::Ord for Series {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_series_from_str() {
+        let a = Series::from_str("Hello World [1.0]").unwrap();
+        assert_eq!(
+            a,
+            Series {
+                name: "Hello World".to_string(),
+                index: Some(1.)
+            }
+        );
+    }
+
+    #[test]
+    fn test_series_from_single_bracket() {
+        assert_eq!(
+            Series::from_str("[").unwrap(),
+            Series {
+                name: "[".to_string(),
+                index: None,
+            }
+        );
+
+        assert_eq!(
+            Series::from_str(" [").unwrap(),
+            Series {
+                name: " [".to_string(),
+                index: None,
+            }
+        );
+    }
 
     #[test]
     fn test_series_ordering() {
