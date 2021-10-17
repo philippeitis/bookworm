@@ -23,7 +23,7 @@ pub enum Direction {
 }
 
 pub enum Selection {
-    All,
+    All(Box<[Box<dyn Matcher + Send + Sync>]>),
     Partial(
         HashMap<BookID, Arc<Book>>,
         Box<[(ColumnIdentifier, ColumnOrder)]>,
@@ -40,7 +40,7 @@ pub enum Selection {
 impl Selection {
     pub fn is_empty(&self) -> bool {
         match self {
-            Selection::All => false,
+            Selection::All(_) => false,
             Selection::Partial(books, _) => books.is_empty(),
             Selection::Range(_, _, _, _) => false,
             Selection::Empty => true,
@@ -49,7 +49,7 @@ impl Selection {
 
     fn contains(&self, book: &Book) -> bool {
         match self {
-            Selection::All => true,
+            Selection::All(matcher) => matcher.iter().all(|x| x.is_match(book)),
             Selection::Partial(books, _) => books.contains_key(&book.id()),
             Selection::Range(start, stop, cols, _) => {
                 start.cmp_columns(book, cols).is_le() && stop.cmp_columns(book, cols).is_ge()
@@ -64,7 +64,7 @@ impl Selection {
 
     pub fn front(&self) -> Option<&Arc<Book>> {
         match self {
-            Selection::All => None,
+            Selection::All(_) => None,
             Selection::Partial(books, sorting_rules) => books
                 .values()
                 .min_by(|a, b| a.cmp_columns(b, sorting_rules)),
@@ -76,7 +76,7 @@ impl Selection {
 
     pub fn first(&self) -> Option<&Arc<Book>> {
         match self {
-            Selection::All => None,
+            Selection::All(_) => None,
             Selection::Partial(books, sorting_rules) => books
                 .values()
                 .min_by(|a, b| a.cmp_columns(b, sorting_rules)),
@@ -87,7 +87,7 @@ impl Selection {
 
     fn last(&self) -> Option<&Arc<Book>> {
         match self {
-            Selection::All => None,
+            Selection::All(_) => None,
             Selection::Partial(books, sorting_rules) => books
                 .values()
                 .max_by(|a, b| a.cmp_columns(b, sorting_rules)),
@@ -98,7 +98,7 @@ impl Selection {
 
     fn is_single(&self) -> bool {
         match self {
-            Selection::All => false,
+            Selection::All(_) => false,
             Selection::Partial(books, sorting_rules) => books.len() == 1,
             Selection::Range(start, end, _, _) => start.id() == end.id(),
             Selection::Empty => false,
@@ -1086,9 +1086,9 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         selection: Selection,
     ) -> Result<Selection, DatabaseError<D::Error>> {
         match selection {
-            Selection::All => {
+            Selection::All(rules) => {
                 self.scroll_up(len).await?;
-                Ok(Selection::All)
+                Ok(Selection::All(rules))
             }
             Selection::Partial(books, rules) => Ok(Selection::Partial(books, rules)),
             Selection::Range(start, end, sorting_rules, Direction::Down) => {
@@ -1206,9 +1206,9 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         selection: Selection,
     ) -> Result<Selection, DatabaseError<D::Error>> {
         match selection {
-            Selection::All => {
+            Selection::All(rules) => {
                 self.scroll_down(len).await?;
-                Ok(Selection::All)
+                Ok(Selection::All(rules))
             }
             Selection::Partial(books, rules) => Ok(Selection::Partial(books, rules)),
             Selection::Range(start, end, sorting_rules, Direction::Down) => {
@@ -1321,7 +1321,13 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
     }
 
     pub async fn select_all(&mut self) -> PaginatorResult<D::Error> {
-        self.selected = Selection::All;
+        self.selected = Selection::All(
+            self.matching_rules
+                .iter()
+                .map(|x| x.box_clone())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
         Ok(())
     }
 

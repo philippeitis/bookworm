@@ -67,7 +67,7 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
     match command {
         Command::DeleteSelected => {
             match ui_state.book_view.selected_books() {
-                Selection::All => unimplemented!(),
+                Selection::All(_) => unimplemented!(),
                 Selection::Partial(books, _) => {
                     app.delete_ids(books.keys().cloned().collect()).await;
                 }
@@ -93,7 +93,7 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
         Command::EditBook(book, edits) => match book {
             BookIndex::Selected => {
                 match ui_state.book_view.selected_books() {
-                    Selection::All => unimplemented!(),
+                    Selection::All(_) => unimplemented!(),
                     Selection::Partial(books, _) => {
                         app.edit_books(
                             books.keys().cloned().collect::<Vec<_>>().into_boxed_slice(),
