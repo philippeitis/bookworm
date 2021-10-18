@@ -10,15 +10,12 @@ use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, BookVariant, Edit};
 
 use crate::paginator::{Selection, Variable};
-use crate::search::{Error as SearchError, Search};
 
 #[derive(Debug)]
 pub enum DatabaseError<DBError> {
     Io(std::io::Error),
-    Search(SearchError),
     Record(RecordError),
     BookNotFound(BookID),
-    IndexOutOfBounds(usize),
     Backend(DBError),
 }
 
@@ -31,12 +28,6 @@ impl<DBError> From<std::io::Error> for DatabaseError<DBError> {
 impl<DBError> From<RecordError> for DatabaseError<DBError> {
     fn from(e: RecordError) -> Self {
         DatabaseError::Record(e)
-    }
-}
-
-impl<DBError> From<SearchError> for DatabaseError<DBError> {
-    fn from(e: SearchError) -> Self {
-        DatabaseError::Search(e)
     }
 }
 
@@ -112,7 +103,17 @@ pub trait AppDatabase {
         ids: &HashSet<BookID>,
     ) -> Result<(), DatabaseError<Self::Error>>;
 
-    async fn remove_selected(&mut self, ids: &Selection) -> Result<(), DatabaseError<Self::Error>>;
+    /// Removes all books contained in the provided selection.
+    ///
+    /// # Arguments
+    /// * ` selection ` - The selection over items to be removed.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails.
+    async fn remove_selected(
+        &mut self,
+        selection: &Selection,
+    ) -> Result<(), DatabaseError<Self::Error>>;
 
     async fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>>;
 
@@ -125,27 +126,7 @@ pub trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails or no book is found
     /// with the given ID.
-    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>>;
-
-    /// Finds and returns all books with the given IDs. If a book with a given ID does not exist,
-    /// None is returned for that particular ID.
-    ///
-    /// # Arguments
-    /// * ` ids ` - An iterator yielding the IDs of the books to be returned.
-    ///
-    /// # Errors
-    /// This function will return an error if the database fails.
-    async fn get_books<I: Iterator<Item = BookID> + Send>(
-        &self,
-        ids: I,
-    ) -> Result<Vec<Option<Arc<Book>>>, DatabaseError<Self::Error>>;
-
-    /// Returns a reference to every book in the database. If a database error occurs while reading,
-    /// the error is returned.
-    ///
-    /// # Errors
-    /// This function will return an error if the database fails.
-    async fn get_all_books(&self) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
+    async fn get_book(&mut self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>>;
 
     /// Returns whether the provided column exists in at least one book in the database.
     ///
@@ -162,14 +143,22 @@ pub trait AppDatabase {
     /// * ` edits ` - A set of <field, value> pairs to set in the book.
     ///
     /// # Errors
-    /// This function will return an error if updating the database fails, or a field can not
-    /// be set.
+    /// This function will return an error if the database fails, or if any of the provided
+    /// edits try to mutate an immutable column
     async fn edit_book_with_id(
         &mut self,
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 
+    /// Edits all books which match the provided selection, in no particular order.
+    ///
+    /// # Arguments
+    /// * ` selected ` - a Selection over target items..
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails, or if any of the provided
+    /// edits try to mutate an immutable column
     async fn edit_selected(
         &mut self,
         selected: &Selection,
@@ -183,23 +172,6 @@ pub trait AppDatabase {
     /// # Errors
     /// This function will return an error if updating the database fails.
     async fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>>;
-
-    /// Finds all books, which satisfy all provided `Search` items in `searches`, and returns them
-    /// in a Vec<>.
-    ///
-    /// # Arguments
-    /// * ` searches ` - Some number of search queries.
-    ///
-    /// # Errors
-    /// This function will return an error if the database fails, or if a member of `searches`
-    /// is malformed.
-    async fn find_matches(
-        &mut self,
-        searches: &[Search],
-    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
-
-    /// Returns the number of books stored internally.
-    async fn size(&self) -> usize;
 
     /// Returns true if the internal database is persisted to file, but does not necessarily indicate
     /// that it has been changed - eg. if a change is immediately undone, the database may still

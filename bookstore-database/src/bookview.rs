@@ -86,10 +86,6 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         Ok(())
     }
 
-    pub async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<D::Error>> {
-        self.db.read().await.get_book(id).await
-    }
-
     pub fn selected_books(&self) -> &Selection {
         match self.scopes.last() {
             None => self.root_cursor.selected(),

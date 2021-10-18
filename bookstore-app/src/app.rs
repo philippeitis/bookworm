@@ -357,7 +357,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                 AppTask::GetBookView => AppResponse::BookView(self.new_book_view().await),
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 AppTask::OpenBookIn(book, index, target) => {
-                    if let Ok(book) = self.db.read().await.get_book(book).await {
+                    if let Ok(book) = self.db.write().await.get_book(book).await {
                         if let Some(path) = get_book_path(&book, index) {
                             match target {
                                 Target::FileManager => {

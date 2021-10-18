@@ -8,8 +8,6 @@ use unicase::UniCase;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, Edit};
 
-use crate::search::{Error, Search};
-
 /// `BookCache` acts as an intermediate caching layer between the backend database
 /// and the front-end UI - allowing books that are already in memory to be provided
 /// without going through the database.
@@ -49,10 +47,6 @@ impl BookCache {
         self.cols.extend(columns.into_iter());
     }
 
-    pub fn len(&self) -> usize {
-        self.books.len()
-    }
-
     pub fn remove_book(&mut self, id: BookID) {
         self.books.remove(&id);
     }
@@ -67,10 +61,6 @@ impl BookCache {
 
     pub fn get_book(&self, id: BookID) -> Option<Arc<Book>> {
         self.books.get(&id).cloned()
-    }
-
-    pub fn get_all_books(&self) -> Vec<Arc<Book>> {
-        self.books.values().cloned().collect()
     }
 
     pub fn edit_book_with_id(
@@ -131,15 +121,6 @@ impl BookCache {
         }
         self.books.retain(|_, book| book.is_placeholder());
         merges
-    }
-
-    pub fn find_matches(&self, searches: &[Search]) -> Result<Vec<Arc<Book>>, Error> {
-        let mut results: Vec<_> = self.books.values().cloned().collect();
-        for search in searches {
-            let matcher = search.clone().into_matcher()?;
-            results.retain(|book| matcher.is_match(book));
-        }
-        Ok(results)
     }
 
     pub(crate) fn has_column(&self, col: &UniCase<String>) -> bool {

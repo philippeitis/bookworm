@@ -23,7 +23,6 @@ use bookstore_records::{Book, BookVariant, Edit};
 
 use crate::bookmap::BookCache;
 use crate::paginator::{QueryBuilder, Selection, Variable};
-use crate::search::Search;
 use crate::{AppDatabase, DatabaseError};
 
 // CREATE VIRTUAL TABLE table_fts USING FTS5 (
@@ -1242,27 +1241,15 @@ impl AppDatabase for SQLiteDatabase {
         Ok(())
     }
 
-    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
+    async fn get_book(&mut self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM books WHERE book_id = {id}"
-        self.local_cache
-            .get_book(id)
-            .ok_or(DatabaseError::BookNotFound(id))
-    }
-
-    async fn get_books<I: IntoIterator<Item = BookID> + Send>(
-        &self,
-        ids: I,
-    ) -> Result<Vec<Option<Arc<Book>>>, DatabaseError<Self::Error>> {
-        // SELECT * FROM {} WHERE book_id IN ({}, );
-        Ok(ids
-            .into_iter()
-            .map(|id| self.local_cache.get_book(id))
-            .collect())
-    }
-
-    async fn get_all_books(&self) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
-        // "SELECT * FROM {} ORDER BY {} {};"
-        Ok(self.local_cache.get_all_books())
+        match self.local_cache.get_book(id) {
+            None => {
+                let mut books = self.load_book_ids(&[id]).await?;
+                books.remove(&id).ok_or(DatabaseError::BookNotFound(id))
+            }
+            Some(book) => Ok(book),
+        }
     }
 
     async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>> {
@@ -1329,21 +1316,6 @@ impl AppDatabase for SQLiteDatabase {
         let to_remove = merged.into_iter().map(|(_, m)| m).collect();
         self.remove_books(&to_remove).await?;
         Ok(to_remove)
-    }
-
-    async fn find_matches(
-        &mut self,
-        searches: &[Search],
-    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
-        // "SELECT * FROM {} WHERE {} REGEXP {};"
-        // FIND_MATCHES_* - look at SQLite FTS5.
-        self.load_books().await?;
-        Ok(self.local_cache.find_matches(searches)?)
-    }
-
-    async fn size(&self) -> usize {
-        // "SELECT COUNT(*) FROM books;"
-        self.local_cache.len()
     }
 
     async fn saved(&self) -> bool {
