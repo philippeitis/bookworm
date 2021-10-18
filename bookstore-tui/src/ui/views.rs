@@ -22,7 +22,7 @@ use bookstore_app::parser::Source;
 use bookstore_app::settings::{Color, SortSettings};
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
 use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
-use bookstore_database::paginator::{range_select_query, Selection};
+use bookstore_database::paginator::Selection;
 use bookstore_database::{AppDatabase, DatabaseError};
 use bookstore_records::book::{ColumnIdentifier, RecordError};
 use bookstore_records::Edit;
@@ -66,48 +66,30 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
 ) -> Result<ApplicationTask, TuiError<D::Error>> {
     match command {
         Command::DeleteSelected => {
-            match ui_state.book_view.selected_books() {
-                Selection::All(_) => unimplemented!(),
-                Selection::Partial(books, _) => {
-                    app.delete_ids(books.keys().cloned().collect()).await;
-                }
-                Selection::Range(start, end, sort_rules, _) => {
-                    let (query, variables) =
-                        range_select_query(start.as_ref(), end.as_ref(), sort_rules);
-                    unimplemented!();
-                }
-                Selection::Empty => {}
-            }
+            app.delete_selected(ui_state.book_view.selected_books().clone())
+                .await;
             ui_state.book_view.refresh().await?;
         }
         Command::DeleteMatching(matches) => {
             // TODO: This will be changed to a set of merge conflicts, which the
             //  UI layer will resolve.
-            let targets = app.delete_matching(matches).await;
+            let matches = matches
+                .to_vec()
+                .into_iter()
+                .filter_map(|s| s.into_matcher().ok())
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            let _ = app.delete_selected(Selection::All(matches)).await;
             ui_state.book_view.refresh().await?;
         }
         Command::DeleteAll => {
             ui_state.book_view.clear().await?;
-            app.delete_all().await;
+            app.delete_selected(Selection::All(Box::default())).await;
         }
         Command::EditBook(book, edits) => match book {
             BookIndex::Selected => {
-                match ui_state.book_view.selected_books() {
-                    Selection::All(_) => unimplemented!(),
-                    Selection::Partial(books, _) => {
-                        app.edit_books(
-                            books.keys().cloned().collect::<Vec<_>>().into_boxed_slice(),
-                            edits,
-                        )
-                        .await;
-                    }
-                    Selection::Range(start, end, sort_rules, _) => {
-                        let (query, variables) =
-                            range_select_query(start.as_ref(), end.as_ref(), sort_rules);
-                        unimplemented!();
-                    }
-                    Selection::Empty => {}
-                }
+                app.edit_selected(ui_state.book_view.selected_books().clone(), edits)
+                    .await;
                 ui_state.book_view.refresh().await?;
             }
             BookIndex::ID(id) => app.edit_books(vec![id].into_boxed_slice(), edits).await,

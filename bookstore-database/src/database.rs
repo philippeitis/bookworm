@@ -9,7 +9,7 @@ use unicase::UniCase;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{Book, BookVariant, Edit};
 
-use crate::paginator::Variable;
+use crate::paginator::{Selection, Variable};
 use crate::search::{Error as SearchError, Search};
 
 #[derive(Debug)]
@@ -112,6 +112,8 @@ pub trait AppDatabase {
         ids: &HashSet<BookID>,
     ) -> Result<(), DatabaseError<Self::Error>>;
 
+    async fn remove_selected(&mut self, ids: &Selection) -> Result<(), DatabaseError<Self::Error>>;
+
     async fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>>;
 
     /// Finds and returns the book with the given ID. If no book is found,
@@ -165,6 +167,12 @@ pub trait AppDatabase {
     async fn edit_book_with_id(
         &mut self,
         id: BookID,
+        edits: &[(ColumnIdentifier, Edit)],
+    ) -> Result<(), DatabaseError<Self::Error>>;
+
+    async fn edit_selected(
+        &mut self,
+        selected: &Selection,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>>;
 

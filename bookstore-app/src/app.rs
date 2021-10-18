@@ -10,7 +10,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use unicase::UniCase;
 
-use bookstore_database::search::Search;
+use bookstore_database::paginator::Selection;
 use bookstore_database::{AppDatabase, Book, BookView, DatabaseError};
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant, Edit};
@@ -122,9 +122,9 @@ pub enum AppTask {
     TakeUpdate,
     GetBookView,
     DeleteIds(HashSet<BookID>),
-    DeleteMatching(Box<[Search]>),
-    DeleteAll,
+    DeleteSelected(Selection),
     EditBooks(Box<[BookID]>, Box<[(ColumnIdentifier, Edit)]>),
+    EditSelection(Selection, Box<[(ColumnIdentifier, Edit)]>),
     AddBooks(Box<[Source]>),
     TryMergeAllBooks,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -166,24 +166,8 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
         self.receiver.as_ref().write().await.recv().await
     }
 
-    pub async fn delete_ids(&self, ids: HashSet<BookID>) {
-        self.send(AppTask::DeleteIds(ids)).await;
-        match self.receive().await.unwrap() {
-            AppResponse::Empty => {}
-            _ => panic!("Expected AppResponse::Empty response from application"),
-        }
-    }
-
-    pub async fn delete_matching(&self, matches: Box<[Search]>) -> HashSet<BookID> {
-        self.send(AppTask::DeleteMatching(matches)).await;
-        match self.receive().await.unwrap() {
-            AppResponse::Deleted(deleted) => deleted,
-            _ => panic!("Expected AppResponse::Empty response from application"),
-        }
-    }
-
-    pub async fn delete_all(&self) {
-        self.send(AppTask::DeleteAll).await;
+    pub async fn delete_selected(&self, selected: Selection) {
+        self.send(AppTask::DeleteSelected(selected)).await;
         match self.receive().await.unwrap() {
             AppResponse::Empty => {}
             _ => panic!("Expected AppResponse::Empty response from application"),
@@ -232,6 +216,18 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
 
     pub async fn edit_books(&self, books: Box<[BookID]>, edits: Box<[(ColumnIdentifier, Edit)]>) {
         self.send(AppTask::EditBooks(books, edits)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Empty => {}
+            _ => panic!("Expected Empty response from application"),
+        }
+    }
+
+    pub async fn edit_selected(
+        &self,
+        selection: Selection,
+        edits: Box<[(ColumnIdentifier, Edit)]>,
+    ) {
+        self.send(AppTask::EditSelection(selection, edits)).await;
         match self.receive().await.unwrap() {
             AppResponse::Empty => {}
             _ => panic!("Expected Empty response from application"),
@@ -380,25 +376,24 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                     let _ = self.remove_books(&ids).await;
                     AppResponse::Empty
                 }
-                AppTask::DeleteMatching(matches) => {
-                    // TODO: use a query here (DELETE WHERE IN QUERY)
-                    let res = self.db.write().await.find_matches(&matches).await;
-                    if let Ok(targets) = res {
-                        let ids = targets.into_iter().map(|target| target.id()).collect();
-                        let _ = self.remove_books(&ids).await;
-                        AppResponse::Deleted(ids)
-                    } else {
-                        AppResponse::Empty
-                    }
-                }
-                AppTask::DeleteAll => {
-                    let _ = async_write!(self, db, db.clear().await);
+                AppTask::DeleteSelected(selection) => {
+                    let _ = self.db.write().await.remove_selected(&selection).await;
+                    self.register_update();
                     AppResponse::Empty
                 }
                 AppTask::EditBooks(books, edits) => {
                     for book in books.to_vec().into_iter() {
                         let _ = self.edit_book_with_id(book, &edits).await;
                     }
+                    AppResponse::Empty
+                }
+                AppTask::EditSelection(selection, edits) => {
+                    let _ = self
+                        .db
+                        .write()
+                        .await
+                        .edit_selected(&selection, &edits)
+                        .await;
                     AppResponse::Empty
                 }
                 AppTask::AddBooks(sources) => {

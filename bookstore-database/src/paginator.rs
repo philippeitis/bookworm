@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
@@ -15,6 +16,16 @@ static ASCII_LOWER: [char; 26] = [
 ];
 
 type PaginatorResult<E> = Result<(), DatabaseError<E>>;
+
+fn clone_match_box(
+    matches: &Box<[Box<dyn Matcher + Send + Sync>]>,
+) -> Box<[Box<dyn Matcher + Send + Sync>]> {
+    matches
+        .iter()
+        .map(|m| m.box_clone())
+        .collect::<Vec<_>>()
+        .into_boxed_slice()
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Direction {
@@ -33,6 +44,7 @@ pub enum Selection {
         Arc<Book>,
         Box<[(ColumnIdentifier, ColumnOrder)]>,
         Direction,
+        Box<[Box<dyn Matcher + Send + Sync>]>,
     ),
     Empty,
 }
@@ -42,7 +54,7 @@ impl Selection {
         match self {
             Selection::All(_) => false,
             Selection::Partial(books, _) => books.is_empty(),
-            Selection::Range(_, _, _, _) => false,
+            Selection::Range(_, _, _, _, _) => false,
             Selection::Empty => true,
         }
     }
@@ -51,8 +63,10 @@ impl Selection {
         match self {
             Selection::All(matcher) => matcher.iter().all(|x| x.is_match(book)),
             Selection::Partial(books, _) => books.contains_key(&book.id()),
-            Selection::Range(start, stop, cols, _) => {
-                start.cmp_columns(book, cols).is_le() && stop.cmp_columns(book, cols).is_ge()
+            Selection::Range(start, stop, cols, _, match_rules) => {
+                match_rules.iter().all(|m| m.is_match(book))
+                    && start.cmp_columns(book, cols).is_le()
+                    && stop.cmp_columns(book, cols).is_ge()
             }
             Selection::Empty => false,
         }
@@ -68,8 +82,8 @@ impl Selection {
             Selection::Partial(books, sorting_rules) => books
                 .values()
                 .min_by(|a, b| a.cmp_columns(b, sorting_rules)),
-            Selection::Range(start, _, _, Direction::Up) => Some(start),
-            Selection::Range(_, end, _, Direction::Down) => Some(end),
+            Selection::Range(start, _, _, Direction::Up, _) => Some(start),
+            Selection::Range(_, end, _, Direction::Down, _) => Some(end),
             Selection::Empty => None,
         }
     }
@@ -80,7 +94,7 @@ impl Selection {
             Selection::Partial(books, sorting_rules) => books
                 .values()
                 .min_by(|a, b| a.cmp_columns(b, sorting_rules)),
-            Selection::Range(start, _, _, _) => Some(start),
+            Selection::Range(start, _, _, _, _) => Some(start),
             Selection::Empty => None,
         }
     }
@@ -91,7 +105,7 @@ impl Selection {
             Selection::Partial(books, sorting_rules) => books
                 .values()
                 .max_by(|a, b| a.cmp_columns(b, sorting_rules)),
-            Selection::Range(_, end, _, _) => Some(end),
+            Selection::Range(_, end, _, _, _) => Some(end),
             Selection::Empty => None,
         }
     }
@@ -99,26 +113,160 @@ impl Selection {
     fn is_single(&self) -> bool {
         match self {
             Selection::All(_) => false,
-            Selection::Partial(books, sorting_rules) => books.len() == 1,
-            Selection::Range(start, end, _, _) => start.id() == end.id(),
+            Selection::Partial(books, _) => books.len() == 1,
+            Selection::Range(start, end, _, _, _) => start.id() == end.id(),
             Selection::Empty => false,
         }
     }
 }
 
-pub fn range_select_query(
-    start: &Book,
-    end: &Book,
-    sort: &[(ColumnIdentifier, ColumnOrder)],
-) -> (String, Vec<Variable>) {
-    QueryBuilder::default()
-        .sort_rules(sort)
-        .between_books(start, end)
+impl Clone for Selection {
+    fn clone(&self) -> Self {
+        match self {
+            Selection::All(matches) => Selection::All(clone_match_box(matches)),
+            Selection::Partial(books, sort) => Selection::Partial(books.clone(), sort.clone()),
+            Selection::Range(start, end, sort, dir, matches) => Selection::Range(
+                start.clone(),
+                end.clone(),
+                sort.clone(),
+                dir.clone(),
+                clone_match_box(matches),
+            ),
+            Selection::Empty => Selection::Empty,
+        }
+    }
+}
+fn alias_num_to_string(mut alias: u32) -> String {
+    let mut alias_str = String::with_capacity(8);
+    loop {
+        let char = alias & 0xF;
+        alias_str.push(ASCII_LOWER[char as usize]);
+        alias >>= 4;
+        if alias == 0 {
+            break;
+        }
+    }
+    alias_str.chars().rev().collect()
 }
 
-struct QueryBuilder {
+#[derive(Debug, Default)]
+struct SqlFrom {
+    body: String,
+    last_alias: u32,
+}
+
+impl SqlFrom {
+    fn select_column(
+        &mut self,
+        column: &ColumnIdentifier,
+    ) -> Option<(String, String, Option<String>)> {
+        let alias = alias_num_to_string(self.last_alias);
+        let (select, bind) = read_column(column, &alias)?;
+        self.last_alias += 1;
+        let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
+        if self.body.is_empty() {
+            self.body.push_str(&select);
+            self.body
+                .push_str(&format!(" as {}TABLE ", alias.to_ascii_uppercase()));
+        } else {
+            self.body.push_str(&format!(
+                "INNER JOIN {} as {} ON {}.book_id = ATABLE.book_id ",
+                select, table_alias, table_alias
+            ));
+        }
+
+        Some((table_alias, alias, bind))
+    }
+}
+
+struct RowCmp {
+    lhs: Vec<(String, Option<Variable>)>,
+    rhs: Vec<(String, Option<Variable>)>,
+    cmp: String,
+}
+
+impl RowCmp {
+    fn new(cmp: String) -> Self {
+        Self {
+            lhs: vec![],
+            rhs: vec![],
+            cmp: cmp,
+        }
+    }
+    fn cmp_column(
+        &mut self,
+        cmp: &str,
+        book: &Book,
+        column: &ColumnIdentifier,
+        table_alias: &str,
+        col_alias: &str,
+    ) {
+        let cmp_key = if matches!(column, ColumnIdentifier::ID) {
+            Some(Variable::Int(u64::from(book.id()) as i64))
+        } else {
+            if let Some(cmp_key) = book.get_column(column) {
+                Some(Variable::Str(cmp_key.to_string()))
+            } else {
+                None
+            }
+        };
+
+        if let Some(cmp_key) = cmp_key {
+            if cmp == ">" {
+                self.lhs
+                    .push((format!("{}.{}", table_alias, col_alias), None));
+                self.rhs.push(("?".to_string(), Some(cmp_key)));
+            } else {
+                self.lhs.push(("?".to_string(), Some(cmp_key)));
+                self.rhs
+                    .push((format!("{}.{}", table_alias, col_alias), None));
+            }
+        }
+    }
+
+    fn to_where(self, bind_vars: &mut Vec<Variable>) -> Option<String> {
+        if self.lhs.is_empty() {
+            return None;
+        }
+
+        let mut lhs = String::new();
+        for (s, key) in self.lhs {
+            lhs += &s;
+            lhs += ", ";
+            if let Some(val) = key {
+                bind_vars.push(val);
+            }
+        }
+        let mut rhs = String::new();
+        for (s, key) in self.rhs {
+            rhs += &s;
+            rhs += ", ";
+            if let Some(val) = key {
+                bind_vars.push(val);
+            }
+        }
+
+        let lhs = lhs.strip_suffix(", ")?;
+        let rhs = rhs.strip_suffix(", ")?;
+        Some(format!("({}) {} ({})", lhs, self.cmp, rhs))
+    }
+}
+
+impl Display for SqlFrom {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if !self.body.is_empty() {
+            f.write_str("FROM ")?;
+            f.write_str(&self.body)
+        } else {
+            f.write_str("")
+        }
+    }
+}
+
+pub struct QueryBuilder {
     order: ColumnOrder,
-    sort_rules: Vec<(ColumnIdentifier, ColumnOrder)>,
+    cmp_rules: Vec<(ColumnIdentifier, ColumnOrder)>,
+    sort: bool,
     id_inclusive: bool,
     limit: Option<i64>,
 }
@@ -128,7 +276,8 @@ impl Default for QueryBuilder {
     fn default() -> Self {
         Self {
             order: ColumnOrder::Descending,
-            sort_rules: vec![(ColumnIdentifier::ID, ColumnOrder::Ascending)],
+            cmp_rules: vec![(ColumnIdentifier::ID, ColumnOrder::Ascending)],
+            sort: false,
             id_inclusive: false,
             limit: None,
         }
@@ -136,46 +285,73 @@ impl Default for QueryBuilder {
 }
 
 impl QueryBuilder {
-    fn sort_rules(mut self, sort_rules: &[(ColumnIdentifier, ColumnOrder)]) -> Self {
-        self.sort_rules = sort_rules.to_vec();
+    pub fn cmp_rules(mut self, cmp_rules: &[(ColumnIdentifier, ColumnOrder)]) -> Self {
+        self.cmp_rules = cmp_rules.to_vec();
         if !self
-            .sort_rules
+            .cmp_rules
             .iter()
             .any(|(col_id, _)| matches!(col_id, ColumnIdentifier::ID))
         {
-            self.sort_rules
+            self.cmp_rules
                 .push((ColumnIdentifier::ID, ColumnOrder::Ascending));
         };
         self
     }
 
-    fn limit(mut self, limit: usize) -> Self {
+    pub fn sort(mut self, sort: bool) -> Self {
+        self.sort = sort;
+        self
+    }
+
+    pub fn limit(mut self, limit: usize) -> Self {
         self.limit = Some(limit as i64);
         self
     }
 
-    fn order(mut self, order: ColumnOrder) -> Self {
+    pub fn order(mut self, order: ColumnOrder) -> Self {
         self.order = order;
         self
     }
 
-    fn include_id(mut self, include_id: bool) -> Self {
+    pub fn include_id(mut self, include_id: bool) -> Self {
         self.id_inclusive = include_id;
         self
     }
 
+    fn add_match_rules(
+        from: &mut SqlFrom,
+        where_str: &mut String,
+        bind_vars: &mut Vec<Variable>,
+        match_rules: &Box<[Box<dyn Matcher + Send + Sync>]>,
+    ) {
+        for match_rule in match_rules.iter() {
+            let (col_id, query_str, var) = match_rule.sql_query();
+            match from.select_column(col_id) {
+                None => {}
+                Some((table_alias, col_alias, bound)) => {
+                    bind_vars.extend(bound.map(Variable::Str).into_iter());
+
+                    if !where_str.is_empty() {
+                        where_str.push_str(" AND ");
+                    }
+
+                    where_str.push_str(&format!(" {}.{} {}", table_alias, col_alias, query_str));
+                    bind_vars.extend(var.into_iter());
+                }
+            }
+        }
+    }
+    // TODO: from should be created in a separate function
+    // TODO:
     /// Returns a query which returns the book ids, relative to the provided book.
     /// Results will not include the provided book.
-    fn join_cols(
+    pub fn join_cols(
         &self,
         book: Option<&Book>,
         match_rules: &Box<[Box<dyn Matcher + Send + Sync>]>,
     ) -> (String, Vec<Variable>) {
-        let mut from = String::new();
-        let mut where_str = String::new();
-        let mut join = String::new();
+        let mut from = SqlFrom::default();
         let mut order_str = String::new();
-        let mut num_ops = 0;
         let mut bind_vars = vec![];
         // SELECT book_id, MIN(value) from multimap_tags WHERE name={} GROUP BY book_id
         // or max
@@ -204,125 +380,42 @@ impl QueryBuilder {
         // WHERE (books.book_id > 291 AND mvalue >= "Alastair")
         // ORDER BY mvalue ASC, ..., books.book_id ASC
         // LIMIT 5;
-        let mut where_rhs = vec![];
-        let mut where_lhs = vec![];
+        let mut row_cmp = RowCmp::new(if self.id_inclusive { ">=" } else { ">" }.to_string());
         // Add the id comparison to ensure pagination doesn't repeat items
-        let mut ascii_iter = ASCII_LOWER.iter();
 
-        for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ascii_iter.by_ref()) {
-            match read_column(col_id, alias.to_string()) {
+        for (col_id, col_ord) in self.cmp_rules.iter() {
+            match from.select_column(col_id) {
                 None => {}
-                Some((select, bound)) => {
-                    bind_vars.extend(bound.map(Variable::Str).into_iter());
-                    let cmp = order_to_cmp(col_ord.clone(), self.order.clone());
-                    let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
-                    if num_ops == 0 {
-                        from.push_str(&select);
-                        from.push_str(&format!(" as {}TABLE ", alias.to_ascii_uppercase()));
-                    } else {
-                        join.push_str(&format!(
-                            "INNER JOIN {} as {} ON {}.book_id = ATABLE.book_id ",
-                            select, table_alias, table_alias
-                        ));
-                    }
+                Some((table_alias, col_alias, bound_var)) => {
+                    bind_vars.extend(bound_var.map(Variable::Str).into_iter());
+                    let cmp = order_to_cmp(col_ord.clone(), self.order);
                     if let Some(book) = book {
-                        let cmp_key = if matches!(col_id, ColumnIdentifier::ID) {
-                            Some(Variable::Int(u64::from(book.id()) as i64))
-                        } else {
-                            if let Some(cmp_key) = book.get_column(col_id) {
-                                Some(Variable::Str(cmp_key.to_string()))
-                            } else {
-                                None
-                            }
-                        };
-
-                        if let Some(cmp_key) = cmp_key {
-                            if cmp == ">" {
-                                where_lhs.push((format!("{}.{}", table_alias, alias), None));
-                                where_rhs.push(("?".to_string(), Some(cmp_key)));
-                            } else {
-                                where_lhs.push(("?".to_string(), Some(cmp_key)));
-                                where_rhs.push((format!("{}.{}", table_alias, alias), None));
-                            }
-                        }
+                        row_cmp.cmp_column(cmp, book, col_id, &table_alias, &col_alias);
                     }
 
-                    order_str.push_str(&format!(
-                        "{} {}, ",
-                        alias,
-                        order_repr(col_ord.clone(), self.order.clone())
-                    ));
-                    num_ops += 1;
-                }
-            }
-        }
-
-        let mut where_lhs_str = String::new();
-        for (s, key) in where_lhs {
-            where_lhs_str += &s;
-            where_lhs_str += ", ";
-            if let Some(val) = key {
-                bind_vars.push(val);
-            }
-        }
-        let mut where_rhs_str = String::new();
-        for (s, key) in where_rhs {
-            where_rhs_str += &s;
-            where_rhs_str += ", ";
-            if let Some(val) = key {
-                bind_vars.push(val);
-            }
-        }
-        match (
-            where_lhs_str.strip_suffix(", "),
-            where_rhs_str.strip_suffix(", "),
-        ) {
-            (Some(where_lhs_str), Some(where_rhs_str)) => {
-                if self.id_inclusive {
-                    where_str = format!("({}) >= ({})", where_lhs_str, where_rhs_str);
-                } else {
-                    where_str = format!("({}) > ({})", where_lhs_str, where_rhs_str)
-                }
-            }
-            _ => {}
-        }
-
-        for (match_rule, alias) in match_rules.iter().zip(ascii_iter) {
-            let (col_id, query_str, var) = match_rule.sql_query();
-            match read_column(col_id, alias.to_string()) {
-                None => {}
-                Some((select, bound)) => {
-                    bind_vars.extend(bound.map(Variable::Str).into_iter());
-                    let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
-                    if num_ops == 0 {
-                        from.push_str(&select);
-                        from.push_str(&format!(" as {}TABLE ", alias.to_ascii_uppercase()));
-                    } else {
-                        join.push_str(&format!(
-                            "INNER JOIN {} as {} ON {}.book_id = ATABLE.book_id ",
-                            select, table_alias, table_alias
+                    if self.sort {
+                        order_str.push_str(&format!(
+                            "{} {}, ",
+                            col_alias,
+                            order_repr(col_ord.clone(), self.order)
                         ));
                     }
-                    if !where_str.is_empty() {
-                        where_str += " AND ";
-                    }
-                    where_str.push_str(&format!(" {}.{} {}", table_alias, alias, query_str));
-                    bind_vars.extend(var.into_iter());
-                    num_ops += 1;
                 }
             }
         }
+
+        let mut where_str = row_cmp.to_where(&mut bind_vars).unwrap_or_default();
+        Self::add_match_rules(&mut from, &mut where_str, &mut bind_vars, match_rules);
         // Clean up string.
-        from.pop();
         if !where_str.is_empty() {
             where_str = format!("WHERE ({})", where_str);
         }
         order_str.pop();
         order_str.pop();
-        let mut query = format!(
-            "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {}",
-            from, join, where_str, order_str
-        );
+        if !order_str.is_empty() {
+            order_str = format!("ORDER BY {}", order_str);
+        }
+        let mut query = format!("SELECT ATABLE.book_id {} {} {}", from, where_str, order_str);
         if let Some(limit) = self.limit {
             query += " LIMIT ?;";
             bind_vars.push(Variable::Int(limit));
@@ -339,112 +432,83 @@ impl QueryBuilder {
         (query, bind_vars)
     }
 
-    fn between_books(&self, start: &Book, end: &Book) -> (String, Vec<Variable>) {
-        let mut from = String::new();
-        let mut where_str = String::new();
-        let mut join = String::new();
+    pub fn between_books(
+        &self,
+        start: &Book,
+        end: &Book,
+        match_rules: &Box<[Box<dyn Matcher + Send + Sync>]>,
+    ) -> (String, Vec<Variable>) {
+        let mut from = SqlFrom::default();
         let mut order_str = String::new();
-        let mut num_ops = 0;
         let mut bind_vars = vec![];
-        // SELECT book_id, MIN(value) from multimap_tags WHERE name={} GROUP BY book_id
-        // or max
-        // multimap / description: use GROUP_CONCAT (+ sort) or just regular min to join authors in sorted order
-        // SELECT
-        //     all fields involved
-        // FROM
-        //     books
-        // INNER JOIN named_tags AS TAGS ON
-        // TAGS.book_id = books.book_id
-        // AND TAGS.name = {named_tag}
-        // WHERE (sort_start > ...)
-        // ORDER BY COL1 ASC, COL2 DESC
-        // LIMIT n;
-        // select all keys needed to sort
-        // need FROM () as below to select a particular mmap key
-        // Need rule for reading each multimap key
-        // Need rule for reading books if title
-        // Need rule for reading named tag
-        // SELECT books.book_id FROM (
-        //     SELECT book_id, MIN(value) as mvalue
-        //     FROM multimap_tags
-        //     WHERE name= "author"
-        //     GROUP BY book_id
-        // ) as A INNER JOIN books ON (A.book_id = books.book_id)
-        // WHERE (books.book_id > 291 AND mvalue >= "Alastair")
-        // ORDER BY mvalue ASC, ..., books.book_id ASC
-        // LIMIT 5;
+
+        let mut row_cmp_start = RowCmp::new(if self.id_inclusive { ">=" } else { ">" }.to_string());
+        let mut row_cmp_end = RowCmp::new(if self.id_inclusive { ">=" } else { ">" }.to_string());
+
+        // Add the id comparison to ensure pagination doesn't repeat items
 
         let op_order = match self.order {
             ColumnOrder::Ascending => ColumnOrder::Descending,
             ColumnOrder::Descending => ColumnOrder::Ascending,
         };
-
-        // Add the id comparison to ensure pagination doesn't repeat items
-        for ((col_id, col_ord), alias) in self.sort_rules.iter().zip(ASCII_LOWER.iter()) {
-            match read_column(col_id, alias.to_string()) {
+        for (col_id, col_ord) in self.cmp_rules.iter() {
+            match from.select_column(col_id) {
                 None => {}
-                Some((select, bound)) => {
-                    bind_vars.extend(bound.map(Variable::Str).into_iter());
-                    let start_cmp = order_to_cmp(col_ord.clone(), self.order.clone());
-                    let end_cmp = order_to_cmp(col_ord.clone(), op_order.clone());
-                    let table_alias = format!("{}TABLE", alias.to_ascii_uppercase());
-                    if num_ops == 0 {
-                        from.push_str(&select);
-                        from.push_str(&format!(" as {}TABLE ", alias.to_ascii_uppercase()));
-                    } else {
-                        join.push_str(&format!(
-                            "INNER JOIN {} as {} ON {}.book_id = ATABLE.book_id ",
-                            select, table_alias, table_alias
+                Some((table_alias, col_alias, bound_var)) => {
+                    bind_vars.extend(bound_var.map(Variable::Str).into_iter());
+                    let start_cmp = order_to_cmp(col_ord.clone(), self.order);
+                    row_cmp_start.cmp_column(start_cmp, start, col_id, &table_alias, &col_alias);
+                    let end_cmp = order_to_cmp(col_ord.clone(), op_order);
+                    row_cmp_end.cmp_column(end_cmp, end, col_id, &table_alias, &col_alias);
+
+                    if self.sort {
+                        order_str.push_str(&format!(
+                            "{} {}, ",
+                            col_alias,
+                            order_repr(col_ord.clone(), self.order)
                         ));
                     }
-                    if matches!(col_id, ColumnIdentifier::ID) {
-                        for (id, cmp) in [(start.id(), &start_cmp), (end.id(), &end_cmp)] {
-                            if self.id_inclusive {
-                                where_str.push_str(&format!(
-                                    "{}.{} {}= ? AND ",
-                                    table_alias, alias, cmp
-                                ));
-                            } else {
-                                where_str
-                                    .push_str(&format!("{}.{} {} ? AND ", table_alias, alias, cmp));
-                            }
-                            bind_vars.push(Variable::Int(u64::from(id) as i64));
-                        }
-                    } else {
-                        for (book, cmp) in [(&start, &start_cmp), (&end, &end_cmp)] {
-                            if let Some(cmp_key) = book.get_column(col_id) {
-                                where_str.push_str(&format!(
-                                    "{}.{} {}= ? AND ",
-                                    table_alias, alias, cmp
-                                ));
-                                bind_vars.push(Variable::Str(cmp_key.to_string()));
-                            }
-                        }
-                    }
-
-                    order_str.push_str(&format!(
-                        "{} {}, ",
-                        alias,
-                        order_repr(col_ord.clone(), self.order.clone())
-                    ));
-                    num_ops += 1;
                 }
             }
         }
 
-        // Clean up string.
-        from.pop();
-        where_str.truncate(where_str.len() - 5);
-        where_str = format!("WHERE ({})", where_str);
+        let mut where_str = match (
+            row_cmp_start.to_where(&mut bind_vars),
+            row_cmp_end.to_where(&mut bind_vars),
+        ) {
+            (Some(start_cmp), Some(end_cmp)) => {
+                format!("{} AND {}", start_cmp, end_cmp)
+            }
+            _ => String::new(),
+        };
+
+        Self::add_match_rules(&mut from, &mut where_str, &mut bind_vars, match_rules);
+
+        if !where_str.is_empty() {
+            where_str = format!("WHERE ({})", where_str);
+        }
+
         order_str.pop();
         order_str.pop();
-        (
-            format!(
-                "SELECT ATABLE.book_id FROM {} {} {} ORDER BY {};",
-                from, join, where_str, order_str
-            ),
-            bind_vars,
-        )
+        if !order_str.is_empty() {
+            order_str = format!("ORDER BY {}", order_str);
+        }
+        let mut query = format!("SELECT ATABLE.book_id {} {} {}", from, where_str, order_str);
+        log("BETWEEN_ROWS");
+        if let Some(limit) = self.limit {
+            query += " LIMIT ?;";
+            bind_vars.push(Variable::Int(limit));
+        } else {
+            query += ";";
+        }
+        log(&query);
+        for var in &bind_vars {
+            match var {
+                Variable::Int(i) => log(i.to_string()),
+                Variable::Str(s) => log(s.to_string()),
+            }
+        }
+        (query, bind_vars)
     }
 
     // fn select(&self, book: Option<&Book>) -> Select {
@@ -532,7 +596,7 @@ pub enum Variable {
     Str(String),
 }
 
-fn read_column(column: &ColumnIdentifier, id: String) -> Option<(String, Option<String>)> {
+fn read_column(column: &ColumnIdentifier, id: &str) -> Option<(String, Option<String>)> {
     match column {
         ColumnIdentifier::Title => Some((
             format!("(SELECT book_id, title as {} from books)", id),
@@ -701,7 +765,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             return Ok(());
         }
         let query_builder = QueryBuilder::default()
-            .sort_rules(&self.sorting_rules)
+            .cmp_rules(&self.sorting_rules)
+            .sort(true)
             .order(ColumnOrder::Descending)
             .limit(num_books);
 
@@ -744,7 +809,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         }
 
         let query_builder = QueryBuilder::default()
-            .sort_rules(&self.sorting_rules)
+            .cmp_rules(&self.sorting_rules)
+            .sort(true)
             .order(ColumnOrder::Ascending)
             .limit(num_books);
 
@@ -790,7 +856,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         book: Option<B>,
     ) -> Result<(), DatabaseError<D::Error>> {
         let builder = QueryBuilder::default()
-            .sort_rules(&self.sorting_rules)
+            .cmp_rules(&self.sorting_rules)
+            .sort(true)
             .order(ColumnOrder::Descending)
             .limit(self.window_size)
             .include_id(true);
@@ -838,6 +905,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             target.clone(),
             self.sorting_rules.clone(),
             Direction::Down,
+            clone_match_box(&self.matching_rules),
         );
 
         Ok(())
@@ -847,7 +915,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         if let Some(target) = self.selected.first().cloned() {
             return if self.selected.is_single() {
                 let (query, bindings) = QueryBuilder::default()
-                    .sort_rules(&self.sorting_rules)
+                    .cmp_rules(&self.sorting_rules)
+                    .sort(true)
                     .order(ColumnOrder::Ascending)
                     .limit(len)
                     .join_cols(Some(target.as_ref()), &self.matching_rules);
@@ -868,6 +937,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     book.clone(),
                     self.sorting_rules.clone(),
                     Direction::Down,
+                    clone_match_box(&self.matching_rules),
                 );
                 Ok(())
             } else {
@@ -882,7 +952,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         if let Some(target) = self.selected.last().cloned() {
             return if self.selected.is_single() {
                 let (query, bindings) = QueryBuilder::default()
-                    .sort_rules(&self.sorting_rules)
+                    .cmp_rules(&self.sorting_rules)
+                    .sort(true)
                     .order(ColumnOrder::Descending)
                     .limit(len)
                     .join_cols(Some(target.as_ref()), &self.matching_rules);
@@ -903,6 +974,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     book.clone(),
                     self.sorting_rules.clone(),
                     Direction::Down,
+                    clone_match_box(&self.matching_rules),
                 );
                 Ok(())
             } else {
@@ -976,6 +1048,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                             target,
                             self.sorting_rules.clone(),
                             Direction::Down,
+                            clone_match_box(&self.matching_rules),
                         );
                     }
                 }
@@ -990,7 +1063,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             (None, _) | (Some(_), true) => {
                 self.window_top = 0;
                 let (query, bindings) = QueryBuilder::default()
-                    .sort_rules(&self.sorting_rules)
+                    .cmp_rules(&self.sorting_rules)
+                    .sort(true)
                     .order(ColumnOrder::Ascending)
                     .limit(self.window_size)
                     .join_cols(None, &self.matching_rules);
@@ -1010,6 +1084,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                             target,
                             self.sorting_rules.clone(),
                             Direction::Down,
+                            clone_match_box(&self.matching_rules),
                         );
                     }
                 }
@@ -1091,13 +1166,14 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 Ok(Selection::All(rules))
             }
             Selection::Partial(books, rules) => Ok(Selection::Partial(books, rules)),
-            Selection::Range(start, end, sorting_rules, Direction::Down) => {
+            Selection::Range(start, end, sorting_rules, Direction::Down, matches) => {
                 // Need to get end + len'th book.
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Ascending)
-                    .sort_rules(&self.sorting_rules)
+                    .sort(true)
+                    .cmp_rules(&self.sorting_rules)
                     .limit(len)
-                    .join_cols(Some(end.as_ref()), &self.matching_rules);
+                    .join_cols(Some(end.as_ref()), &matches);
                 let book = self
                     .db
                     .write()
@@ -1112,24 +1188,38 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     }
 
                     if book.cmp_columns(&start, &sorting_rules).is_lt() {
-                        Ok(Selection::Range(book, start, sorting_rules, Direction::Up))
+                        Ok(Selection::Range(
+                            book,
+                            start,
+                            sorting_rules,
+                            Direction::Up,
+                            matches,
+                        ))
                     } else {
                         Ok(Selection::Range(
                             start,
                             book,
                             sorting_rules,
                             Direction::Down,
+                            matches,
                         ))
                     }
                 } else {
-                    Ok(Selection::Range(start, end, sorting_rules, Direction::Down))
+                    Ok(Selection::Range(
+                        start,
+                        end,
+                        sorting_rules,
+                        Direction::Down,
+                        matches,
+                    ))
                 }
             }
-            Selection::Range(start, end, sorting_rules, Direction::Up) => {
+            Selection::Range(start, end, sorting_rules, Direction::Up, matches) => {
                 // Need to get end + len'th book.
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Ascending)
-                    .sort_rules(&self.sorting_rules)
+                    .sort(true)
+                    .cmp_rules(&self.sorting_rules)
                     .limit(len)
                     .join_cols(Some(start.as_ref()), &self.matching_rules);
                 let book = self
@@ -1144,15 +1234,28 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                         self.scroll_up(len).await?;
                     }
 
-                    Ok(Selection::Range(book, end, sorting_rules, Direction::Up))
+                    Ok(Selection::Range(
+                        book,
+                        end,
+                        sorting_rules,
+                        Direction::Up,
+                        matches,
+                    ))
                 } else {
-                    Ok(Selection::Range(start, end, sorting_rules, Direction::Up))
+                    Ok(Selection::Range(
+                        start,
+                        end,
+                        sorting_rules,
+                        Direction::Up,
+                        matches,
+                    ))
                 }
             }
             Selection::Empty => {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Ascending)
-                    .sort_rules(&self.sorting_rules)
+                    .sort(true)
+                    .cmp_rules(&self.sorting_rules)
                     .include_id(true)
                     .limit(len)
                     .join_cols(
@@ -1180,6 +1283,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                         end,
                         self.sorting_rules.clone(),
                         Direction::Down,
+                        clone_match_box(&self.matching_rules),
                     ))
                 } else {
                     Ok(Selection::Empty)
@@ -1211,13 +1315,14 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 Ok(Selection::All(rules))
             }
             Selection::Partial(books, rules) => Ok(Selection::Partial(books, rules)),
-            Selection::Range(start, end, sorting_rules, Direction::Down) => {
+            Selection::Range(start, end, sorting_rules, Direction::Down, matches) => {
                 // Need to get end + len'th book.
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Descending)
-                    .sort_rules(&self.sorting_rules)
+                    .sort(true)
+                    .cmp_rules(&self.sorting_rules)
                     .limit(len)
-                    .join_cols(Some(end.as_ref()), &self.matching_rules);
+                    .join_cols(Some(end.as_ref()), &matches);
                 let book = self
                     .db
                     .write()
@@ -1235,18 +1340,26 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                         book,
                         sorting_rules,
                         Direction::Down,
+                        matches,
                     ))
                 } else {
-                    Ok(Selection::Range(start, end, sorting_rules, Direction::Down))
+                    Ok(Selection::Range(
+                        start,
+                        end,
+                        sorting_rules,
+                        Direction::Down,
+                        matches,
+                    ))
                 }
             }
-            Selection::Range(start, end, sorting_rules, Direction::Up) => {
+            Selection::Range(start, end, sorting_rules, Direction::Up, matches) => {
                 // Need to get end + len'th book.
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Descending)
-                    .sort_rules(&self.sorting_rules)
+                    .sort(true)
+                    .cmp_rules(&self.sorting_rules)
                     .limit(len)
-                    .join_cols(Some(start.as_ref()), &self.matching_rules);
+                    .join_cols(Some(start.as_ref()), &matches);
                 let book = self
                     .db
                     .write()
@@ -1261,18 +1374,37 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     }
 
                     if book.cmp_columns(&end, &sorting_rules).is_gt() {
-                        Ok(Selection::Range(end, book, sorting_rules, Direction::Down))
+                        Ok(Selection::Range(
+                            end,
+                            book,
+                            sorting_rules,
+                            Direction::Down,
+                            matches,
+                        ))
                     } else {
-                        Ok(Selection::Range(book, end, sorting_rules, Direction::Up))
+                        Ok(Selection::Range(
+                            book,
+                            end,
+                            sorting_rules,
+                            Direction::Up,
+                            matches,
+                        ))
                     }
                 } else {
-                    Ok(Selection::Range(start, end, sorting_rules, Direction::Up))
+                    Ok(Selection::Range(
+                        start,
+                        end,
+                        sorting_rules,
+                        Direction::Up,
+                        matches,
+                    ))
                 }
             }
             Selection::Empty => {
                 let (query, bound_variables) = QueryBuilder::default()
                     .order(ColumnOrder::Descending)
-                    .sort_rules(&self.sorting_rules)
+                    .sort(true)
+                    .cmp_rules(&self.sorting_rules)
                     .include_id(true)
                     .limit(len)
                     .join_cols(
@@ -1300,6 +1432,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                         book,
                         self.sorting_rules.clone(),
                         Direction::Down,
+                        clone_match_box(&self.matching_rules),
                     ))
                 } else {
                     Ok(Selection::Empty)
@@ -1350,6 +1483,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     self.window().last().cloned().unwrap_or(book),
                     self.sorting_rules.clone(),
                     Direction::Up,
+                    clone_match_box(&self.matching_rules),
                 );
                 Ok(())
             }
@@ -1370,6 +1504,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     book,
                     self.sorting_rules.clone(),
                     Direction::Down,
+                    clone_match_box(&self.matching_rules),
                 );
                 Ok(())
             }

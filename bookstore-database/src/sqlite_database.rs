@@ -22,7 +22,7 @@ use bookstore_records::series::Series;
 use bookstore_records::{Book, BookVariant, Edit};
 
 use crate::bookmap::BookCache;
-use crate::paginator::Variable;
+use crate::paginator::{QueryBuilder, Selection, Variable};
 use crate::search::Search;
 use crate::{log, AppDatabase, DatabaseError};
 
@@ -1181,6 +1181,44 @@ impl AppDatabase for SQLiteDatabase {
             .map_err(DatabaseError::Backend)
     }
 
+    async fn remove_selected(
+        &mut self,
+        selected: &Selection,
+    ) -> Result<(), DatabaseError<Self::Error>> {
+        let (query, bound_variables) = match selected {
+            Selection::All(matchers) => {
+                if matchers.is_empty() {
+                    return self.clear().await;
+                } else {
+                    QueryBuilder::default().join_cols(None, matchers)
+                }
+            }
+            Selection::Partial(books, _) => {
+                return self
+                    .remove_books(&books.keys().cloned().collect::<HashSet<_>>())
+                    .await;
+            }
+            Selection::Range(start, end, cmp_rules, _, match_rules) => QueryBuilder::default()
+                .cmp_rules(cmp_rules)
+                .include_id(true)
+                .between_books(start, end, match_rules),
+            Selection::Empty => {
+                return Ok(());
+            }
+        };
+        let ids = self
+            .read_selected_books(&query, &bound_variables)
+            .await?
+            .into_iter()
+            .map(|x| x.id())
+            .collect::<HashSet<_>>();
+        // "DELETE FROM books WHERE book_id IN ({ids})"
+        self.local_cache.remove_books(&ids);
+        self.remove_books_async(ids.into_iter())
+            .await
+            .map_err(DatabaseError::Backend)
+    }
+
     async fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books"
         // execute_query!(self, "DELETE FROM extended_tags")?;
@@ -1229,6 +1267,41 @@ impl AppDatabase for SQLiteDatabase {
         // UPDATE {} SET X = SUBSTR(..) || "aaa" || SUBSTR (..)
         // "UPDATE {} SET {} = {} WHERE book_id = {};"
         self.edit_book_by_id_async(id, edits).await
+    }
+
+    async fn edit_selected(
+        &mut self,
+        selected: &Selection,
+        edits: &[(ColumnIdentifier, Edit)],
+    ) -> Result<(), DatabaseError<Self::Error>> {
+        let (query, bound_variables) = match selected {
+            Selection::All(matchers) => QueryBuilder::default().join_cols(None, matchers),
+            Selection::Partial(books, _) => {
+                for id in books.keys().cloned() {
+                    self.edit_book_with_id(id, edits).await?;
+                }
+                return Ok(());
+            }
+            Selection::Range(start, end, cmp_rules, _, match_rules) => QueryBuilder::default()
+                .cmp_rules(cmp_rules)
+                .include_id(true)
+                .between_books(start, end, match_rules),
+            Selection::Empty => {
+                return Ok(());
+            }
+        };
+        let ids = self
+            .read_selected_books(&query, &bound_variables)
+            .await?
+            .into_iter()
+            .map(|x| x.id())
+            .collect::<HashSet<_>>();
+        // "DELETE FROM books WHERE book_id IN ({ids})"
+        for id in ids.into_iter() {
+            self.local_cache.edit_book_with_id(id, edits)?;
+            self.edit_book_with_id(id, edits).await?;
+        }
+        Ok(())
     }
 
     async fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {

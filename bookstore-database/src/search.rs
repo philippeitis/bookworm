@@ -37,7 +37,7 @@ pub struct Search {
 }
 
 impl Search {
-    pub(crate) fn into_matcher(self) -> Result<Box<dyn Matcher + Send + Sync>, Error> {
+    pub fn into_matcher(self) -> Result<Box<dyn Matcher + Send + Sync>, Error> {
         Ok(match self.mode {
             SearchMode::Regex => Box::new(RegexMatcher::new(self.column, self.search)?),
             SearchMode::ExactSubstring => {
