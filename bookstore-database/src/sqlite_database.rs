@@ -21,7 +21,7 @@ use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::series::Series;
 use bookstore_records::{Book, BookVariant, Edit};
 
-use crate::bookmap::BookCache;
+use crate::cache::BookCache;
 use crate::paginator::{QueryBuilder, Selection, Variable};
 use crate::{AppDatabase, DatabaseError};
 
@@ -1309,7 +1309,7 @@ impl AppDatabase for SQLiteDatabase {
         //  move to a more robust deduplication strategy with the possibility
         //  of user feedback.
         self.load_books().await?;
-        let merged = self.local_cache.merge_similar_merge_ids();
+        let merged = self.local_cache.merge_similar_books();
         self.merge_by_ids(&merged)
             .await
             .map_err(DatabaseError::Backend)?;

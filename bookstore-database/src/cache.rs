@@ -16,6 +16,7 @@ use bookstore_records::{Book, Edit};
 pub(crate) struct BookCache {
     books: HashMap<BookID, Arc<Book>>,
     cols: HashSet<UniCase<String>>,
+    capacity: Option<usize>,
 }
 
 impl Default for BookCache {
@@ -27,6 +28,7 @@ impl Default for BookCache {
                 .map(|s| s.to_string())
                 .map(UniCase::new)
                 .collect(),
+            capacity: Some(32768),
         }
     }
 }
@@ -36,10 +38,20 @@ impl BookCache {
         books: HashMap<BookID, Arc<Book>>,
         cols: HashSet<UniCase<String>>,
     ) -> Self {
-        BookCache { books, cols }
+        BookCache {
+            books,
+            cols,
+            capacity: None,
+        }
     }
 
+    /// Inserts a book into `self`, making space in the internal cache if necessary.
     pub(crate) fn insert_book(&mut self, book: Arc<Book>) {
+        if Some(self.books.len()) >= self.capacity {
+            if let Some(key) = self.books.keys().next().cloned() {
+                self.books.remove(&key);
+            }
+        }
         self.books.insert(book.id(), book);
     }
 
@@ -89,7 +101,7 @@ impl BookCache {
     /// particular order. Books that are merged will not necessarily free IDs no longer in use.
     /// Returns a Vec containing BookID pairs, where the first BookID is merged into, and exists,
     /// and the second BookID was merged from, and deleted.
-    pub fn merge_similar_merge_ids(&mut self) -> Vec<(BookID, BookID)> {
+    pub fn merge_similar_books(&mut self) -> Vec<(BookID, BookID)> {
         let mut ref_map: HashMap<(String, String), BookID> = HashMap::new();
         let mut merges = vec![];
         for book in self.books.values() {
@@ -106,20 +118,17 @@ impl BookCache {
             }
         }
 
-        let placeholder = Arc::new(Book::placeholder());
         for (b1, b2_id) in merges.iter() {
-            // Placeholder allows for O(n) time book removal while maintaining sort
-            // and getting owned copy of book.
-            let b2 = self.books.insert(*b2_id, placeholder.clone());
-            // b1, b2 always exist: ref_map only stores b1, and any given b2 can only merge into
-            // a b1, and never a b2, and a b1 never merges into b2, since b1 comes first.
+            let b2 = self.books.remove(b2_id);
+            // b1, b2 always exist: ref_map only stores b1. Any given b2 will only ever merge
+            // into an instance of b1, and a b1 will never merge into a b2
             if let Some(b1) = self.books.get_mut(b1) {
                 if let Some(b2) = b2 {
                     Arc::make_mut(b1).merge_mut(&b2);
                 }
             }
         }
-        self.books.retain(|_, book| book.is_placeholder());
+
         merges
     }
 
