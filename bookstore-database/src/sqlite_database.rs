@@ -750,9 +750,7 @@ impl SQLiteDatabase {
         sqlx::query(&format!("PRAGMA cache_size = {}", size))
             .execute(&mut tx)
             .await?;
-        let s = merges
-            .map(|id| id.to_string())
-            .join(", ");
+        let s = merges.map(|id| id.to_string()).join(", ");
         sqlx::query(&format!("DELETE FROM books WHERE book_id IN ({})", s))
             .execute(&mut tx)
             .await?;

@@ -7,8 +7,8 @@ pub use database::{AppDatabase, DatabaseError};
 #[cfg(feature = "sqlite")]
 pub use sqlite_database::SQLiteDatabase;
 
-mod cache;
 pub mod bookview;
+mod cache;
 pub mod database;
 pub mod paginator;
 pub mod search;
