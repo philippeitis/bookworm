@@ -529,6 +529,7 @@ impl SQLiteDatabase {
         Ok((new_books, columns))
     }
 
+    #[tracing::instrument(name = "Loading book IDs from disk or cache", skip(self))]
     /// Loads the books with the provided ids - either reading from the underlying database,
     /// or from the internal cache, on a book-by-book basis.
     async fn load_book_ids(
@@ -732,8 +733,9 @@ impl SQLiteDatabase {
             .execute(&mut tx)
             .await?;
         sqlx::query!("DELETE FROM books").execute(&mut tx).await?;
-        tx.commit().await?;
-        Ok(())
+        // When deleting all books, 100% should do a vacuum
+        sqlx::query!("VACUUM").execute(&mut tx).await?;
+        tx.commit().await
     }
 
     async fn remove_books_async<I: Iterator<Item = BookID> + Send>(
@@ -749,13 +751,12 @@ impl SQLiteDatabase {
             .execute(&mut tx)
             .await?;
         let s = merges
-            .map(u64::from)
-            .map(|x| (x as i64).to_string())
+            .map(|id| id.to_string())
             .join(", ");
         sqlx::query(&format!("DELETE FROM books WHERE book_id IN ({})", s))
             .execute(&mut tx)
             .await?;
-        sqlx::query!("PRAGMA cache_size = 2000")
+        sqlx::query!("PRAGMA cache_size = 4096")
             .execute(&mut tx)
             .await?;
         tx.commit().await
