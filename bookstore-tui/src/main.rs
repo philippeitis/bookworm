@@ -37,7 +37,8 @@ struct Opts {
     database: Option<PathBuf>,
 }
 
-fn init_logging() {
+#[tokio::main]
+async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
     let logging_dir = if let Some(mut dir) = dirs::data_local_dir() {
         dir.push("bookstore/logs/");
         dir
@@ -57,10 +58,7 @@ fn init_logging() {
         .with(env_filter)
         .with(fmt::layer().json().with_writer(file_appender));
     set_global_default(subscriber).expect("Failed to set subscriber");
-}
 
-#[tokio::main]
-async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
     let (opts, commands) = {
         let args: Vec<_> = env::args().collect();
         if args.is_empty() {
@@ -75,8 +73,6 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
             }
         }
     };
-
-    init_logging();
 
     let Opts { settings, database } = opts;
     let ((interface_settings, mut app_settings), settings_path) = if let Some(path) = settings {
@@ -179,25 +175,6 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
     )?;
     crossterm::terminal::disable_raw_mode()?;
     r
-    // match r {
-    //     Ok(res) => res,
-    //     Err(e) => match e.downcast_ref::<&'static str>() {
-    //         Some(s) => {
-    //             println!("Error occurred during execution: {}", s);
-    //             Ok(())
-    //         }
-    //         None => match e.downcast_ref::<String>() {
-    //             Some(s) => {
-    //                 println!("Error occurred during execution: {}", s);
-    //                 Ok(())
-    //             }
-    //             None => {
-    //                 println!("Unknown error occurred during execution.");
-    //                 Ok(())
-    //             }
-    //         },
-    //     },
-    // }
 }
 
 // TODO:
@@ -208,7 +185,6 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
 //  Splash screen
 //  New database button / screen
 //  Copy books to central directory: -c flag && set dir in settings.toml
-//  Duplicate detection on import
 //  Add automatic date column?
 //  Convert format to media, convert book to something else
 //  Infinite undo redo (:u, :r)

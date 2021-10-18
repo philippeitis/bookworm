@@ -322,6 +322,16 @@ impl SQLiteDatabase {
         Ok(())
     }
 
+    #[tracing::instrument(
+        name = "Converting SQLite data to Book records",
+        skip(
+            raw_books,
+            raw_variants,
+            raw_named_tags,
+            raw_free_tags,
+            raw_multimap_tags
+        )
+    )]
     fn books_from_sql(
         raw_books: Vec<BookData>,
         raw_variants: Vec<VariantData>,
@@ -334,7 +344,7 @@ impl SQLiteDatabase {
             .filter_map(|book_data: BookData| match Book::try_from(book_data) {
                 Ok(book) => Some((book.id(), book)),
                 Err(e) => {
-                    eprintln!("Failed to read book from SQLite database: {}", e);
+                    tracing::error!("Could not transform SQLite record into book: {}", e);
                     None
                 }
             })
@@ -345,7 +355,7 @@ impl SQLiteDatabase {
             let variant = match BookVariant::try_from(variant) {
                 Ok(variant) => variant,
                 Err(e) => {
-                    eprintln!("Failed to read book variant from SQLite database: {}", e);
+                    tracing::error!("Could not transform SQLite record into book variant: {}", e);
                     continue;
                 }
             };
@@ -355,7 +365,7 @@ impl SQLiteDatabase {
             } else {
                 // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book,
                 //  and this means that database is wrong
-                eprintln!(
+                tracing::error!(
                     "SQLite database may be corrupted. Found orphan variant for {}.",
                     id
                 );
@@ -373,7 +383,7 @@ impl SQLiteDatabase {
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    eprintln!(
+                    tracing::error!(
                         "SQLite database may be corrupted. Found orphan variant for {}.",
                         id
                     );
@@ -394,7 +404,7 @@ impl SQLiteDatabase {
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    eprintln!(
+                    tracing::error!(
                         "SQLite database may be corrupted. Found orphan variant for {}.",
                         id
                     );
@@ -411,7 +421,7 @@ impl SQLiteDatabase {
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    eprintln!(
+                    tracing::error!(
                         "SQLite database may be corrupted. Found orphan variant for {}.",
                         id
                     );
@@ -1168,6 +1178,9 @@ impl AppDatabase for SQLiteDatabase {
         Ok(())
     }
 
+    // TODO: In both remove_books and remove_selected,
+    //  we should ensure that large deletes don't
+    //  cause the DB to remain large.
     async fn remove_books(
         &mut self,
         ids: &HashSet<BookID>,
