@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(unused)]
 
 use std::collections::BTreeSet;
 use tui::buffer::Buffer;
@@ -12,7 +13,6 @@ use unicode_width::UnicodeWidthStr;
 #[derive(Debug, Clone)]
 pub struct MultiSelectListState {
     offset: usize,
-    target: Option<usize>,
     selected: BTreeSet<usize>,
 }
 
@@ -20,26 +20,23 @@ impl Default for MultiSelectListState {
     fn default() -> MultiSelectListState {
         MultiSelectListState {
             offset: 0,
-            target: None,
             selected: BTreeSet::new(),
         }
     }
 }
 
 impl MultiSelectListState {
+    pub fn offset(mut self, offset: usize) -> Self {
+        self.offset = offset;
+        self
+    }
+
     pub fn selected(&self) -> &BTreeSet<usize> {
         &self.selected
     }
 
     pub fn select(&mut self, index: usize) {
         self.selected.insert(index);
-    }
-
-    pub fn front_selection(&mut self) -> Option<usize> {
-        match self.target {
-            None => self.selected.iter().next().cloned(),
-            Some(target) => Some(target),
-        }
     }
 
     pub fn deselect(&mut self, index: usize) {
@@ -131,16 +128,14 @@ impl<'a> MultiSelectList<'a> {
         self
     }
 
-    fn get_items_bounds(
-        &self,
-        selected: Option<usize>,
-        offset: usize,
-        max_height: usize,
-    ) -> (usize, usize) {
+    fn get_items_bounds(&self, offset: usize, max_height: usize) -> (usize, usize) {
         let offset = offset.min(self.items.len().saturating_sub(1));
         let mut start = offset;
         let mut end = offset;
         let mut height = 0;
+
+        // Fills forwards until max_height is reached
+        // or no more items are left.
         for item in self.items.iter().skip(offset) {
             if height + item.height() > max_height {
                 break;
@@ -149,23 +144,16 @@ impl<'a> MultiSelectList<'a> {
             end += 1;
         }
 
-        let selected = selected.unwrap_or(0).min(self.items.len() - 1);
-        while selected >= end {
-            height = height.saturating_add(self.items[end].height());
-            end += 1;
-            while height > max_height {
-                height = height.saturating_sub(self.items[start].height());
-                start += 1;
+        // Fills backwards, if offset is too large
+        // and we have insufficient items.
+        for item in self.items[..start].iter().rev() {
+            if height + item.height() > max_height {
+                break;
             }
-        }
-        while selected < start {
+            height += item.height();
             start -= 1;
-            height = height.saturating_add(self.items[start].height());
-            while height > max_height {
-                end -= 1;
-                height = height.saturating_sub(self.items[end].height());
-            }
         }
+
         (start, end)
     }
 }
@@ -193,9 +181,7 @@ impl<'a> StatefulWidget for MultiSelectList<'a> {
         }
         let list_height = list_area.height as usize;
 
-        let (start, end) =
-            self.get_items_bounds(state.front_selection(), state.offset, list_height);
-        state.offset = start;
+        let (start, end) = self.get_items_bounds(state.offset, list_height);
 
         let highlight_symbol = self.highlight_symbol.unwrap_or("");
         let blank_symbol = " ".repeat(highlight_symbol.width());
@@ -206,7 +192,7 @@ impl<'a> StatefulWidget for MultiSelectList<'a> {
             .items
             .iter_mut()
             .enumerate()
-            .skip(state.offset)
+            .skip(start)
             .take(end - start)
         {
             let (x, y) = match self.start_corner {
