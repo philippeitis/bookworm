@@ -83,8 +83,8 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
             ui_state.book_view.refresh().await?;
         }
         Command::DeleteAll => {
-            ui_state.book_view.clear().await?;
             app.delete_selected(Selection::All(Box::default())).await;
+            ui_state.book_view.refresh().await?;
         }
         Command::EditBook(book, edits) => match book {
             BookIndex::Selected => {

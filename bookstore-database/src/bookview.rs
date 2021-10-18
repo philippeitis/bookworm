@@ -103,12 +103,6 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         Ok(())
     }
 
-    pub async fn clear(&mut self) -> Result<(), BookViewError<D::Error>> {
-        self.scopes.clear();
-        self.root_cursor.refresh().await?;
-        Ok(())
-    }
-
     pub fn window_size(&self) -> usize {
         self.root_cursor.window_size()
     }
