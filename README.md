@@ -9,7 +9,15 @@ bookstore is a fast TUI library management system, like Calibre.
 - Instant startup
   - bookstore only reads books into memory when they're needed, allowing a database with millions of books to be opened instantly
 # Installation
+## Download binary
+Binary downloads are available at https://github.com/philippeitis/bookstore/releases
 
+The Linux version requires installing dependencies for copy & paste beforehand, using the following command:
+```bash
+sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
+```
+
+## Build from source
 On Windows, MacOS
 ```bash
 git clone https://github.com/philippeitis/bookstore.git
