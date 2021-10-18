@@ -16,6 +16,7 @@ use crossterm::{cursor, event::DisableMouseCapture, event::EnableMouseCapture, e
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
+use rolling_file::{BasicRollingFileAppender, RollingConditionBasic};
 use tracing::subscriber::set_global_default;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, EnvFilter, Registry};
@@ -40,16 +41,17 @@ struct Opts {
 #[tokio::main]
 async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
     let logging_dir = if let Some(mut dir) = dirs::data_local_dir() {
-        dir.push("bookstore/logs/");
+        dir.push("bookstore/logs/log");
         dir
     } else {
-        PathBuf::from("./bookstore/logs/")
+        PathBuf::from("./bookstore/logs/log")
     };
 
     println!("Writing logs to {}", logging_dir.display());
 
     let (file_appender, _guard) = tracing_appender::non_blocking::NonBlocking::new(
-        tracing_appender::rolling::hourly(logging_dir, "log"),
+        BasicRollingFileAppender::new(logging_dir, RollingConditionBasic::new().hourly(), 24)
+            .expect("Failed to initialize logging"),
     );
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
@@ -57,7 +59,7 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
     let subscriber = Registry::default()
         .with(env_filter)
         .with(fmt::layer().json().with_writer(file_appender));
-    set_global_default(subscriber).expect("Failed to set subscriber");
+    set_global_default(subscriber).expect("Failed to initialize logging");
 
     let (opts, commands) = {
         let args: Vec<_> = env::args().collect();

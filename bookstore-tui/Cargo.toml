@@ -31,6 +31,7 @@ tracing = "0.1.29"
 tracing-subscriber = { version = "0.2.12", features = ["env-filter"] }
 tracing-appender = "0.1"
 tracing-futures = "0.2.5"
+rolling-file = "0.1.0"
 
 [features]
 copypaste = ["clipboard"]
