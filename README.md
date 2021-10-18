@@ -67,12 +67,4 @@ Note that not all terminals are fully supported - Windows Command Prompt and Ubu
 # Planned Features
 - Cloud synchronization (eg. back up database and all books to Google Drive)
 - Support for supplementary files (eg. more than one cover for a book)
-- Thorough Deduplication
 - Reflecting external libraries as if they are native (eg. access Project Gutenberg directly)
-- Providing a mechanism to use external extensions to take advantage of existing scripts for the features below:
-  - Metadata scraping (eg. fetch book data)
-  - Conversion of ebooks
-  
-# TODOs
-- Better error reporting in UI
-- Automatic duplicate detection and merging
