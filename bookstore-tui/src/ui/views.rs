@@ -28,7 +28,6 @@ use bookstore_records::book::{ColumnIdentifier, RecordError};
 use bookstore_records::Edit;
 
 use crate::ui::help_strings::{help_strings, GENERAL_HELP};
-use crate::ui::log;
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::terminal_ui::{TuiError, UIState};
 use crate::ui::tui_widgets::{ListItemX, MultiSelectList, MultiSelectListState};
@@ -58,6 +57,7 @@ trait TuiStyle {
     fn cursor_style(&self) -> Style;
 }
 
+#[tracing::instrument(name = "Executing user command", skip(app, command, ui_state))]
 pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
     app: &mut AppChannel<D>,
     command: Command,
@@ -103,8 +103,7 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
                 .await?;
         }
         Command::SortColumns(columns) => {
-            log("SORTING");
-            log(format!("{:?}", columns));
+            tracing::info!("Sorting by {:?}", columns);
             ui_state.book_view.sort_by_columns(&columns).await?;
             ui_state.sort_settings = SortSettings { columns };
         }
@@ -482,6 +481,7 @@ impl<D: AppDatabase + Send + Sync> ColumnWidget<D> {
 
 #[async_trait]
 impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for ColumnWidget<D> {
+    #[tracing::instrument(name = "Preparing ColumnWidgetRender", skip(self, state))]
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
         self.refresh_book_widget(state).await;
         let chunk = if let Some(book_widget) = &mut self.book_widget {
@@ -500,9 +500,8 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        log(format!("{:?}", chunk));
-        log(format!("{:?}", vchunks));
-        log(format!("{}", vchunks[0].height));
+        tracing::info!("Writing into chunk with size {:?}", chunk);
+        tracing::info!("Have vertical chunks: {:?}", vchunks);
 
         // Account for top table row
         let _ = state
@@ -726,7 +725,7 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                     }
                     KeyCode::Delete => {
                         if state.curr_command.is_empty() {
-                            log("User pressed delete.");
+                            tracing::info!("Command string is empty, and user has pressed delete");
                             if !state.book_view.selected_books().is_empty() {
                                 run_command(app, Command::DeleteSelected, state).await?;
                             }

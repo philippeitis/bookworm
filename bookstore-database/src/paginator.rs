@@ -8,7 +8,7 @@ use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::{Book, ColumnOrder};
 
 use crate::search::Matcher;
-use crate::{log, AppDatabase, DatabaseError};
+use crate::{AppDatabase, DatabaseError};
 
 static ASCII_LOWER: [char; 26] = [
     'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
@@ -350,6 +350,7 @@ impl QueryBuilder {
         book: Option<&Book>,
         match_rules: &Box<[Box<dyn Matcher + Send + Sync>]>,
     ) -> (String, Vec<Variable>) {
+        tracing::info!("Creating a query");
         let mut from = SqlFrom::default();
         let mut order_str = String::new();
         let mut bind_vars = vec![];
@@ -422,13 +423,7 @@ impl QueryBuilder {
         } else {
             query += ";";
         }
-        log(&query);
-        for var in &bind_vars {
-            match var {
-                Variable::Int(i) => log(i.to_string()),
-                Variable::Str(s) => log(s.to_string()),
-            }
-        }
+
         (query, bind_vars)
     }
 
@@ -438,6 +433,7 @@ impl QueryBuilder {
         end: &Book,
         match_rules: &Box<[Box<dyn Matcher + Send + Sync>]>,
     ) -> (String, Vec<Variable>) {
+        tracing::info!("Creating a query between books");
         let mut from = SqlFrom::default();
         let mut order_str = String::new();
         let mut bind_vars = vec![];
@@ -494,20 +490,14 @@ impl QueryBuilder {
             order_str = format!("ORDER BY {}", order_str);
         }
         let mut query = format!("SELECT ATABLE.book_id {} {} {}", from, where_str, order_str);
-        log("BETWEEN_ROWS");
+
         if let Some(limit) = self.limit {
             query += " LIMIT ?;";
             bind_vars.push(Variable::Int(limit));
         } else {
             query += ";";
         }
-        log(&query);
-        for var in &bind_vars {
-            match var {
-                Variable::Int(i) => log(i.to_string()),
-                Variable::Str(s) => log(s.to_string()),
-            }
-        }
+
         (query, bind_vars)
     }
 
@@ -591,6 +581,7 @@ pub struct Paginator<D: AppDatabase + 'static> {
     db: Arc<RwLock<D>>,
 }
 
+#[derive(Debug)]
 pub enum Variable {
     Int(i64),
     Str(String),
@@ -743,8 +734,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         &mut self,
         sorting_rules: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>> {
+        tracing::info!("Sorting by {:?}", self.sorting_rules);
         self.sorting_rules = add_id(sorting_rules.to_vec().into_boxed_slice());
-        log(format!("{:?}", self.sorting_rules));
         let target = self.window().first().cloned();
         self.books.clear();
         self.make_book_visible(target).await
@@ -792,7 +783,6 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 .read_selected_books(&query, &bindings)
                 .await;
             let end = std::time::Instant::now();
-            log(format!("Took {}s to prefetch", (end - start).as_secs_f32()));
         });
 
         self.books.extend(books);
@@ -840,7 +830,6 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 .read_selected_books(&query, &bindings)
                 .await;
             let end = std::time::Instant::now();
-            log(format!("Took {}s to prefetch", (end - start).as_secs_f32()));
         });
 
         if !books.is_empty() {

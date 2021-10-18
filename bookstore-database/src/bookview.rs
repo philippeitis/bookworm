@@ -10,7 +10,7 @@ use bookstore_records::{Book, ColumnOrder};
 
 use crate::paginator::{Paginator, Selection};
 use crate::search::{Error as SearchError, Search};
-use crate::{log, AppDatabase, DatabaseError};
+use crate::{AppDatabase, DatabaseError};
 
 #[derive(Debug)]
 pub enum BookViewError<DBError> {
@@ -75,13 +75,12 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         }
     }
 
+    #[tracing::instrument(name = "Sorting all scopes", skip(self, cols))]
     pub async fn sort_by_columns(
         &mut self,
         cols: &[(ColumnIdentifier, ColumnOrder)],
     ) -> Result<(), DatabaseError<D::Error>> {
         for scope in std::iter::once(&mut self.root_cursor).chain(self.scopes.iter_mut()) {
-            // Required to maintain sort order.
-            log("SORTING SCOPE");
             scope.sort_by(&cols).await?;
         }
         Ok(())
@@ -132,10 +131,8 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         }
     }
 
+    #[tracing::instrument(name = "Refreshing paginators", skip(self))]
     pub async fn refresh(&mut self) -> Result<(), DatabaseError<D::Error>> {
-        log("refreshing db size.");
-        let db_size = self.db.read().await.size().await;
-        log(format!("size is {}.", db_size));
         for cursor in std::iter::once(&mut self.root_cursor).chain(self.scopes.iter_mut()) {
             cursor.refresh().await?;
         }
@@ -178,21 +175,25 @@ impl<D: AppDatabase + Send + Sync> BookView<D> {
         .bind_match(matchers.into_boxed_slice())
     }
 
+    #[tracing::instrument(name = "Jumping to match target", skip(self, searches))]
     pub async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
         // Create temporary paginator with window size of 1
         // and make discovered book visible.
-        log("JUMPING");
+        let jump_span = tracing::info_span!("Saving new subscriber details in the database");
         let mut paginator = self.create_paginator(searches);
         paginator.update_window_size(1).await?;
         if let Some(book) = paginator.window().first().cloned() {
-            log(format!("FOUND MATCH {}", book.id()));
+            tracing::info!("Found a match with id: {}", book.id());
             match self.scopes.last_mut() {
                 None => &mut self.root_cursor,
                 Some(cursor) => cursor,
             }
             .make_book_visible(Some(book))
             .await?;
-        }
+        } else {
+            tracing::info!("Did not find a match - no changes occuring.");
+        };
+
         Ok(true)
     }
 

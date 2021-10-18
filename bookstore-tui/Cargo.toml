@@ -27,5 +27,10 @@ tokio = { version = "1.12.0", features = ["full"] }
 async-trait = "0.1.51"
 futures = "0.3.17"
 
+tracing = "0.1.29"
+tracing-subscriber = { version = "0.2.12", features = ["env-filter"] }
+tracing-appender = "0.1"
+tracing-futures = "0.2.5"
+
 [features]
 copypaste = ["clipboard"]

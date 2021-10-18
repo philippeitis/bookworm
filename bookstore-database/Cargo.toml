@@ -8,18 +8,21 @@ edition = "2018"
 bookstore-records = { version = "0.1.0", path = "../bookstore-records", features = ["serde"] }
 
 unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.git", branch = "serde", features = ["serde"] }
+itertools = "0.10.1"
 
 sublime_fuzzy = "0.7.0"
 regex = "1.5.4"
 serde = { version = "1.0", features = ["derive", "rc"], optional = true }
 
+tokio = { version = "1.12.0", features = ["full", "rt"] }
+async-trait = "0.1.51"
+
 # SQLx dependencies
 sqlx = { version = "0.5.9", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
 ron = { version = "0.6.5", optional = true }
-itertools = "0.10.1"
 
-tokio = { version = "1.12.0", features = ["full", "rt"] }
-async-trait = "0.1.51"
+tracing-futures = "0.2.5"
+tracing = "0.1.29"
 
 [features]
 sqlite = ["sqlx", "ron"]

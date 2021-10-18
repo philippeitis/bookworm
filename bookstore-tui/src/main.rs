@@ -16,6 +16,10 @@ use crossterm::{cursor, event::DisableMouseCapture, event::EnableMouseCapture, e
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
+use tracing::subscriber::set_global_default;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{fmt, EnvFilter, Registry};
+
 use bookstore_app::{parse_args, App, Settings};
 use bookstore_database::AppDatabase;
 use bookstore_database::SQLiteDatabase;
@@ -31,6 +35,28 @@ struct Opts {
     settings: Option<PathBuf>,
     #[clap(short, long)]
     database: Option<PathBuf>,
+}
+
+fn init_logging() {
+    let logging_dir = if let Some(mut dir) = dirs::data_local_dir() {
+        dir.push("bookstore/logs/");
+        dir
+    } else {
+        PathBuf::from("./bookstore/logs/")
+    };
+
+    println!("Writing logs to {}", logging_dir.display());
+
+    let (file_appender, _guard) = tracing_appender::non_blocking::NonBlocking::new(
+        tracing_appender::rolling::hourly(logging_dir, "log"),
+    );
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let subscriber = Registry::default()
+        .with(env_filter)
+        .with(fmt::layer().json().with_writer(file_appender));
+    set_global_default(subscriber).expect("Failed to set subscriber");
 }
 
 #[tokio::main]
@@ -49,6 +75,8 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
             }
         }
     };
+
+    init_logging();
 
     let Opts { settings, database } = opts;
     let ((interface_settings, mut app_settings), settings_path) = if let Some(path) = settings {

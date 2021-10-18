@@ -24,7 +24,7 @@ use bookstore_records::{Book, BookVariant, Edit};
 use crate::bookmap::BookCache;
 use crate::paginator::{QueryBuilder, Selection, Variable};
 use crate::search::Search;
-use crate::{log, AppDatabase, DatabaseError};
+use crate::{AppDatabase, DatabaseError};
 
 // CREATE VIRTUAL TABLE table_fts USING FTS5 (
 //     fields,
@@ -243,6 +243,7 @@ pub struct SQLiteDatabase {
 
 // TODO: Measure performance of deletion with current changes, and check if issues are still present.
 impl SQLiteDatabase {
+    #[tracing::instrument(name = "Reading the ids of books matching the query", skip(self))]
     async fn read_book_ids(
         &self,
         query: &str,
@@ -272,7 +273,7 @@ impl SQLiteDatabase {
             })
             .collect();
         let end = std::time::Instant::now();
-        log(format!("Took {}s to read ids", (end - start).as_secs_f32()));
+        tracing::info!("Took {}s to read ids", (end - start).as_secs_f32());
         Ok(ids)
     }
 
@@ -439,6 +440,7 @@ impl SQLiteDatabase {
         )
     }
 
+    #[tracing::instrument(name = "Loading books from the database", skip(self))]
     /// NOTE: The performance of this has been scrutinized to some degree.
     /// tokio::join_all offers a substantial improvement in performance (>10x), and
     /// scrolling is significantly smoother.
@@ -498,11 +500,11 @@ impl SQLiteDatabase {
         );
 
         let end = std::time::Instant::now();
-        log(format!(
+        tracing::info!(
             "Took {}s to read {} books from SQLite",
             (end - start).as_secs_f32(),
             raw_books.len(),
-        ));
+        );
         let start = std::time::Instant::now();
 
         let (new_books, columns) = SQLiteDatabase::books_from_sql(
@@ -513,10 +515,8 @@ impl SQLiteDatabase {
             raw_multimap_tags,
         );
         let end = std::time::Instant::now();
-        log(format!(
-            "Took {}s to convert books",
-            (end - start).as_secs_f32()
-        ));
+        tracing::info!("Took {}s to convert books", (end - start).as_secs_f32());
+
         Ok((new_books, columns))
     }
 
@@ -594,69 +594,6 @@ impl SQLiteDatabase {
 }
 
 impl SQLiteDatabase {
-    pub async fn async_open<P>(file_path: P) -> Result<Self, DatabaseError<sqlx::Error>>
-    where
-        P: AsRef<Path> + Send + Sync,
-        Self: Sized,
-    {
-        let db_exists = file_path.as_ref().exists();
-        if !db_exists {
-            if let Some(path) = file_path.as_ref().parent() {
-                std::fs::create_dir_all(path)?;
-            }
-        }
-        let database = SqlitePoolOptions::new()
-            .connect_with(
-                SqliteConnectOptions::new()
-                    .filename(&file_path)
-                    .create_if_missing(true),
-            )
-            .await
-            .map_err(DatabaseError::Backend)?;
-
-        let db = Self {
-            backend: database,
-            local_cache: BookCache::default(),
-            path: file_path.as_ref().to_path_buf(),
-        };
-
-        for query in [
-            CREATE_BOOKS,
-            CREATE_FREE_TAGS,
-            CREATE_NAMED_TAGS,
-            CREATE_MULTIMAP_TAGS,
-            CREATE_VARIANTS,
-        ] {
-            sqlx::query(query)
-                .execute(&db.backend)
-                .await
-                .map_err(DatabaseError::Backend)?;
-        }
-
-        // TODO: Disable this when doing large writes.
-        // NOTE: These indices are absolutely essential for fast scrolling
-        for table in [
-            "books",
-            "variants",
-            "named_tags",
-            "free_tags",
-            "multimap_tags",
-        ] {
-            sqlx::query(&format!(
-                "CREATE INDEX IF NOT EXISTS {}_ids on {}(book_id);",
-                table, table
-            ))
-            .execute(&db.backend)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        }
-
-        // if db_exists {
-        //     db.load_books().await?;
-        // }
-        Ok(db)
-    }
-
     async fn insert_book_async(
         &mut self,
         book: BookVariant,
@@ -1125,12 +1062,73 @@ impl SQLiteDatabase {
 impl AppDatabase for SQLiteDatabase {
     type Error = sqlx::Error;
 
+    #[tracing::instrument(
+        name = "Opening a database from path",
+        skip(file_path),
+        fields(
+            path=%file_path.as_ref().display()
+        )
+    )]
     async fn open<P>(file_path: P) -> Result<Self, DatabaseError<Self::Error>>
     where
         P: AsRef<Path> + Send + Sync,
         Self: Sized,
     {
-        Self::async_open(file_path).await
+        let db_exists = file_path.as_ref().exists();
+        if !db_exists {
+            if let Some(path) = file_path.as_ref().parent() {
+                std::fs::create_dir_all(path)?;
+            }
+        }
+        let database = SqlitePoolOptions::new()
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&file_path)
+                    .create_if_missing(true),
+            )
+            .await
+            .map_err(DatabaseError::Backend)?;
+
+        let db = Self {
+            backend: database,
+            local_cache: BookCache::default(),
+            path: file_path.as_ref().to_path_buf(),
+        };
+
+        tracing::info!("Creating core tables if they do not exist");
+        for query in [
+            CREATE_BOOKS,
+            CREATE_FREE_TAGS,
+            CREATE_NAMED_TAGS,
+            CREATE_MULTIMAP_TAGS,
+            CREATE_VARIANTS,
+        ] {
+            sqlx::query(query)
+                .execute(&db.backend)
+                .await
+                .map_err(DatabaseError::Backend)?;
+        }
+
+        // TODO: Disable this when doing large writes.
+        // NOTE: These indices are absolutely essential for fast scrolling
+        tracing::info!("Creating indices over book_id");
+        for table in [
+            "books",
+            "variants",
+            "named_tags",
+            "free_tags",
+            "multimap_tags",
+        ] {
+            sqlx::query(&format!(
+                "CREATE INDEX IF NOT EXISTS {}_ids on {}(book_id);",
+                table, table
+            ))
+            .execute(&db.backend)
+            .await
+            .map_err(DatabaseError::Backend)?;
+        }
+
+        Ok(db)
     }
 
     fn path(&self) -> &Path {
