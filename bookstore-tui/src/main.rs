@@ -47,6 +47,13 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
         PathBuf::from("./bookstore/logs/log")
     };
 
+    std::fs::create_dir_all(
+        logging_dir
+            .parent()
+            .expect("Could not read the parent of logging_dir"),
+    )
+    .expect("Failed to create logging directory");
+
     println!("Writing logs to {}", logging_dir.display());
 
     let (file_appender, _guard) = tracing_appender::non_blocking::NonBlocking::new(
