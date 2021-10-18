@@ -216,10 +216,4 @@ pub trait AppDatabase {
         query: &str,
         bound_variables: &[Variable],
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
-
-    async fn delete_selected_books(
-        &mut self,
-        query: &str,
-        bound_variables: &[Variable],
-    ) -> Result<(), DatabaseError<Self::Error>>;
 }

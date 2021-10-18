@@ -1406,18 +1406,4 @@ impl AppDatabase for SQLiteDatabase {
             })
             .collect())
     }
-
-    async fn delete_selected_books(
-        &mut self,
-        query: &str,
-        bound_variables: &[Variable],
-    ) -> Result<(), DatabaseError<Self::Error>> {
-        let ids: HashSet<_> = self
-            .read_book_ids(query, bound_variables)
-            .await?
-            .into_iter()
-            .collect();
-        // Need to remove local copies
-        self.remove_books(&ids).await
-    }
 }
