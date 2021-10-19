@@ -68,10 +68,10 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         }
     }
 
-    pub async fn get_books_cursored(&self) -> Result<Vec<Arc<Book>>, BookViewError<D::Error>> {
+    pub fn window(&self) -> Vec<Arc<Book>> {
         match self.scopes.last() {
-            None => Ok(self.root_cursor.window().to_vec()),
-            Some(cursor) => Ok(cursor.window().to_vec()),
+            None => self.root_cursor.window().to_vec(),
+            Some(cursor) => cursor.window().to_vec(),
         }
     }
 
@@ -107,6 +107,8 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         self.root_cursor.window_size()
     }
 
+    /// Returns the books in the selection with their index, relative to the top
+    /// and the book itself
     pub fn relative_selections(&self) -> Vec<(usize, Arc<Book>)> {
         match self.scopes.last() {
             None => self.root_cursor.relative_selections(),

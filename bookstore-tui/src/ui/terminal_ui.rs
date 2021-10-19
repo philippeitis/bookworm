@@ -78,8 +78,8 @@ pub(crate) struct UIState<D: AppDatabase + Send + Sync + 'static> {
 }
 
 impl<D: AppDatabase + Send + Sync> UIState<D> {
-    pub(crate) async fn update_column_data(&mut self) -> Result<(), BookViewError<D::Error>> {
-        self.table_view.regenerate_columns(&self.book_view).await
+    pub(crate) fn update_column_data(&mut self) {
+        self.table_view.regenerate_columns(&self.book_view)
     }
 
     pub(crate) fn selected_table_value(&self) -> Option<Vec<&str>> {
@@ -103,7 +103,8 @@ impl<D: AppDatabase + Send + Sync> UIState<D> {
 
     pub(crate) async fn make_selection_visible(&mut self) -> Result<(), BookViewError<D::Error>> {
         self.book_view.refresh().await?;
-        self.table_view.regenerate_columns(&self.book_view).await
+        self.table_view.regenerate_columns(&self.book_view);
+        Ok(())
     }
 }
 

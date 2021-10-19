@@ -508,7 +508,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
             .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
             .await;
 
-        let _ = state.update_column_data().await;
+        state.update_column_data();
     }
 
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect) {
@@ -829,7 +829,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
             .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
             .await;
 
-        let _ = state.update_column_data().await;
+        state.update_column_data();
     }
 
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect) {
