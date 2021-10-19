@@ -7,7 +7,7 @@ pub mod user_input;
 use crate::user_input::InputRecorder;
 pub use autocomplete::AutoCompleter;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Edit {
     Delete,
     Replace(String),

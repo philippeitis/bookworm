@@ -11,7 +11,7 @@ use itertools::Itertools;
 use crate::autocomplete::AutoCompleteError;
 use crate::AutoCompleter;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Direction {
     Left,
     Right,
@@ -34,7 +34,7 @@ enum TextEvent {
     Push(char),
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, PartialEq, Debug)]
 pub struct CursoredText {
     cursor: usize,
     selection: Option<(NonZeroUsize, Direction)>,
@@ -300,7 +300,7 @@ impl CursoredText {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct InputRecorder<K: Hash + PartialEq + Eq> {
     pub started_edit: bool,
     events: Vec<TextEvent>,
