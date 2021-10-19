@@ -1255,10 +1255,7 @@ impl AppDatabase for SQLiteDatabase {
             .map(|x| x.id())
             .collect::<HashSet<_>>();
         // "DELETE FROM books WHERE book_id IN ({ids})"
-        self.cache.write().await.remove_books(&ids);
-        self.remove_books_async(ids.into_iter())
-            .await
-            .map_err(DatabaseError::Backend)
+        self.remove_books(&ids).await
     }
 
     async fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
@@ -1273,18 +1270,13 @@ impl AppDatabase for SQLiteDatabase {
         Ok(())
     }
 
-    #[tracing::instrument(name = "Reading single book", skip(self))]
     async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM books WHERE book_id = {id}"
         // If this is put in the match, the read lock will cause the process to hang
-        let book = self.cache.read().await.get_book(id);
-        match book {
-            None => {
-                let mut books = self.load_book_ids(&[id]).await?;
-                books.remove(&id).ok_or(DatabaseError::BookNotFound(id))
-            }
-            Some(book) => Ok(book),
-        }
+        self.load_book_ids(&[id])
+            .await?
+            .remove(&id)
+            .ok_or(DatabaseError::BookNotFound(id))
     }
 
     async fn read_selected_books(
@@ -1367,6 +1359,7 @@ impl AppDatabase for SQLiteDatabase {
         Ok(to_remove)
     }
 
+    // TODO: has_column needs to check DB
     async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>> {
         Ok(self.cache.read().await.has_column(col))
     }

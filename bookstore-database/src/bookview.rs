@@ -169,7 +169,7 @@ impl<D: AppDatabase + Send + Sync> BookView<D> {
     pub async fn jump_to(&mut self, searches: &[Search]) -> Result<bool, DatabaseError<D::Error>> {
         // Create temporary paginator with window size of 1
         // and make discovered book visible.
-        let jump_span = tracing::info_span!("Saving new subscriber details in the database");
+        let _jump_span = tracing::info_span!("Saving new subscriber details in the database");
         let mut paginator = self.create_paginator(searches);
         paginator.update_window_size(1).await?;
         if let Some(book) = paginator.window().first().cloned() {
