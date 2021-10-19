@@ -45,7 +45,7 @@ impl BookCache {
         }
     }
 
-    /// Inserts a book into `self`, making space in the internal cache if necessary.
+    /// Inserts `book` into `self`, making space in the internal cache if necessary.
     pub(crate) fn insert_book(&mut self, book: Arc<Book>) {
         if Some(self.books.len()) >= self.capacity {
             if let Some(key) = self.books.keys().next().cloned() {
@@ -71,6 +71,7 @@ impl BookCache {
         self.books.clear();
     }
 
+    #[must_use]
     pub fn get_book(&self, id: BookID) -> Option<Arc<Book>> {
         self.books.get(&id).cloned()
     }

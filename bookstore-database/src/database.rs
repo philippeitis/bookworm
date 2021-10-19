@@ -117,6 +117,7 @@ pub trait AppDatabase {
 
     async fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>>;
 
+    #[must_use]
     /// Finds and returns the book with the given ID. If no book is found,
     /// a `BookNotFound` error is returned.
     ///
@@ -128,6 +129,7 @@ pub trait AppDatabase {
     /// with the given ID.
     async fn get_book(&mut self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>>;
 
+    #[must_use]
     /// Returns whether the provided column exists in at least one book in the database.
     ///
     /// # Arguments
