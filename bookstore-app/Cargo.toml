@@ -22,4 +22,5 @@ itertools = "0.10.1"
 rayon = "1.5.1"
 jwalk = "0.6.0"
 dirs = "4.0.0"
-opener = "0.5.0"
+# TODO: Switch to mainline opener when changes are merged
+opener = { version = "0.5.0", git = "https://github.com/philippeitis/opener" }

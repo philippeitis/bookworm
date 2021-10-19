@@ -8,7 +8,6 @@ pub use settings::Settings;
 
 #[allow(clippy::module_inception)]
 pub mod app;
-mod open;
 pub mod parser;
 pub mod settings;
 pub mod table_view;

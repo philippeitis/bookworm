@@ -16,7 +16,6 @@ use bookstore_input::Edit;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant};
 
-use crate::open::open_in_dir;
 use crate::parser::{ModifyColumn, Source, Target};
 use crate::table_view::TableView;
 
@@ -368,7 +367,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                         if let Some(path) = get_book_path(&book, index) {
                             match target {
                                 Target::FileManager => {
-                                    let _ = open_in_dir(path);
+                                    let _ = opener::open_in_file_manager(path);
                                 }
                                 Target::DefaultApp => {
                                     let _ = opener::open(path);
