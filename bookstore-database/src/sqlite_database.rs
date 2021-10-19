@@ -734,8 +734,9 @@ impl SQLiteDatabase {
             .await?;
         sqlx::query!("DELETE FROM books").execute(&mut tx).await?;
         // When deleting all books, 100% should do a vacuum
-        sqlx::query!("VACUUM").execute(&mut tx).await?;
-        tx.commit().await
+        tx.commit().await?;
+        sqlx::query!("VACUUM").execute(&self.backend).await?;
+        Ok(())
     }
 
     async fn remove_books_async<I: Iterator<Item = BookID> + Send>(
