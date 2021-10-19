@@ -862,7 +862,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     return Ok(());
                 }
 
-                match self.db.write().await.get_book(b.as_ref().id()).await {
+                match self.db.read().await.get_book(b.as_ref().id()).await {
                     Ok(fresh) => builder.join_cols(Some(&fresh), &self.matching_rules),
                     Err(_) => builder.join_cols(Some(b.as_ref()), &self.matching_rules),
                 }

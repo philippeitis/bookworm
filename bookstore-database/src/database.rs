@@ -81,15 +81,6 @@ pub trait AppDatabase {
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;
 
-    /// Removes the book with the given ID. If no book with the given ID exists, no change occurs.
-    ///
-    /// # Arguments
-    /// * ` id ` - The ID of the book to be removed.
-    ///
-    /// # Errors
-    /// This function will return an error if the database fails.
-    async fn remove_book(&mut self, id: BookID) -> Result<(), DatabaseError<Self::Error>>;
-
     /// Removes all books with the given IDs. If a book with a given ID does not exist, or an ID
     /// is repeated, no changes will occur for that particular ID.
     ///
@@ -127,14 +118,13 @@ pub trait AppDatabase {
     /// # Errors
     /// This function will return an error if the database fails or no book is found
     /// with the given ID.
-    async fn get_book(&mut self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>>;
+    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>>;
 
-    #[must_use]
-    /// Returns whether the provided column exists in at least one book in the database.
-    ///
-    /// # Arguments
-    /// * ` col ` - The column to check.
-    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>>;
+    async fn read_selected_books(
+        &self,
+        query: &str,
+        bound_variables: &[Variable],
+    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
 
     /// Finds the book with the given ID, then, for each pair of strings (field, new_value)
     /// in `edits`, set the corresponding field to new_value. If a given field is immutable,
@@ -175,19 +165,21 @@ pub trait AppDatabase {
     /// This function will return an error if updating the database fails.
     async fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>>;
 
-    /// Returns true if the internal database is persisted to file, but does not necessarily indicate
-    /// that it has been changed - eg. if a change is immediately undone, the database may still
-    /// be marked as unsaved.
-    async fn saved(&self) -> bool;
-
     async fn update<I: Iterator<Item = BookVariant> + Send>(
         &mut self,
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;
 
-    async fn read_selected_books(
-        &mut self,
-        query: &str,
-        bound_variables: &[Variable],
-    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>>;
+    #[must_use]
+    /// Returns whether the provided column exists in at least one book in the database.
+    ///
+    /// # Arguments
+    /// * ` col ` - The column to check.
+    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>>;
+
+    #[must_use]
+    /// Returns true if the internal database is persisted to file, but does not necessarily indicate
+    /// that it has been changed - eg. if a change is immediately undone, the database may still
+    /// be marked as unsaved.
+    async fn saved(&self) -> bool;
 }

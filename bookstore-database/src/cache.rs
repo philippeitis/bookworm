@@ -59,10 +59,6 @@ impl BookCache {
         self.cols.extend(columns.into_iter());
     }
 
-    pub fn remove_book(&mut self, id: BookID) {
-        self.books.remove(&id);
-    }
-
     pub fn remove_books(&mut self, ids: &HashSet<BookID>) {
         self.books.retain(|id, _| !ids.contains(id));
     }
@@ -74,6 +70,11 @@ impl BookCache {
     #[must_use]
     pub fn get_book(&self, id: BookID) -> Option<Arc<Book>> {
         self.books.get(&id).cloned()
+    }
+
+    #[must_use]
+    pub fn get_books(&self, ids: &[BookID]) -> Vec<Option<Arc<Book>>> {
+        ids.iter().map(|id| self.books.get(id).cloned()).collect()
     }
 
     pub fn edit_book_with_id(

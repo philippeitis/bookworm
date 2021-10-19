@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use tokio::sync::RwLock;
 use unicase::UniCase;
 
 use bookstore_records::book::{BookID, ColumnIdentifier};
@@ -236,7 +237,7 @@ impl TryFrom<VariantData> for BookVariant {
 
 pub struct SQLiteDatabase {
     connection: SqlitePool,
-    cache: BookCache,
+    cache: Arc<RwLock<BookCache>>,
     path: PathBuf,
 }
 
@@ -449,7 +450,7 @@ impl SQLiteDatabase {
     ///
     /// In the future, it would be nice to resolve minor hiccups when rapidly scrolling
     async fn read_books_from_sql(
-        &mut self,
+        &self,
         ids: &[BookID],
     ) -> Result<
         (Vec<(BookID, Arc<Book>)>, HashSet<UniCase<String>>),
@@ -520,13 +521,18 @@ impl SQLiteDatabase {
     /// Loads the books with the provided ids - either reading from the underlying database,
     /// or from the internal cache, on a book-by-book basis.
     async fn load_book_ids(
-        &mut self,
+        &self,
         ids: &[BookID],
     ) -> Result<HashMap<BookID, Arc<Book>>, DatabaseError<<SQLiteDatabase as AppDatabase>::Error>>
     {
-        let mut books: HashMap<BookID, Option<Arc<Book>>> = ids
-            .iter()
-            .map(|id| (*id, self.cache.get_book(*id)))
+        let mut books: HashMap<BookID, Option<Arc<Book>>> = self
+            .cache
+            .read()
+            .await
+            .get_books(ids)
+            .into_iter()
+            .zip(ids.iter().cloned())
+            .map(|(book, id)| (id, book))
             .collect();
         let ids: Vec<_> = books
             .iter()
@@ -534,10 +540,13 @@ impl SQLiteDatabase {
             .map(|(id, _)| *id)
             .collect();
         let (new_books, columns) = self.read_books_from_sql(&ids).await?;
-        new_books
-            .iter()
-            .for_each(|(_, book)| self.cache.insert_book(book.clone()));
-        self.cache.insert_columns(columns);
+        {
+            let mut cache = self.cache.write().await;
+            for book in new_books.iter().map(|(_, book)| book) {
+                cache.insert_book(book.clone());
+            }
+        }
+        self.cache.write().await.insert_columns(columns);
         new_books
             .into_iter()
             .for_each(|(id, book)| drop(books.insert(id, Some(book))));
@@ -586,7 +595,10 @@ impl SQLiteDatabase {
             raw_multimap_tags,
         );
 
-        self.cache = BookCache::from_values_unchecked(books.into_iter().collect(), columns);
+        self.cache = Arc::new(RwLock::new(BookCache::from_values_unchecked(
+            books.into_iter().collect(),
+            columns,
+        )));
         Ok(())
     }
 }
@@ -697,6 +709,8 @@ impl SQLiteDatabase {
                 let id = BookID::try_from(id as u64)
                     .expect("SQLite database should never return NULL ID from primary key.");
                 self.cache
+                    .write()
+                    .await
                     .insert_book(Arc::new(Book::from_variant(id, variant)));
 
                 ids.push(id);
@@ -802,7 +816,7 @@ impl SQLiteDatabase {
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
-        if !self.cache.edit_book_with_id(id, &edits)? {
+        if !self.cache.write().await.edit_book_with_id(id, &edits)? {
             return Err(DatabaseError::BookNotFound(id));
         }
         let mut tx = self
@@ -1092,7 +1106,7 @@ impl AppDatabase for SQLiteDatabase {
 
         let db = Self {
             connection: database,
-            cache: BookCache::default(),
+            cache: Default::default(),
             path: file_path.as_ref().to_path_buf(),
         };
 
@@ -1158,17 +1172,6 @@ impl AppDatabase for SQLiteDatabase {
             .map_err(DatabaseError::Backend)
     }
 
-    async fn remove_book(&mut self, id: BookID) -> Result<(), DatabaseError<Self::Error>> {
-        // "DELETE FROM books WHERE book_id = {id}"
-        let idx = u64::from(id) as i64;
-        sqlx::query!("DELETE FROM books WHERE book_id = ?", idx)
-            .execute(&self.connection)
-            .await
-            .map_err(DatabaseError::Backend)?;
-        self.cache.remove_book(id);
-        Ok(())
-    }
-
     // TODO: In both remove_books and remove_selected,
     //  we should ensure that large deletes don't
     //  cause the DB to remain large.
@@ -1177,7 +1180,7 @@ impl AppDatabase for SQLiteDatabase {
         ids: &HashSet<BookID>,
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books WHERE book_id IN ({ids})"
-        self.cache.remove_books(ids);
+        self.cache.write().await.remove_books(ids);
         self.remove_books_async(ids.iter().cloned())
             .await
             .map_err(DatabaseError::Backend)
@@ -1215,7 +1218,7 @@ impl AppDatabase for SQLiteDatabase {
             .map(|x| x.id())
             .collect::<HashSet<_>>();
         // "DELETE FROM books WHERE book_id IN ({ids})"
-        self.cache.remove_books(&ids);
+        self.cache.write().await.remove_books(&ids);
         self.remove_books_async(ids.into_iter())
             .await
             .map_err(DatabaseError::Backend)
@@ -1229,13 +1232,13 @@ impl AppDatabase for SQLiteDatabase {
         self.clear_db_async()
             .await
             .map_err(DatabaseError::Backend)?;
-        self.cache.clear();
+        self.cache.write().await.clear();
         Ok(())
     }
 
-    async fn get_book(&mut self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
+    async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM books WHERE book_id = {id}"
-        match self.cache.get_book(id) {
+        match self.cache.read().await.get_book(id) {
             None => {
                 let mut books = self.load_book_ids(&[id]).await?;
                 books.remove(&id).ok_or(DatabaseError::BookNotFound(id))
@@ -1244,8 +1247,23 @@ impl AppDatabase for SQLiteDatabase {
         }
     }
 
-    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>> {
-        Ok(self.cache.has_column(col))
+    async fn read_selected_books(
+        &self,
+        query: &str,
+        bound_variables: &[Variable],
+    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
+        let ids = self.read_book_ids(query, bound_variables).await?;
+        let books = self.load_book_ids(&ids).await?;
+
+        Ok(ids
+            .iter()
+            .map(|id| {
+                books
+                    .get(id)
+                    .expect("failed to load all books from SQLite")
+                    .clone()
+            })
+            .collect())
     }
 
     async fn edit_book_with_id(
@@ -1288,7 +1306,7 @@ impl AppDatabase for SQLiteDatabase {
             .collect::<HashSet<_>>();
         // "DELETE FROM books WHERE book_id IN ({ids})"
         for id in ids.into_iter() {
-            self.cache.edit_book_with_id(id, edits)?;
+            self.cache.write().await.edit_book_with_id(id, edits)?;
             self.edit_book_with_id(id, edits).await?;
         }
         Ok(())
@@ -1301,13 +1319,17 @@ impl AppDatabase for SQLiteDatabase {
         //  move to a more robust deduplication strategy with the possibility
         //  of user feedback.
         self.load_books().await?;
-        let merged = self.cache.merge_similar_books();
+        let merged = self.cache.write().await.merge_similar_books();
         self.merge_by_ids(&merged)
             .await
             .map_err(DatabaseError::Backend)?;
         let to_remove = merged.into_iter().map(|(_, m)| m).collect();
         self.remove_books(&to_remove).await?;
         Ok(to_remove)
+    }
+
+    async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>> {
+        Ok(self.cache.read().await.has_column(col))
     }
 
     async fn saved(&self) -> bool {
@@ -1362,23 +1384,4 @@ impl AppDatabase for SQLiteDatabase {
     //         .map(|id| books.get(id).unwrap().clone())
     //         .collect())
     // }
-
-    async fn read_selected_books(
-        &mut self,
-        query: &str,
-        bound_variables: &[Variable],
-    ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
-        let ids = self.read_book_ids(query, bound_variables).await?;
-        let books = self.load_book_ids(&ids).await?;
-
-        Ok(ids
-            .iter()
-            .map(|id| {
-                books
-                    .get(id)
-                    .expect("failed to load all books from SQLite")
-                    .clone()
-            })
-            .collect())
-    }
 }
