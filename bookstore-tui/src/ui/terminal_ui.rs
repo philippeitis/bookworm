@@ -11,10 +11,10 @@ use tui::layout::Rect;
 use tui::Terminal;
 
 use bookstore_app::app::AppChannel;
+use bookstore_app::columns::Columns;
 use bookstore_app::settings::{
     DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings, SortSettings,
 };
-use bookstore_app::table_view::TableView;
 use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
 use bookstore_database::{AppDatabase, BookView, DatabaseError};
@@ -71,26 +71,27 @@ pub(crate) struct UIState<D: AppDatabase + Send + Sync + 'static> {
     pub(crate) nav_settings: NavigationSettings,
     pub(crate) curr_command: CommandString,
     pub(crate) selected_column: usize,
-    pub(crate) table_view: TableView,
+    pub(crate) table_view: Columns,
     pub(crate) book_view: BookView<D>,
     pub(crate) sort_settings: SortSettings,
     // pub(crate) command_log: Vec<CommandString>,
 }
 
 impl<D: AppDatabase + Send + Sync> UIState<D> {
-    pub(crate) fn update_column_data(&mut self) {
-        self.table_view.regenerate_columns(&self.book_view)
-    }
+    pub(crate) fn selected_column_values(&self) -> Option<Vec<String>> {
+        let books: Vec<_> = self
+            .book_view
+            .relative_selections()
+            .into_iter()
+            .map(|(_, book)| book)
+            .collect();
+        let selected_values = self
+            .table_view
+            .read_columns(&books)
+            .nth(self.selected_column)
+            .map(|(_, column_values)| column_values.map(String::from).collect());
 
-    pub(crate) fn selected_table_value(&self) -> Option<Vec<&str>> {
-        let selected_column = self.table_view.get_column(self.selected_column);
-        Some(
-            self.book_view
-                .relative_selections()
-                .into_iter()
-                .map(|(i, _)| selected_column[i].as_str())
-                .collect(),
-        )
+        selected_values
     }
 
     pub(crate) fn num_cols(&self) -> usize {
@@ -103,7 +104,6 @@ impl<D: AppDatabase + Send + Sync> UIState<D> {
 
     pub(crate) async fn make_selection_visible(&mut self) -> Result<(), BookViewError<D::Error>> {
         self.book_view.refresh().await?;
-        self.table_view.regenerate_columns(&self.book_view);
         Ok(())
     }
 }
@@ -157,7 +157,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
             nav_settings: settings.navigation_settings,
             curr_command: CommandString::new(),
             selected_column: 0,
-            table_view: TableView::from(settings.columns),
+            table_view: Columns::from(settings.columns),
             book_view,
             sort_settings,
         };
@@ -221,14 +221,14 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                             AppView::Edit => {
                                 let _ = self.ui_state.make_selection_visible().await;
                                 let selected_books = self.ui_state.book_view.relative_selections();
-                                if let Some(column) = self.ui_state.selected_table_value() {
+                                if let Some(column) = self.ui_state.selected_column_values() {
                                     self.active_view = Box::new(EditWidget {
                                         edit: {
                                             let mut edit = InputRecorder::default();
                                             for ((_, book), col) in
                                                 selected_books.into_iter().zip(column.into_iter())
                                             {
-                                                edit.add_cursor(book.id(), col);
+                                                edit.add_cursor(book.id(), &col);
                                             }
                                             edit
                                         },

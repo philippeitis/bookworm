@@ -3,26 +3,15 @@ use std::sync::Arc;
 
 use unicase::UniCase;
 
-use bookstore_database::{AppDatabase, BookView};
 use bookstore_records::book::ColumnIdentifier;
 use bookstore_records::Book;
 
 #[derive(Default)]
-pub struct TableView {
+pub struct Columns {
     selected_cols: Vec<UniCase<String>>,
-    column_data: Vec<Vec<String>>,
 }
 
-impl TableView {
-    /// Refreshes the table data according to the currently selected columns and the books
-    /// in the BookView's cursor.
-    pub fn regenerate_columns<D: AppDatabase + Send + Sync>(&mut self, bv: &BookView<D>) {
-        self.column_data = self
-            .read_columns(&bv.window())
-            .map(|(_, col)| col.map(String::from).collect())
-            .collect();
-    }
-
+impl Columns {
     pub fn remove_column(&mut self, column: &UniCase<String>) {
         self.selected_cols.retain(|x| x != column);
     }
@@ -31,10 +20,6 @@ impl TableView {
         if !self.selected_cols.contains(&column) {
             self.selected_cols.push(column);
         }
-    }
-
-    pub fn header_col_iter(&self) -> impl Iterator<Item = (&UniCase<String>, &Vec<String>)> {
-        self.selected_cols.iter().zip(self.column_data.iter())
     }
 
     pub fn read_columns<'s, 'a>(
@@ -59,17 +44,12 @@ impl TableView {
     pub fn selected_cols(&self) -> &[UniCase<String>] {
         &self.selected_cols
     }
-
-    pub fn get_column(&self, index: usize) -> &[String] {
-        &self.column_data[index]
-    }
 }
 
-impl From<Vec<String>> for TableView {
+impl From<Vec<String>> for Columns {
     fn from(selected_cols: Vec<String>) -> Self {
-        TableView {
+        Columns {
             selected_cols: selected_cols.into_iter().map(UniCase::new).collect(),
-            column_data: vec![],
         }
     }
 }

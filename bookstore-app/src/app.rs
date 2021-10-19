@@ -16,8 +16,8 @@ use bookstore_input::Edit;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 use bookstore_records::{BookError, BookVariant};
 
+use crate::columns::Columns;
 use crate::parser::{ModifyColumn, Source, Target};
-use crate::table_view::TableView;
 
 macro_rules! async_write {
     ($self:ident, $id: ident, $op:expr) => {{
@@ -266,7 +266,7 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
     pub async fn modify_columns(
         &self,
         columns: Box<[ModifyColumn]>,
-        table: &mut TableView,
+        table: &mut Columns,
         book_view: &mut BookView<D>,
     ) -> Result<(), ApplicationError<D::Error>> {
         for column in columns.into_vec() {

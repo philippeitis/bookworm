@@ -507,8 +507,6 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
             .book_view
             .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
             .await;
-
-        state.update_column_data();
     }
 
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect) {
@@ -533,11 +531,14 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
         let hchunks = split_chunk_into_columns(chunk, state.num_cols() as u16);
         let select_style = state.style.select_style();
 
-        for ((title, data), &chunk) in state.table_view.header_col_iter().zip(hchunks.iter()) {
+        let books = state.book_view.window();
+        for ((title, data), &chunk) in state.table_view.read_columns(&books).zip(hchunks.iter()) {
             let width = usize::from(chunk.width).saturating_sub(1);
+            let column: Vec<_> = data.collect();
             let list = MultiSelectList::new(
-                data.iter()
-                    .map(|word| cut_word_to_fit(word, width))
+                column
+                    .iter()
+                    .map(|word| cut_word_to_fit(&word, width))
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))
@@ -806,11 +807,11 @@ impl<D: AppDatabase + Send + Sync> EditWidget<D> {
         self.edit = InputRecorder::default();
         let selected_books = state.book_view.relative_selections();
         let column = state
-            .selected_table_value()
+            .selected_column_values()
             .expect("Selected value should exist when in edit mode.");
 
         for ((_, book), col) in selected_books.into_iter().zip(column.into_iter()) {
-            self.edit.add_cursor(book.id(), col);
+            self.edit.add_cursor(book.id(), &col);
         }
     }
 }
@@ -828,8 +829,6 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
             .book_view
             .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
             .await;
-
-        state.update_column_data();
     }
 
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect) {
@@ -853,14 +852,16 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
             default: edit_style,
         };
 
+        let books = state.book_view.window();
         for (col, ((title, data), &chunk)) in state
             .table_view
-            .header_col_iter()
+            .read_columns(&books)
             .zip(hchunks.iter())
             .enumerate()
         {
             let width = usize::from(chunk.width).saturating_sub(1);
-            let items = data
+            let column: Vec<_> = data.collect();
+            let items = column
                 .iter()
                 .enumerate()
                 .map(|(row, word)| {
