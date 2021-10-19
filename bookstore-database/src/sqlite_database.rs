@@ -14,14 +14,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 use tokio::sync::RwLock;
 use unicase::UniCase;
 
 use bookstore_input::Edit;
 use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::series::Series;
-use bookstore_records::{Book, BookVariant};
+use bookstore_records::{Book, BookVariant, Edit as BEdit};
 
 use crate::cache::BookCache;
 use crate::paginator::{QueryBuilder, Selection, Variable};
@@ -615,15 +615,270 @@ impl SQLiteDatabase {
     }
 }
 
-impl SQLiteDatabase {
-    async fn insert_book_async(
-        &mut self,
-        book: BookVariant,
-    ) -> Result<BookID, <Self as AppDatabase>::Error> {
-        let ids = self.insert_books_async(std::iter::once(book), 1).await?;
-        Ok(ids[0])
-    }
+#[tracing::instrument(name="Modifying book", skip(tx, book, edits), fields(id = %book.id()))]
+async fn edit_book<'a>(
+    mut tx: Transaction<'a, Sqlite>,
+    book: &mut Book,
+    edits: &[(ColumnIdentifier, Edit)],
+) -> Result<Transaction<'a, Sqlite>, DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
+    let id = book.id();
+    let book_id = u64::from(id) as i64;
+    for (column, edit) in edits {
+        if matches!(column, ColumnIdentifier::ID) {
+            tracing::error!("Attempted to edit book_id");
+            continue;
+        }
 
+        let edit = match edit {
+            Edit::Delete => BEdit::Delete,
+            Edit::Replace(s) => BEdit::Replace(s.to_string()),
+            Edit::Append(s) => BEdit::Append(s.to_string()),
+            Edit::Sequence(seq) => {
+                if let Some(col) = book.get_column(column) {
+                    BEdit::Replace(seq.apply_to(&col).render())
+                } else {
+                    continue;
+                }
+            }
+        };
+
+        match &edit {
+            BEdit::Delete => {
+                match column {
+                        ColumnIdentifier::Title => {
+                            sqlx::query!("UPDATE books SET title = null WHERE book_id = ?;", book_id)
+                        }
+                        ColumnIdentifier::Author => sqlx::query!(
+                        "DELETE FROM multimap_tags where book_id = ? AND name = 'author';",
+                        book_id
+                    ),
+                        ColumnIdentifier::ID => {
+                            unreachable!("Updating local cache should have errored before this could be reached.")
+                        }
+                        ColumnIdentifier::Series => sqlx::query!(
+                        "UPDATE books SET series_name = null, series_id = null WHERE book_id = ?;",
+                        book_id
+                    ),
+                        ColumnIdentifier::Variants => {
+                            unreachable!("Updating local cache should have errored before this could be reached.")
+                        }
+                        ColumnIdentifier::Description => sqlx::query!(
+                        "UPDATE variants SET description = null WHERE book_id = ?;",
+                        book_id
+                    ),
+                        ColumnIdentifier::NamedTag(column) => {
+                            sqlx::query!(
+                            "DELETE FROM named_tags where book_id = ? and name = ?;",
+                            book_id,
+                            column
+                        ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
+                            continue;
+                        }
+                        ColumnIdentifier::ExactTag(tag) => {
+                            sqlx::query!(
+                        "DELETE FROM free_tags where book_id = ? AND value = ?;",
+                        book_id,
+                        tag
+                        ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
+                            continue;
+                        }
+                        ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => unimplemented!("Deleting multimap tags not supported."),
+                        ColumnIdentifier::Tags => {
+                            sqlx::query!(
+                            "DELETE FROM free_tags where book_id = ?;", book_id,
+                        )
+                        }
+                    }.execute(&mut tx).await.map_err(DatabaseError::Backend)?;
+            }
+            BEdit::Replace(value) => {
+                match column {
+                    ColumnIdentifier::Title => {
+                        sqlx::query!(
+                            "UPDATE books SET title = ? WHERE book_id = ?;",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Author => {
+                        sqlx::query!(
+                            "INSERT INTO multimap_tags (name, value, book_id) VALUES('author', ?, ?);",
+                            value,
+                            book_id
+                        )
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Series => {
+                        let series = Series::from_str(value).ok();
+                        let (series, series_index) = match series {
+                            None => (None, None),
+                            Some(Series { name, index }) => (Some(name), index),
+                        };
+
+                        sqlx::query!(
+                            "UPDATE books SET series_name = ?, series_id = ? WHERE book_id = ?",
+                            series,
+                            series_index,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::ID => {
+                        unreachable!("id is immutable, and this case is reached when local cache is modified");
+                    }
+                    ColumnIdentifier::Variants => {
+                        unreachable!(
+                            "variants is immutable, and this case is reached when local cache is modified"
+                        );
+                    }
+                    ColumnIdentifier::Description => {
+                        sqlx::query!(
+                            "UPDATE variants SET description = ? WHERE book_id = ?",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Tags => {
+                        sqlx::query!(
+                            "INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::NamedTag(column) => {
+                        sqlx::query!(
+                            "INSERT into named_tags (name, value, book_id) VALUES(?, ?, ?)",
+                            column,
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::ExactTag(tag) => {
+                        sqlx::query!(
+                            "DELETE FROM free_tags WHERE value = ? AND book_id = ?; INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                            tag,
+                            book_id,
+                            value,
+                            book_id
+                        )
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
+                        unimplemented!("Replacing multimap tags not supported.")
+                    }
+                }
+            }
+            BEdit::Append(value) => {
+                match column {
+                    ColumnIdentifier::Title => {
+                        sqlx::query!(
+                            "UPDATE books SET title = title || ? WHERE book_id = ?;",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Author => {
+                        sqlx::query!(
+                            "INSERT INTO multimap_tags (name, value, book_id) VALUES('author', ?, ?);",
+                            value,
+                            book_id
+                        )
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Series => {
+                        unreachable!("book should reject concatenating to series");
+                    }
+                    ColumnIdentifier::ID => {
+                        unreachable!("id is immutable, and this case is reached when local cache is modified");
+                    }
+                    ColumnIdentifier::Variants => {
+                        unreachable!(
+                            "variants is immutable, and this case is reached when local cache is modified"
+                        );
+                    }
+                    ColumnIdentifier::Description => {
+                        sqlx::query!(
+                            "UPDATE variants SET description = description || ? WHERE book_id = ?",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::Tags => {
+                        sqlx::query!(
+                            "INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                            value,
+                            book_id
+                        )
+                        .execute(&mut tx)
+                        .await
+                        .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::NamedTag(column) => {
+                        sqlx::query!(
+                            "INSERT OR REPLACE INTO named_tags (name, value, book_id) VALUES(?, \
+                            COALESCE((SELECT value from named_tags where name = ? AND book_id = ?), \'\') || ?, ?)",
+                            column,
+                            column,
+                            book_id,
+                            value,
+                            book_id
+                        )
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::ExactTag(tag) => {
+                        let new_tag = tag.to_owned() + value;
+                        sqlx::query!(
+                            "DELETE FROM free_tags where value = ? AND book_id = ?; INSERT into free_tags (value, book_id) VALUES(?, ?)",
+                            tag,
+                            book_id,
+                            new_tag,
+                            book_id
+                        )
+                            .execute(&mut tx)
+                            .await
+                            .map_err(DatabaseError::Backend)?;
+                    }
+                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
+                        unimplemented!("Appending to multimap tags not supported.")
+                    }
+                }
+            }
+        }
+
+        book.edit_column(column, edit)
+            .map_err(DatabaseError::Record)?;
+    }
+    Ok(tx)
+}
+
+impl SQLiteDatabase {
     async fn insert_books_async<I: Iterator<Item = BookVariant> + Send>(
         &mut self,
         books: I,
@@ -826,273 +1081,6 @@ impl SQLiteDatabase {
         tx.commit().await
     }
 
-    async fn edit_book_by_id_async(
-        &mut self,
-        id: BookID,
-        edits: &[(ColumnIdentifier, Edit)],
-    ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
-        let mut tx = self
-            .connection
-            .begin()
-            .await
-            .map_err(DatabaseError::Backend)?;
-
-        let book = self
-            .load_book_ids(&[id])
-            .await?
-            .remove(&id)
-            .ok_or(DatabaseError::BookNotFound(id))?;
-        let book_id = u64::from(id) as i64;
-        for (column, edit) in edits {
-            if matches!(column, ColumnIdentifier::ID) {
-                tracing::error!("Attempted to edit book_id");
-                continue;
-            }
-
-            let edit = match edit {
-                Edit::Delete => Edit::Delete,
-                Edit::Replace(s) => Edit::Replace(s.to_string()),
-                Edit::Append(s) => Edit::Append(s.to_string()),
-                Edit::Sequence(seq) => {
-                    if let Some(col) = book.get_column(column) {
-                        Edit::Replace(seq.apply_to(&col).render())
-                    } else {
-                        continue;
-                    }
-                }
-            };
-
-            match &edit {
-                Edit::Delete => {
-                    match column {
-                        ColumnIdentifier::Title => {
-                            sqlx::query!("UPDATE books SET title = null WHERE book_id = ?;", book_id)
-                        }
-                        ColumnIdentifier::Author => sqlx::query!(
-                        "DELETE FROM multimap_tags where book_id = ? AND name = 'author';",
-                        book_id
-                    ),
-                        ColumnIdentifier::ID => {
-                            unreachable!("Updating local cache should have errored before this could be reached.")
-                        }
-                        ColumnIdentifier::Series => sqlx::query!(
-                        "UPDATE books SET series_name = null, series_id = null WHERE book_id = ?;",
-                        book_id
-                    ),
-                        ColumnIdentifier::Variants => {
-                            unreachable!("Updating local cache should have errored before this could be reached.")
-                        }
-                        ColumnIdentifier::Description => sqlx::query!(
-                        "UPDATE variants SET description = null WHERE book_id = ?;",
-                        book_id
-                    ),
-                        ColumnIdentifier::NamedTag(column) => {
-                            sqlx::query!(
-                            "DELETE FROM named_tags where book_id = ? and name = ?;",
-                            book_id,
-                            column
-                        ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
-                            continue;
-                        }
-                        ColumnIdentifier::ExactTag(tag) => {
-                            sqlx::query!(
-                        "DELETE FROM free_tags where book_id = ? AND value = ?;",
-                        book_id,
-                        tag
-                        ).execute(&mut tx).await.map_err(DatabaseError::Backend)?;
-                            continue;
-                        }
-                        ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => unimplemented!("Deleting multimap tags not supported."),
-                        ColumnIdentifier::Tags => {
-                            sqlx::query!(
-                            "DELETE FROM free_tags where book_id = ?;", book_id,
-                        )
-                        }
-                    }.execute(&mut tx).await.map_err(DatabaseError::Backend)?;
-                }
-                Edit::Replace(value) => match column {
-                    ColumnIdentifier::Title => {
-                        sqlx::query!(
-                            "UPDATE books SET title = ? WHERE book_id = ?;",
-                            value,
-                            book_id
-                        )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::Author => {
-                        sqlx::query!(
-                            "INSERT INTO multimap_tags (name, value, book_id) VALUES('author', ?, ?);",
-                            value,
-                            book_id
-                        )
-                            .execute(&mut tx)
-                            .await
-                            .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::Series => {
-                        let series = Series::from_str(value).ok();
-                        let (series, series_index) = match series {
-                            None => (None, None),
-                            Some(Series { name, index }) => (Some(name), index),
-                        };
-
-                        sqlx::query!(
-                            "UPDATE books SET series_name = ?, series_id = ? WHERE book_id = ?",
-                            series,
-                            series_index,
-                            book_id
-                        )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::ID => {
-                        unreachable!("id is immutable, and this case is reached when local cache is modified");
-                    }
-                    ColumnIdentifier::Variants => {
-                        unreachable!(
-                            "variants is immutable, and this case is reached when local cache is modified"
-                        );
-                    }
-                    ColumnIdentifier::Description => {
-                        sqlx::query!(
-                            "UPDATE variants SET description = ? WHERE book_id = ?",
-                            value,
-                            book_id
-                        )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::Tags => {
-                        sqlx::query!(
-                            "INSERT into free_tags (value, book_id) VALUES(?, ?)",
-                            value,
-                            book_id
-                        )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::NamedTag(column) => {
-                        sqlx::query!(
-                            "INSERT into named_tags (name, value, book_id) VALUES(?, ?, ?)",
-                            column,
-                            value,
-                            book_id
-                        )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::ExactTag(tag) => {
-                        sqlx::query!(
-                            "DELETE FROM free_tags WHERE value = ? AND book_id = ?; INSERT into free_tags (value, book_id) VALUES(?, ?)",
-                            tag,
-                            book_id,
-                            value,
-                            book_id
-                        )
-                            .execute(&mut tx)
-                            .await
-                            .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
-                        unimplemented!("Replacing multimap tags not supported.")
-                    }
-                },
-                Edit::Append(value) => match column {
-                    ColumnIdentifier::Title => {
-                        sqlx::query!(
-                            "UPDATE books SET title = title || ? WHERE book_id = ?;",
-                            value,
-                            book_id
-                        )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::Author => {
-                        sqlx::query!(
-                            "INSERT INTO multimap_tags (name, value, book_id) VALUES('author', ?, ?);",
-                            value,
-                            book_id
-                        )
-                            .execute(&mut tx)
-                            .await
-                            .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::Series => {
-                        unreachable!("book should reject concatenating to series");
-                    }
-                    ColumnIdentifier::ID => {
-                        unreachable!("id is immutable, and this case is reached when local cache is modified");
-                    }
-                    ColumnIdentifier::Variants => {
-                        unreachable!(
-                            "variants is immutable, and this case is reached when local cache is modified"
-                        );
-                    }
-                    ColumnIdentifier::Description => {
-                        sqlx::query!(
-                            "UPDATE variants SET description = description || ? WHERE book_id = ?",
-                            value,
-                            book_id
-                        )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::Tags => {
-                        sqlx::query!(
-                            "INSERT into free_tags (value, book_id) VALUES(?, ?)",
-                            value,
-                            book_id
-                        )
-                        .execute(&mut tx)
-                        .await
-                        .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::NamedTag(column) => {
-                        sqlx::query!(
-                            "INSERT OR REPLACE INTO named_tags (name, value, book_id) VALUES(?, \
-                            COALESCE((SELECT value from named_tags where name = ? AND book_id = ?), \'\') || ?, ?)",
-                            column,
-                            column,
-                            book_id,
-                            value,
-                            book_id
-                        )
-                            .execute(&mut tx)
-                            .await
-                            .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::ExactTag(tag) => {
-                        let new_tag = tag.to_owned() + value;
-                        sqlx::query!(
-                            "DELETE FROM free_tags where value = ? AND book_id = ?; INSERT into free_tags (value, book_id) VALUES(?, ?)",
-                            tag,
-                            book_id,
-                            new_tag,
-                            book_id
-                        )
-                            .execute(&mut tx)
-                            .await
-                            .map_err(DatabaseError::Backend)?;
-                    }
-                    ColumnIdentifier::MultiMap(_) | ColumnIdentifier::MultiMapExact(_, _) => {
-                        unimplemented!("Appending to multimap tags not supported.")
-                    }
-                },
-                _ => unreachable!("Converted previously"),
-            }
-        }
-        self.cache.write().await.edit_book_with_id(id, &edits)?;
-        tx.commit().await.map_err(DatabaseError::Backend)
-    }
-
     async fn update_books_async<I: Iterator<Item = BookVariant> + Send>(
         &mut self,
         _books: I,
@@ -1102,6 +1090,39 @@ impl SQLiteDatabase {
         // let books: Vec<BookVariant> = books.into_iter().collect();
         // let sizes_and_hashes: Vec<_> = books.iter().map(|b| (b.file_size, b.hash)).collect();
         unimplemented!();
+    }
+
+    async fn edit_unique(
+        &mut self,
+        books: &HashMap<BookID, Arc<Book>>,
+        edits: &[(ColumnIdentifier, Edit)],
+        transaction_size: usize,
+    ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
+        let mut tx = self
+            .connection
+            .begin()
+            .await
+            .map_err(DatabaseError::Backend)?;
+
+        let mut num_transactions = 0;
+        for mut book in books.values().cloned() {
+            tx = edit_book(tx, Arc::make_mut(&mut book), edits).await?;
+            self.cache.write().await.insert_book(book);
+            // Commits transaction after a certain number of steps
+            // to avoid data loss.
+            if num_transactions == transaction_size {
+                num_transactions = 0;
+                tx.commit().await.map_err(DatabaseError::Backend)?;
+                tx = self
+                    .connection
+                    .begin()
+                    .await
+                    .map_err(DatabaseError::Backend)?;
+            }
+            num_transactions += 1;
+        }
+        tx.commit().await.map_err(DatabaseError::Backend)?;
+        Ok(())
     }
 }
 
@@ -1195,9 +1216,11 @@ impl AppDatabase for SQLiteDatabase {
         &mut self,
         book: BookVariant,
     ) -> Result<BookID, DatabaseError<Self::Error>> {
-        self.insert_book_async(book)
+        let ids = self
+            .insert_books_async(std::iter::once(book), 1)
             .await
-            .map_err(DatabaseError::Backend)
+            .map_err(DatabaseError::Backend)?;
+        Ok(ids[0])
     }
 
     async fn insert_books<I: Iterator<Item = BookVariant> + Send>(
@@ -1216,7 +1239,6 @@ impl AppDatabase for SQLiteDatabase {
         &mut self,
         ids: &HashSet<BookID>,
     ) -> Result<(), DatabaseError<Self::Error>> {
-        // "DELETE FROM books WHERE book_id IN ({ids})"
         self.cache.write().await.remove_books(ids);
         self.remove_books_async(ids.iter().cloned())
             .await
@@ -1248,21 +1270,16 @@ impl AppDatabase for SQLiteDatabase {
                 return Ok(());
             }
         };
-        let ids = self
+        let books = self
             .read_selected_books(&query, &bound_variables)
             .await?
             .into_iter()
             .map(|x| x.id())
             .collect::<HashSet<_>>();
-        // "DELETE FROM books WHERE book_id IN ({ids})"
-        self.remove_books(&ids).await
+        self.remove_books(&books).await
     }
 
     async fn clear(&mut self) -> Result<(), DatabaseError<Self::Error>> {
-        // "DELETE FROM books"
-        // execute_query!(self, "DELETE FROM extended_tags")?;
-        // execute_query!(self, "DELETE FROM variants")?;
-        // execute_query!(self, "DELETE FROM books")?;
         self.clear_db_async()
             .await
             .map_err(DatabaseError::Backend)?;
@@ -1303,10 +1320,22 @@ impl AppDatabase for SQLiteDatabase {
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>> {
-        // eg.
-        // UPDATE {} SET X = SUBSTR(..) || "aaa" || SUBSTR (..)
-        // "UPDATE {} SET {} = {} WHERE book_id = {};"
-        self.edit_book_by_id_async(id, edits).await
+        let mut tx = self
+            .connection
+            .begin()
+            .await
+            .map_err(DatabaseError::Backend)?;
+
+        let mut book = self
+            .load_book_ids(&[id])
+            .await?
+            .remove(&id)
+            .ok_or(DatabaseError::BookNotFound(id))?;
+        let mut book_ = Arc::make_mut(&mut book);
+        let tx = edit_book(tx, book_, edits).await?;
+        tx.commit().await.map_err(DatabaseError::Backend)?;
+        self.cache.write().await.insert_book(book);
+        Ok(())
     }
 
     async fn edit_selected(
@@ -1317,9 +1346,7 @@ impl AppDatabase for SQLiteDatabase {
         let (query, bound_variables) = match selected {
             Selection::All(matchers) => QueryBuilder::default().join_cols(None, matchers),
             Selection::Partial(books, _) => {
-                for id in books.keys().cloned() {
-                    self.edit_book_with_id(id, edits).await?;
-                }
+                self.edit_unique(books, edits, 5000).await?;
                 return Ok(());
             }
             Selection::Range(start, end, cmp_rules, _, match_rules) => QueryBuilder::default()
@@ -1330,17 +1357,14 @@ impl AppDatabase for SQLiteDatabase {
                 return Ok(());
             }
         };
-        let ids = self
+        let books = self
             .read_selected_books(&query, &bound_variables)
             .await?
             .into_iter()
-            .map(|x| x.id())
-            .collect::<HashSet<_>>();
-        // "DELETE FROM books WHERE book_id IN ({ids})"
-        for id in ids.into_iter() {
-            self.edit_book_with_id(id, edits).await?;
-        }
-        Ok(())
+            .map(|x| (x.id(), x))
+            .collect::<HashMap<_, _>>();
+
+        self.edit_unique(&books, edits, 5000).await
     }
 
     async fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>> {
