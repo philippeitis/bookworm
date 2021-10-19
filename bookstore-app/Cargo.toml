@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 bookstore-database = { version = "0.1.0", path = "../bookstore-database" }
 bookstore-records = { version = "0.1.0", path = "../bookstore-records" }
+bookstore-input = { version = "0.1.0", path = "../bookstore-input" }
 
 serde = { version = "1.0", features = ["derive"] }
 

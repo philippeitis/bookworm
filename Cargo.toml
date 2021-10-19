@@ -5,6 +5,7 @@ members = [
     "bookstore-app",
     "bookstore-records",
     "bookstore-database",
+    "bookstore-input",
 ]
 resolver = "2"
 

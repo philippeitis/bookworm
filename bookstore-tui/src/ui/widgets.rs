@@ -8,8 +8,8 @@ use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, Borders, Paragraph};
 use tui::Frame;
 
-use bookstore_app::user_input::{CharChunks, CommandString, Direction};
 use bookstore_database::Book;
+use bookstore_input::user_input::{CharChunks, CommandString, Direction};
 
 use crate::ui::scrollable_text::BlindOffset;
 

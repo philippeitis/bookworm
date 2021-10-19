@@ -107,7 +107,7 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         self.root_cursor.window_size()
     }
 
-    pub fn relative_selections(&self) -> Vec<usize> {
+    pub fn relative_selections(&self) -> Vec<(usize, Arc<Book>)> {
         match self.scopes.last() {
             None => self.root_cursor.relative_selections(),
             Some(cursor) => cursor.relative_selections(),

@@ -12,8 +12,9 @@ use unicase::UniCase;
 
 use bookstore_database::paginator::Selection;
 use bookstore_database::{AppDatabase, Book, BookView, DatabaseError};
+use bookstore_input::Edit;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{BookError, BookVariant, Edit};
+use bookstore_records::{BookError, BookVariant};
 
 use crate::open::open_in_dir;
 use crate::parser::{ModifyColumn, Source, Target};

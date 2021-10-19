@@ -28,9 +28,6 @@ impl TableView {
             return Ok(());
         }
 
-        // bv.get_books_cursored() and ColumnIdentifier::from are expensive, so
-        // we collect the ColumnIdentifiers into a Vec and only call get_books_cursored()
-        // once.
         let cols = self
             .selected_cols
             .iter()

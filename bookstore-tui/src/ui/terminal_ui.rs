@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 
@@ -14,10 +15,11 @@ use bookstore_app::settings::{
     DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings, SortSettings,
 };
 use bookstore_app::table_view::TableView;
-use bookstore_app::user_input::{CommandString, CommandStringError, EditState};
 use bookstore_app::ApplicationError;
 use bookstore_database::bookview::BookViewError;
 use bookstore_database::{AppDatabase, BookView, DatabaseError};
+use bookstore_input::user_input::{CommandString, CommandStringError, InputRecorder};
+use bookstore_records::Book;
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::views::{
@@ -63,6 +65,7 @@ impl<DBError> From<CommandStringError> for TuiError<DBError> {
         TuiError::CommandString(e)
     }
 }
+
 pub(crate) struct UIState<D: AppDatabase + Send + Sync + 'static> {
     pub(crate) style: InterfaceStyle,
     pub(crate) nav_settings: NavigationSettings,
@@ -85,7 +88,7 @@ impl<D: AppDatabase + Send + Sync> UIState<D> {
             self.book_view
                 .relative_selections()
                 .into_iter()
-                .map(|x| selected_column[x].as_str())
+                .map(|(i, _)| selected_column[i].as_str())
                 .collect(),
         )
     }
@@ -94,12 +97,11 @@ impl<D: AppDatabase + Send + Sync> UIState<D> {
         self.table_view.selected_cols().len()
     }
 
-    pub(crate) fn selected(&self) -> Option<(usize, Vec<usize>)> {
+    pub(crate) fn selected(&self) -> Option<(usize, Vec<(usize, Arc<Book>)>)> {
         Some((self.selected_column, self.book_view.relative_selections()))
     }
 
     pub(crate) async fn make_selection_visible(&mut self) -> Result<(), BookViewError<D::Error>> {
-        // Will refresh db size.
         self.book_view.refresh().await?;
         self.table_view.regenerate_columns(&self.book_view).await
     }
@@ -217,9 +219,18 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                             }
                             AppView::Edit => {
                                 let _ = self.ui_state.make_selection_visible().await;
-                                if let Some(selected_str) = self.ui_state.selected_table_value() {
+                                let selected_books = self.ui_state.book_view.relative_selections();
+                                if let Some(column) = self.ui_state.selected_table_value() {
                                     self.active_view = Box::new(EditWidget {
-                                        edit: EditState::new(selected_str[0]),
+                                        edit: {
+                                            let mut edit = InputRecorder::default();
+                                            for ((_, book), col) in
+                                                selected_books.into_iter().zip(column.into_iter())
+                                            {
+                                                edit.add_cursor(book.id(), col);
+                                            }
+                                            edit
+                                        },
                                         focused: true,
                                         database: PhantomData,
                                     });

@@ -5,8 +5,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
+use bookstore_input::Edit;
 use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{Book, Edit};
+use bookstore_records::{Book, Edit as BEdit};
 
 /// `BookCache` acts as an intermediate caching layer between the backend database
 /// and the front-end UI - allowing books that are already in memory to be provided
@@ -86,6 +87,18 @@ impl BookCache {
             None => Ok(false),
             Some(book) => {
                 for (column, edit) in edits {
+                    let edit = match edit {
+                        Edit::Delete => BEdit::Delete,
+                        Edit::Replace(r) => BEdit::Replace(r.to_string()),
+                        Edit::Append(a) => BEdit::Append(a.to_string()),
+                        Edit::Sequence(s) => {
+                            if let Some(col) = book.get_column(&column) {
+                                BEdit::Replace(s.apply_to(&col).render())
+                            } else {
+                                continue;
+                            }
+                        }
+                    };
                     Arc::make_mut(book).edit_column(&column, edit)?;
                     match column {
                         ColumnIdentifier::NamedTag(x) => {

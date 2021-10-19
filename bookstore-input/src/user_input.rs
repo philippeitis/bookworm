@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
+use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::ops::Add;
 use std::path::PathBuf;
@@ -9,8 +11,31 @@ use itertools::Itertools;
 use crate::autocomplete::AutoCompleteError;
 use crate::AutoCompleter;
 
-#[derive(Default)]
-struct CursoredText {
+#[derive(Debug)]
+pub enum Direction {
+    Left,
+    Right,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum TextEvent {
+    SelectAll,
+    Deselect,
+    KeyUp,
+    KeyShiftUp,
+    KeyDown,
+    KeyShiftDown,
+    KeyLeft,
+    KeyShiftLeft,
+    KeyRight,
+    KeyShiftRight,
+    Del,
+    BackSpace,
+    Push(char),
+}
+
+#[derive(Default, Debug)]
+pub struct CursoredText {
     cursor: usize,
     selection: Option<(NonZeroUsize, Direction)>,
     text: Vec<char>,
@@ -242,147 +267,26 @@ impl CursoredText {
         self.cursor = 0;
         self.selection = None;
     }
-}
 
-pub struct EditState {
-    pub started_edit: bool,
-    value: CursoredText,
-}
-
-impl Default for EditState {
-    fn default() -> Self {
-        EditState {
-            started_edit: false,
-            value: CursoredText::default(),
-        }
-    }
-}
-
-impl EditState {
-    pub fn new<S: AsRef<str>>(value: S) -> Self {
-        let text: Vec<_> = value.as_ref().chars().collect();
-        EditState {
-            started_edit: false,
-            value: CursoredText {
-                cursor: text.len(),
-                selection: None,
-                text,
-            },
-        }
-    }
-
-    pub fn value_to_string(&self) -> String {
-        self.value.text.iter().collect()
-    }
-
-    pub fn del(&mut self) {
-        if self.started_edit {
-            self.value.del();
-        } else {
-            self.value.clear();
-        }
-        self.started_edit = true;
-    }
-
-    pub fn push(&mut self, c: char) {
-        if !self.started_edit {
-            self.value.clear();
-        }
-        self.started_edit = true;
-        self.value.push(c);
-    }
-
-    pub fn extend(&mut self, s: &str) {
-        if !self.started_edit {
-            self.value.clear();
-        }
-        self.started_edit = true;
-        for c in s.chars() {
-            self.value.push(c);
-        }
-    }
-
-    /// Performs backspace
-    pub fn backspace(&mut self) {
-        if self.started_edit {
-            self.value.backspace();
-        } else {
-            self.value.clear();
-        }
-        self.started_edit = true;
-    }
-
-    pub fn key_up(&mut self) {
-        self.started_edit = true;
-        self.value.key_up()
-    }
-
-    pub fn key_shift_up(&mut self) {
-        self.started_edit = true;
-        self.value.key_shift_up()
-    }
-
-    pub fn key_down(&mut self) {
-        self.started_edit = true;
-        self.value.key_down()
-    }
-
-    pub fn key_shift_down(&mut self) {
-        self.started_edit = true;
-        self.value.key_shift_down()
-    }
-
-    pub fn key_left(&mut self) {
-        self.started_edit = true;
-        self.value.key_left()
-    }
-
-    pub fn key_shift_left(&mut self) {
-        self.started_edit = true;
-        self.value.key_shift_left()
-    }
-
-    pub fn key_right(&mut self) {
-        self.started_edit = true;
-        self.value.key_right()
-    }
-
-    pub fn key_shift_right(&mut self) {
-        self.started_edit = true;
-        self.value.key_shift_right()
-    }
-
-    pub fn clear(&mut self) {
-        self.started_edit = true;
-        self.value.clear();
-    }
-
-    pub fn select_all(&mut self) {
-        self.started_edit = true;
-        self.value.select_all()
-    }
-
-    pub fn deselect(&mut self) {
-        self.started_edit = true;
-        self.value.deselect();
+    pub fn render(&self) -> String {
+        self.text.iter().collect()
     }
 
     pub fn char_chunks(&self) -> CharChunks {
-        let ct = &self.value;
-        match ct.selection {
+        match self.selection {
             Some((x, Direction::Left)) => {
-                let (a, b) = ct.text.split_at(ct.cursor);
+                let (a, b) = self.text.split_at(self.cursor);
                 let (b, c) = b.split_at(usize::from(x));
                 CharChunks::Selected(a, b, c, Direction::Left)
             }
             Some((x, Direction::Right)) => {
-                let midcursor = ct.cursor - usize::from(x);
-                let (a, b) = ct.text.split_at(midcursor);
+                let midcursor = self.cursor - usize::from(x);
+                let (a, b) = self.text.split_at(midcursor);
                 let (b, c) = b.split_at(usize::from(x));
                 CharChunks::Selected(a, b, c, Direction::Right)
             }
             None => {
-                let (a, b) = ct.text.split_at(ct.cursor);
+                let (a, b) = self.text.split_at(self.cursor);
                 CharChunks::Unselected(a.iter().collect(), b.iter().collect())
             }
         }
@@ -393,6 +297,232 @@ impl EditState {
             CharChunks::Selected(_, inside, ..) => Some(inside),
             CharChunks::Unselected(..) => None,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct InputRecorder<K: Hash + PartialEq + Eq> {
+    pub started_edit: bool,
+    events: Vec<TextEvent>,
+    cursored: HashMap<K, CursoredText>,
+}
+
+impl<K: Hash + PartialEq + Eq> Default for InputRecorder<K> {
+    fn default() -> Self {
+        Self {
+            started_edit: false,
+            events: vec![],
+            cursored: HashMap::new(),
+        }
+    }
+}
+
+impl<K: Hash + PartialEq + Eq> InputRecorder<K> {
+    pub fn get(&self, key: &K) -> Option<&CursoredText> {
+        self.cursored.get(key)
+    }
+
+    pub fn get_base(&self) -> InputRecorder<bool> {
+        InputRecorder {
+            started_edit: self.started_edit,
+            events: self.events.clone(),
+            cursored: HashMap::new(),
+        }
+    }
+
+    pub fn push(&mut self, c: char) {
+        self.events.push(TextEvent::Push(c));
+
+        if self.started_edit {
+            self.cursored.values_mut().for_each(|cursor| cursor.push(c));
+        } else {
+            self.cursored.values_mut().for_each(|cursor| cursor.clear());
+        }
+
+        self.started_edit = true;
+    }
+
+    pub fn extend(&mut self, s: &str) {
+        for c in s.chars() {
+            self.events.push(TextEvent::Push(c));
+        }
+
+        if self.started_edit {
+            self.cursored.values_mut().for_each(|cursor| {
+                for c in s.chars() {
+                    cursor.push(c);
+                }
+            });
+        } else {
+            self.cursored.values_mut().for_each(|cursor| cursor.clear());
+        }
+
+        self.started_edit = true;
+    }
+
+    pub fn del(&mut self) {
+        self.events.push(TextEvent::Del);
+
+        if self.started_edit {
+            self.cursored.values_mut().for_each(|cursor| cursor.del());
+        } else {
+            self.cursored.values_mut().for_each(|cursor| cursor.clear());
+        }
+
+        self.started_edit = true;
+    }
+
+    /// Performs backspace
+    pub fn backspace(&mut self) {
+        self.events.push(TextEvent::BackSpace);
+
+        if self.started_edit {
+            self.cursored
+                .values_mut()
+                .for_each(|cursor| cursor.backspace());
+        } else {
+            self.cursored.values_mut().for_each(|cursor| cursor.clear());
+        }
+
+        self.started_edit = true;
+    }
+
+    pub fn key_up(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyUp);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.key_up());
+    }
+
+    pub fn key_shift_up(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyShiftUp);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.key_shift_up());
+    }
+
+    pub fn key_down(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyDown);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.key_down());
+    }
+
+    pub fn key_shift_down(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyShiftDown);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.key_shift_down());
+    }
+
+    pub fn key_left(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyLeft);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.key_left());
+    }
+
+    pub fn key_shift_left(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyShiftLeft);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.key_shift_left());
+    }
+
+    pub fn key_right(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyRight);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.key_right());
+    }
+
+    pub fn key_shift_right(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyShiftRight);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.key_shift_right());
+    }
+
+    pub fn clear(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::SelectAll);
+        self.events.push(TextEvent::BackSpace);
+        self.cursored.values_mut().for_each(|cursor| cursor.clear());
+    }
+
+    pub fn select_all(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::SelectAll);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.select_all());
+    }
+
+    pub fn deselect(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::Deselect);
+        self.cursored
+            .values_mut()
+            .for_each(|cursor| cursor.deselect());
+    }
+
+    pub fn add_cursor(&mut self, key: K, text: &str) {
+        self.cursored.insert(key, self.apply_to(text));
+    }
+
+    pub fn apply_to(&self, text: &str) -> CursoredText {
+        let mut cursored_text = CursoredText {
+            cursor: text.len(),
+            selection: None,
+            text: text.chars().collect(),
+        };
+
+        let mut started_edit = false;
+        for event in &self.events {
+            match event {
+                TextEvent::SelectAll => cursored_text.select_all(),
+                TextEvent::Deselect => cursored_text.deselect(),
+                TextEvent::KeyUp => cursored_text.key_up(),
+                TextEvent::KeyShiftUp => cursored_text.key_shift_up(),
+                TextEvent::KeyDown => cursored_text.key_down(),
+                TextEvent::KeyShiftDown => cursored_text.key_shift_down(),
+                TextEvent::KeyLeft => cursored_text.key_left(),
+                TextEvent::KeyShiftLeft => cursored_text.key_shift_left(),
+                TextEvent::KeyRight => cursored_text.key_right(),
+                TextEvent::KeyShiftRight => cursored_text.key_shift_left(),
+                TextEvent::Del => {
+                    if !started_edit {
+                        cursored_text.clear();
+                    } else {
+                        cursored_text.del();
+                    }
+                }
+                TextEvent::BackSpace => {
+                    if !started_edit {
+                        cursored_text.clear();
+                    } else {
+                        cursored_text.backspace();
+                    }
+                }
+                TextEvent::Push(c) => {
+                    if !started_edit {
+                        cursored_text.clear();
+                    }
+                    cursored_text.push(*c);
+                }
+            }
+            started_edit = true;
+        }
+
+        cursored_text
     }
 }
 
@@ -755,11 +885,6 @@ impl<'a> Iterator for CommandStringIter<'a> {
 pub enum CharChunks<'a> {
     Selected(&'a [char], &'a [char], &'a [char], Direction),
     Unselected(String, String),
-}
-
-pub enum Direction {
-    Left,
-    Right,
 }
 
 #[cfg(test)]

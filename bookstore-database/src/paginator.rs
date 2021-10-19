@@ -840,10 +840,12 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         Ok(())
     }
 
+    #[tracing::instrument(name = "Making book visible", skip(self, book))]
     pub async fn make_book_visible<B: AsRef<Book>>(
         &mut self,
         book: Option<B>,
     ) -> Result<(), DatabaseError<D::Error>> {
+        tracing::info!("Making book visible");
         let builder = QueryBuilder::default()
             .cmp_rules(&self.sorting_rules)
             .sort(true)
@@ -851,6 +853,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             .limit(self.window_size)
             .include_id(true);
 
+        tracing::info!("Built QueryBuilder");
         let (query, bindings) = match &book {
             None => builder.join_cols(None, &self.matching_rules),
             Some(b) => {
@@ -862,6 +865,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     return Ok(());
                 }
 
+                tracing::info!("Book is not visible: trying to find");
+
                 match self.db.read().await.get_book(b.as_ref().id()).await {
                     Ok(fresh) => builder.join_cols(Some(&fresh), &self.matching_rules),
                     Err(_) => builder.join_cols(Some(b.as_ref()), &self.matching_rules),
@@ -869,6 +874,8 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             }
         };
 
+        tracing::info!("Built query");
+        tracing::info!("Trying to read a page");
         self.books = self
             .db
             .write()
@@ -934,7 +941,11 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             };
         }
 
-        self.scroll_up(len).await
+        if matches!(self.selected, Selection::All(_)) {
+            self.home().await
+        } else {
+            self.scroll_up(len).await
+        }
     }
 
     async fn scroll_down_move_select(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
@@ -971,7 +982,11 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             };
         }
 
-        self.scroll_down(len).await
+        if matches!(self.selected, Selection::All(_)) {
+            self.end().await
+        } else {
+            self.scroll_down(len).await
+        }
     }
 
     pub async fn scroll_down(&mut self, len: usize) -> Result<(), DatabaseError<D::Error>> {
@@ -1030,7 +1045,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                 self.window_top = 0;
                 self.books.clear();
                 self.scroll_down(0).await?;
-                if self.selected.is_single() {
+                if self.selected.is_single() || matches!(self.selected, Selection::All(_)) {
                     if let Some(target) = self.window().first().cloned() {
                         self.selected = Selection::Range(
                             target.clone(),
@@ -1066,7 +1081,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
                     .await?;
                 self.books.reverse();
 
-                if self.selected.is_single() {
+                if self.selected.is_single() || matches!(self.selected, Selection::All(_)) {
                     if let Some(target) = self.window().last().cloned() {
                         self.selected = Selection::Range(
                             target.clone(),
@@ -1092,6 +1107,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         self.scroll_down(0).await
     }
 
+    #[tracing::instrument(name = "Refreshing paginator", skip(self))]
     pub async fn refresh(&mut self) -> Result<(), DatabaseError<D::Error>> {
         // Find first selected which is visible, otherwise first item in window
         let target = self
@@ -1101,6 +1117,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             .or_else(|| self.window().first())
             .cloned();
         self.books.clear();
+        tracing::info!("Cleared internal books");
         self.make_book_visible(target).await
     }
 
@@ -1113,12 +1130,12 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
     }
     // https://github.com/rusqlite/rusqlite/blob/6a22bb7a56d4be48f5bea81c40ccc496fc74bb57/src/functions.rs#L844
 
-    pub fn relative_selections(&self) -> Vec<usize> {
+    pub fn relative_selections(&self) -> Vec<(usize, Arc<Book>)> {
         self.window()
             .iter()
             .enumerate()
             .filter(|(i, book)| self.selected.contains(book.as_ref()))
-            .map(|(i, _)| i)
+            .map(|(i, book)| (i, book.clone()))
             .collect()
     }
 

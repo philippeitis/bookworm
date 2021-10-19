@@ -18,9 +18,10 @@ use sqlx::SqlitePool;
 use tokio::sync::RwLock;
 use unicase::UniCase;
 
+use bookstore_input::Edit;
 use bookstore_records::book::{BookID, ColumnIdentifier};
 use bookstore_records::series::Series;
-use bookstore_records::{Book, BookVariant, Edit};
+use bookstore_records::{Book, BookVariant};
 
 use crate::cache::BookCache;
 use crate::paginator::{QueryBuilder, Selection, Variable};
@@ -472,11 +473,15 @@ impl SQLiteDatabase {
             "SELECT * FROM multimap_tags WHERE multimap_tags.book_id {}",
             where_
         );
+
+        tracing::info!("Built queries");
         let raw_books = sqlx::query_as(&raw_book_query).fetch_all(&self.connection);
         let raw_variants = sqlx::query_as(&raw_variant_query).fetch_all(&self.connection);
         let raw_named_tags = sqlx::query_as(&raw_named_tag_query).fetch_all(&self.connection);
         let raw_free_tags = sqlx::query_as(&raw_free_tag_query).fetch_all(&self.connection);
         let raw_multimap_tags = sqlx::query_as(&raw_multimap_tag_query).fetch_all(&self.connection);
+
+        tracing::info!("Launching queries");
 
         let start = std::time::Instant::now();
 
@@ -487,6 +492,8 @@ impl SQLiteDatabase {
             raw_free_tags,
             raw_multimap_tags
         );
+
+        tracing::info!("Received results");
 
         let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
             raw_books.map_err(DatabaseError::Backend)?,
@@ -534,19 +541,24 @@ impl SQLiteDatabase {
             .zip(ids.iter().cloned())
             .map(|(book, id)| (id, book))
             .collect();
+        tracing::info!("Finishing loading all cached books");
         let ids: Vec<_> = books
             .iter()
             .filter(|(_, book)| book.is_none())
             .map(|(id, _)| *id)
             .collect();
+        tracing::info!(
+            "{} books were not available in cache - searching in DB",
+            ids.len()
+        );
         let (new_books, columns) = self.read_books_from_sql(&ids).await?;
         {
             let mut cache = self.cache.write().await;
             for book in new_books.iter().map(|(_, book)| book) {
                 cache.insert_book(book.clone());
             }
+            cache.insert_columns(columns);
         }
-        self.cache.write().await.insert_columns(columns);
         new_books
             .into_iter()
             .for_each(|(id, book)| drop(books.insert(id, Some(book))));
@@ -720,6 +732,7 @@ impl SQLiteDatabase {
         Ok(ids)
     }
 
+    #[tracing::instrument(name = "Clearing database", skip(self))]
     async fn clear_db_async(&mut self) -> Result<(), sqlx::Error> {
         let mut tx = self.connection.begin().await?;
         sqlx::query!("DELETE FROM multimap_tags")
@@ -737,7 +750,9 @@ impl SQLiteDatabase {
         sqlx::query!("DELETE FROM books").execute(&mut tx).await?;
         // When deleting all books, 100% should do a vacuum
         tx.commit().await?;
+        tracing::info!("Initiating VACUUM");
         sqlx::query!("VACUUM").execute(&self.connection).await?;
+        tracing::info!("VACUUM complete");
         Ok(())
     }
 
@@ -816,18 +831,38 @@ impl SQLiteDatabase {
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
-        if !self.cache.write().await.edit_book_with_id(id, &edits)? {
-            return Err(DatabaseError::BookNotFound(id));
-        }
         let mut tx = self
             .connection
             .begin()
             .await
             .map_err(DatabaseError::Backend)?;
 
+        let book = self
+            .load_book_ids(&[id])
+            .await?
+            .remove(&id)
+            .ok_or(DatabaseError::BookNotFound(id))?;
         let book_id = u64::from(id) as i64;
         for (column, edit) in edits {
-            match edit {
+            if matches!(column, ColumnIdentifier::ID) {
+                tracing::error!("Attempted to edit book_id");
+                continue;
+            }
+
+            let edit = match edit {
+                Edit::Delete => Edit::Delete,
+                Edit::Replace(s) => Edit::Replace(s.to_string()),
+                Edit::Append(s) => Edit::Append(s.to_string()),
+                Edit::Sequence(seq) => {
+                    if let Some(col) = book.get_column(column) {
+                        Edit::Replace(seq.apply_to(&col).render())
+                    } else {
+                        continue;
+                    }
+                }
+            };
+
+            match &edit {
                 Edit::Delete => {
                     match column {
                         ColumnIdentifier::Title => {
@@ -1051,8 +1086,10 @@ impl SQLiteDatabase {
                         unimplemented!("Appending to multimap tags not supported.")
                     }
                 },
+                _ => unreachable!("Converted previously"),
             }
         }
+        self.cache.write().await.edit_book_with_id(id, &edits)?;
         tx.commit().await.map_err(DatabaseError::Backend)
     }
 
@@ -1236,9 +1273,12 @@ impl AppDatabase for SQLiteDatabase {
         Ok(())
     }
 
+    #[tracing::instrument(name = "Reading single book", skip(self))]
     async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM books WHERE book_id = {id}"
-        match self.cache.read().await.get_book(id) {
+        // If this is put in the match, the read lock will cause the process to hang
+        let book = self.cache.read().await.get_book(id);
+        match book {
             None => {
                 let mut books = self.load_book_ids(&[id]).await?;
                 books.remove(&id).ok_or(DatabaseError::BookNotFound(id))
@@ -1306,7 +1346,6 @@ impl AppDatabase for SQLiteDatabase {
             .collect::<HashSet<_>>();
         // "DELETE FROM books WHERE book_id IN ({ids})"
         for id in ids.into_iter() {
-            self.cache.write().await.edit_book_with_id(id, edits)?;
             self.edit_book_with_id(id, edits).await?;
         }
         Ok(())

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
@@ -19,13 +19,13 @@ use clipboard::{ClipboardContext, ClipboardProvider};
 
 use bookstore_app::app::AppChannel;
 use bookstore_app::parser::Source;
+use bookstore_app::settings::InterfaceStyle;
 use bookstore_app::settings::{Color, SortSettings};
 use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
-use bookstore_app::{settings::InterfaceStyle, user_input::EditState};
 use bookstore_database::paginator::Selection;
 use bookstore_database::{AppDatabase, DatabaseError};
-use bookstore_records::book::{ColumnIdentifier, RecordError};
-use bookstore_records::Edit;
+use bookstore_input::{user_input::InputRecorder, Edit};
+use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
 
 use crate::ui::help_strings::{help_strings, GENERAL_HELP};
 use crate::ui::scrollable_text::ScrollableText;
@@ -508,6 +508,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
             .book_view
             .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
             .await;
+
         let _ = state.update_column_data().await;
     }
 
@@ -545,7 +546,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
             let mut selected_row = MultiSelectListState::default();
 
             if let Some((_, srows)) = state.selected() {
-                for i in srows {
+                for (i, _) in srows {
                     selected_row.select(i);
                 }
             }
@@ -769,7 +770,7 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
 }
 
 pub(crate) struct EditWidget<D> {
-    pub(crate) edit: EditState,
+    pub(crate) edit: InputRecorder<BookID>,
     pub(crate) focused: bool,
     pub(crate) database: PhantomData<fn(D)>,
 }
@@ -784,11 +785,10 @@ impl<D: AppDatabase + Send + Sync> EditWidget<D> {
         if self.edit.started_edit {
             self.focused = false;
             let column = { state.table_view.selected_cols()[state.selected_column].to_owned() };
-            let edits = [(
+            let edits = vec![(
                 ColumnIdentifier::from(column),
-                Edit::Replace(self.edit.value_to_string()),
+                Edit::Sequence(self.edit.get_base()),
             )]
-            .to_vec()
             .into_boxed_slice();
             match run_command(app, Command::EditBook(BookIndex::Selected, edits), state).await {
                 Ok(_) => {}
@@ -804,11 +804,15 @@ impl<D: AppDatabase + Send + Sync> EditWidget<D> {
 
     /// Used when column has been changed and edit should reflect new column's value.
     fn reset_edit(&mut self, state: &UIState<D>) {
-        let value = state
+        self.edit = InputRecorder::default();
+        let selected_books = state.book_view.relative_selections();
+        let column = state
             .selected_table_value()
-            .expect("Selected value should exist when in edit mode.")[0]
-            .to_owned();
-        self.edit = EditState::new(value);
+            .expect("Selected value should exist when in edit mode.");
+
+        for ((_, book), col) in selected_books.into_iter().zip(column.into_iter()) {
+            self.edit.add_cursor(book.id(), col);
+        }
     }
 }
 
@@ -825,6 +829,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
             .book_view
             .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
             .await;
+
         let _ = state.update_column_data().await;
     }
 
@@ -841,7 +846,8 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
         let (scol, srows) = state
             .selected()
             .expect("EditWidget should only exist when items are selected");
-        let srows: HashSet<_> = srows.into_iter().collect();
+
+        let srows: HashMap<_, _> = srows.into_iter().map(|(i, book)| (i, book.id())).collect();
         let style_rules = StyleRules {
             cursor: state.style.cursor_style(),
             selected: select_style,
@@ -859,14 +865,17 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
                 .iter()
                 .enumerate()
                 .map(|(row, word)| {
-                    if col == scol && srows.contains(&row) {
-                        // TODO: Force text around cursor to be visible.
-                        let styled =
-                            char_chunks_to_styled_text(self.edit.char_chunks(), style_rules);
-                        //Span::from(self.edit.value_to_string().unicode_truncate_start(width).0.to_string())
-                        ListItemX::new(styled)
-                    } else {
-                        ListItemX::new(Span::from(word.unicode_truncate(width).0))
+                    match (col == scol, srows.get(&row)) {
+                        (true, Some(id)) => {
+                            // TODO: Force text around cursor to be visible.
+                            let styled = char_chunks_to_styled_text(
+                                self.edit.get(id).unwrap().char_chunks(),
+                                style_rules,
+                            );
+                            //Span::from(self.edit.value_to_string().unicode_truncate_start(width).0.to_string())
+                            ListItemX::new(styled)
+                        }
+                        _ => ListItemX::new(Span::from(word.unicode_truncate(width).0)),
                     }
                 })
                 .collect::<Vec<_>>();
@@ -882,12 +891,9 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
             }
 
             let mut selected_row = MultiSelectListState::default();
-            selected_row.select(
-                *srows
-                    .iter()
-                    .next()
-                    .expect("Edit widget should always have one or more items selected"),
-            );
+            for key in srows.keys() {
+                selected_row.select(*key);
+            }
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
         CommandWidget::new(&state.curr_command).render_into_frame(f, vchunks[1]);
@@ -918,26 +924,28 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for EditWidget<D> {
                                     }
                                 }
                                 ('c', true) => {
-                                    if let Some(text) = self.edit.selected() {
-                                        paste_into_clipboard(&text.iter().collect::<String>());
-                                    } else {
-                                        let string = self.edit.value_to_string();
-                                        if !string.is_empty() {
-                                            paste_into_clipboard(&string);
-                                        }
-                                    }
+                                    unimplemented!()
+                                    // if let Some(text) = self.edit.selected() {
+                                    //     paste_into_clipboard(&text.iter().collect::<String>());
+                                    // } else {
+                                    //     let string = self.edit.value_to_string();
+                                    //     if !string.is_empty() {
+                                    //         paste_into_clipboard(&string);
+                                    //     }
+                                    // }
                                 }
                                 ('x', true) => {
-                                    if let Some(text) = self.edit.selected() {
-                                        paste_into_clipboard(&text.iter().collect::<String>());
-                                        self.edit.del();
-                                    } else {
-                                        let string = self.edit.value_to_string();
-                                        if !string.is_empty() {
-                                            paste_into_clipboard(&string);
-                                        }
-                                        self.edit.clear();
-                                    }
+                                    unimplemented!()
+                                    // if let Some(text) = self.edit.selected() {
+                                    //     paste_into_clipboard(&text.iter().collect::<String>());
+                                    //     self.edit.del();
+                                    // } else {
+                                    //     let string = self.edit.value_to_string();
+                                    //     if !string.is_empty() {
+                                    //         paste_into_clipboard(&string);
+                                    //     }
+                                    //     self.edit.clear();
+                                    // }
                                 }
                                 ('d', _) => {
                                     if self.focused {

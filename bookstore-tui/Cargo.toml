@@ -10,9 +10,10 @@ rustflags = [
 ]
 
 [dependencies]
-bookstore-app = { version = "0.1.0", path = "../bookstore-app/" }
+bookstore-app = { version = "0.1.0", path = "../bookstore-app" }
 bookstore-database = { version = "0.1.0", path = "../bookstore-database" }
 bookstore-records = { version = "0.1.0", path = "../bookstore-records" }
+bookstore-input = { version = "0.1.0", path = "../bookstore-input" }
 
 dirs = "4.0.0"
 clap = "3.0.0-beta.5"
