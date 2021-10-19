@@ -174,6 +174,7 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
         }
     }
 
+    #[must_use]
     pub async fn take_update(&self) -> bool {
         self.send(AppTask::TakeUpdate).await;
         match self.receive().await.unwrap() {
@@ -182,6 +183,7 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
         }
     }
 
+    #[must_use]
     pub async fn saved(&self) -> bool {
         self.send(AppTask::IsSaved).await;
         match self.receive().await.unwrap() {
@@ -198,6 +200,7 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
         }
     }
 
+    #[must_use]
     pub async fn db_path(&self) -> PathBuf {
         self.send(AppTask::GetDbPath).await;
         match self.receive().await.unwrap() {
@@ -206,6 +209,7 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
         }
     }
 
+    #[must_use]
     pub async fn new_book_view(&self) -> BookView<D> {
         self.send(AppTask::GetBookView).await;
         match self.receive().await.unwrap() {
@@ -283,6 +287,7 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
 }
 
 impl<D: AppDatabase + Send + Sync> App<D> {
+    #[must_use]
     pub fn new(db: D) -> (Self, AppChannel<D>) {
         let (event_sender, event_receiver) = tokio::sync::mpsc::channel(100);
         let (result_sender, result_receiver) = tokio::sync::mpsc::channel(100);
@@ -301,6 +306,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
         )
     }
 
+    #[must_use]
     pub async fn db_path(&self) -> std::path::PathBuf {
         self.db.read().await.path().to_path_buf()
     }
@@ -471,19 +477,18 @@ impl<D: AppDatabase + Send + Sync> App<D> {
             self.result_sender.send(val).await.ok();
         }
     }
+
     fn register_update(&mut self) {
         self.updated = true;
     }
 
+    #[must_use]
     fn take_update(&mut self) -> bool {
         std::mem::replace(&mut self.updated, false)
     }
 
+    #[must_use]
     async fn saved(&mut self) -> bool {
         self.db.read().await.saved().await
     }
 }
-
-// TODO: UI should update immediately, but have a ... in the corner
-//  Maybe ... updates
-//  to indicate that background tasks are running
