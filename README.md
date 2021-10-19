@@ -1,3 +1,7 @@
+# bookstore
+![CI](https://github.com/philippeitis/bookstore/actions/workflows/rust.yml/badge.svg)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
 bookstore is a fast TUI library management system, like Calibre.
 
 # Features
