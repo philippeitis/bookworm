@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 
 use futures::{future::FutureExt, StreamExt};
+use tokio::time::{timeout, Duration};
 
 use tui::backend::Backend;
 use tui::layout::Rect;
@@ -125,7 +126,7 @@ pub(crate) struct AppInterface<'a, D: 'a + AppDatabase + Send + Sync + 'static, 
     border_widget: BorderWidget,
     active_view: Box<dyn ViewHandler<D, B> + 'a>,
     ui_state: UIState<D>,
-    ui_updated: bool,
+    update_tui: bool,
     settings_path: Option<PathBuf>,
     event_receiver: EventStream,
     app_channel: AppChannel<D>,
@@ -165,7 +166,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                 command_widget_selected: false,
                 database: Default::default(),
             }),
-            ui_updated: false,
+            update_tui: false,
             ui_state,
             settings_path,
             app_channel,
@@ -179,8 +180,8 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
     /// # Errors
     /// This function may error if executing a particular action fails.
     async fn read_user_input(&mut self) -> Result<bool, TuiError<D::Error>> {
-        loop {
-            if let Some(Ok(event)) = self.event_receiver.next().fuse().await {
+        match timeout(Duration::from_millis(20), self.event_receiver.next().fuse()).await {
+            Ok(Some(Ok(event))) => {
                 match event {
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('q'),
@@ -202,7 +203,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                 {
                     ApplicationTask::Quit => return Ok(false),
                     ApplicationTask::SwitchView(view) => {
-                        self.ui_updated = true;
+                        self.update_tui = true;
                         match view {
                             AppView::Columns => {
                                 self.active_view = Box::new(ColumnWidget {
@@ -239,18 +240,23 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                         }
                     }
                     ApplicationTask::UpdateUI => {
-                        self.ui_updated = true;
+                        self.update_tui = true;
                     }
                     ApplicationTask::DoNothing => {}
                 }
-                break;
+                Ok(true)
+            }
+            Ok(None) => Ok(false),
+            Ok(Some(Err(_))) => Ok(true),
+            Err(_) => {
+                self.update_tui = true;
+                Ok(true)
             }
         }
-        Ok(true)
     }
 
     fn take_update(&mut self) -> bool {
-        std::mem::replace(&mut self.ui_updated, false)
+        std::mem::replace(&mut self.update_tui, false)
     }
 
     /// Runs the application - including handling user inputs and refreshing the output.

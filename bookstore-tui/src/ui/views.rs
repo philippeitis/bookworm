@@ -496,7 +496,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
 
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
+            .constraints([
+                Constraint::Length(chunk.height.saturating_sub(1)),
+                Constraint::Length(1),
+            ])
             .split(chunk);
 
         tracing::info!("Preparing to render into chunk with size {:?}", chunk);
@@ -524,7 +527,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
 
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
+            .constraints([
+                Constraint::Length(chunk.height.saturating_sub(1)),
+                Constraint::Length(1),
+            ])
             .split(chunk);
 
         let chunk = vchunks[0];
@@ -821,7 +827,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
+            .constraints([
+                Constraint::Length(chunk.height.saturating_sub(1)),
+                Constraint::Length(1),
+            ])
             .split(chunk);
 
         // Account for top table row.
@@ -1077,7 +1086,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Hel
     async fn prepare_render(&mut self, _state: &mut UIState<D>, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
+            .constraints([
+                Constraint::Length(chunk.height.saturating_sub(1)),
+                Constraint::Length(1),
+            ])
             .split(chunk);
 
         self.text
