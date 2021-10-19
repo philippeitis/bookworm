@@ -61,7 +61,6 @@ trait TuiStyle {
 pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
     app: &mut AppChannel<D>,
     command: Command,
-    // TODO: These should be removed as arguments
     ui_state: &mut UIState<D>,
 ) -> Result<ApplicationTask, TuiError<D::Error>> {
     match command {

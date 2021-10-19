@@ -60,7 +60,6 @@ const CREATE_BOOKS: &str = r#"CREATE TABLE IF NOT EXISTS `books` (
 );"#;
 
 /// Tags for books with a particular name and single value
-// TODO: Fix inability to store multiple authors.
 const CREATE_NAMED_TAGS: &str = r#"CREATE TABLE IF NOT EXISTS `named_tags` (
 `name` TEXT NOT NULL,
 `value` TEXT NOT NULL,
@@ -364,8 +363,6 @@ impl SQLiteDatabase {
             if let Some(book) = books.get_mut(&id) {
                 book.push_variant(variant);
             } else {
-                // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book,
-                //  and this means that database is wrong
                 tracing::error!("Found orphan variant for ID {} while loading books.", id);
             }
         }
@@ -380,7 +377,6 @@ impl SQLiteDatabase {
             let id = BookID::try_from(tag.book_id as u64).expect("book_id is non-null");
             match books.get_mut(&id) {
                 None => {
-                    // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
                     tracing::error!("Found orphan tag for ID {} while loading books.", id);
                 }
                 Some(book) => {
@@ -411,7 +407,6 @@ impl SQLiteDatabase {
             let id = BookID::try_from(tag.book_id as u64).expect("book_id is non-null");
             match books.get_mut(&id) {
                 None => {
-                    // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
                     tracing::error!("Found orphan tag for ID {} while loading books.", id);
                 }
                 Some(book) => match tag.name.as_str() {
@@ -1112,11 +1107,6 @@ impl SQLiteDatabase {
     }
 }
 
-// TODO: Should we use a separate process to mirror changes to SQL database?
-//  Would push writes to queue:
-//  DELETE_ALL should clear queue, since everything will be deleted.
-//  DELETE_BOOK_ID should clear anything that overwrites given book, except when
-//  an ordering is enforced in previous command.
 #[async_trait]
 impl AppDatabase for SQLiteDatabase {
     type Error = sqlx::Error;

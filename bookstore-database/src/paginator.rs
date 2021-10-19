@@ -271,7 +271,6 @@ pub struct QueryBuilder {
     limit: Option<i64>,
 }
 
-// TODO: Rapid scrolling is slow
 impl Default for QueryBuilder {
     fn default() -> Self {
         Self {
@@ -341,8 +340,7 @@ impl QueryBuilder {
             }
         }
     }
-    // TODO: from should be created in a separate function
-    // TODO:
+
     /// Returns a query which returns the book ids, relative to the provided book.
     /// Results will not include the provided book.
     pub fn join_cols(
