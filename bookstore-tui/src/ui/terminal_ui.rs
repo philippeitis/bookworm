@@ -132,16 +132,13 @@ pub(crate) struct AppInterface<'a, D: 'a + AppDatabase + Send + Sync + 'static, 
 }
 
 impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
-    /// Returns a new database, instantiated with the provided settings and database.
+    /// Returns a new interface, instantiated with the provided settings and database.
     ///
     /// # Arguments
     ///
     /// * ` name ` - The application instance name. Not to confused with the file name.
-    /// * ` settings` - The application settings.
-    /// * ` db ` - The database which contains books to be read.
-    ///
-    /// # Errors
-    /// None.
+    /// * ` settings` - The interface settings.
+    /// * ` settings_path ` - The settings path (used to persist settings).
     pub(crate) async fn new<S: Into<String>>(
         name: S,
         settings: InterfaceSettings,
@@ -179,10 +176,6 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
     /// Reads and handles user input. On success, returns a bool
     /// indicating whether to continue or not.
     ///
-    /// # Arguments
-    ///
-    /// * ` terminal ` - The current terminal.
-    ///
     /// # Errors
     /// This function may error if executing a particular action fails.
     async fn read_user_input(&mut self) -> Result<bool, TuiError<D::Error>> {
@@ -192,13 +185,13 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('q'),
                         modifiers: KeyModifiers::CONTROL,
-                    }) => return Ok(true),
+                    }) => return Ok(false),
                     Event::Key(KeyEvent {
                         code: KeyCode::Char('s'),
                         modifiers: KeyModifiers::CONTROL,
                     }) => {
                         self.app_channel.save().await;
-                        return Ok(false);
+                        return Ok(true);
                     }
                     _ => {}
                 }
@@ -207,7 +200,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                     .handle_input(event, &mut self.ui_state, &mut self.app_channel)
                     .await?
                 {
-                    ApplicationTask::Quit => return Ok(true),
+                    ApplicationTask::Quit => return Ok(false),
                     ApplicationTask::SwitchView(view) => {
                         self.ui_updated = true;
                         match view {
@@ -253,7 +246,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                 break;
             }
         }
-        Ok(false)
+        Ok(true)
     }
 
     fn take_update(&mut self) -> bool {
@@ -296,9 +289,10 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                         return;
                     }
                     self.border_widget.render_into_frame(f, size);
-                    // TODO: User may suddenly enlargen the window,
-                    //  - should ensure that more than the window size items
-                    //  are loaded
+                    // TODO: If preparing the render takes too long and the user
+                    //  increases the window the window, it is possible for books to not be
+                    //  even if they are available, since lazy rendering.
+                    tracing::info!("Rendering into terminal with size {:?}", size);
                     self.active_view.render_into_frame(
                         f,
                         &self.ui_state,
@@ -313,12 +307,15 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
             }
 
             match self.read_user_input().await {
-                Ok(true) => {
+                Ok(false) => {
                     self.write_settings().await?;
                     return Ok(terminal.clear()?);
                 }
-                Ok(false) => {}
-                Err(_e) => {} // TODO: Handle errors
+                Ok(true) => {}
+                Err(e) => {
+                    tracing::info!("Error occurred during execution: {:?}", e);
+                    // TODO: User should be notified when errors occur - but where and how?
+                }
             }
         }
     }

@@ -499,10 +499,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
             .constraints([Constraint::Length(chunk.height - 1), Constraint::Length(1)])
             .split(chunk);
 
-        tracing::info!("Writing into chunk with size {:?}", chunk);
+        tracing::info!("Preparing to render into chunk with size {:?}", chunk);
         tracing::info!("Have vertical chunks: {:?}", vchunks);
 
-        // Account for top table row
+        // Account for column titles
         let _ = state
             .book_view
             .refresh_window_size(usize::from(vchunks[0].height).saturating_sub(1))
