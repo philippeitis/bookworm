@@ -235,8 +235,8 @@ impl TryFrom<VariantData> for BookVariant {
 }
 
 pub struct SQLiteDatabase {
-    backend: SqlitePool,
-    local_cache: BookCache,
+    connection: SqlitePool,
+    cache: BookCache,
     path: PathBuf,
 }
 
@@ -262,7 +262,7 @@ impl SQLiteDatabase {
         }
         let start = std::time::Instant::now();
         let ids: Vec<SqlxBookId> = query
-            .fetch_all(&self.backend)
+            .fetch_all(&self.connection)
             .await
             .map_err(DatabaseError::Backend)?;
         let ids: Vec<BookID> = ids
@@ -364,10 +364,7 @@ impl SQLiteDatabase {
             } else {
                 // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book,
                 //  and this means that database is wrong
-                tracing::error!(
-                    "SQLite database may be corrupted. Found orphan variant for {}.",
-                    id
-                );
+                tracing::error!("Found orphan variant for ID {} while loading books.", id);
             }
         }
 
@@ -378,14 +375,11 @@ impl SQLiteDatabase {
         }
 
         for tag in raw_named_tags.into_iter() {
-            let id = NonZeroU64::try_from(tag.book_id as u64).expect("book_id is non-null");
+            let id = BookID::try_from(tag.book_id as u64).expect("book_id is non-null");
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    tracing::error!(
-                        "SQLite database may be corrupted. Found orphan variant for {}.",
-                        id
-                    );
+                    tracing::error!("Found orphan tag for ID {} while loading books.", id);
                 }
                 Some(book) => {
                     if !prime_cols.contains(&tag.name) {
@@ -399,14 +393,10 @@ impl SQLiteDatabase {
         }
 
         for tag in raw_free_tags.into_iter() {
-            let id = NonZeroU64::try_from(tag.book_id as u64).expect("book_id is non-null");
+            let id = BookID::try_from(tag.book_id as u64).expect("book_id is non-null");
             match books.get_mut(&id) {
                 None => {
-                    // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    tracing::error!(
-                        "SQLite database may be corrupted. Found orphan variant for {}.",
-                        id
-                    );
+                    tracing::error!("Found orphan tag for ID {} while loading books.", id);
                 }
                 Some(book) => {
                     book.extend_column(&ColumnIdentifier::Tags, tag.value)
@@ -416,14 +406,11 @@ impl SQLiteDatabase {
         }
 
         for tag in raw_multimap_tags.into_iter() {
-            let id = NonZeroU64::try_from(tag.book_id as u64).expect("book_id is non-null");
+            let id = BookID::try_from(tag.book_id as u64).expect("book_id is non-null");
             match books.get_mut(&id) {
                 None => {
                     // TODO: Decide what to do here, since schema dictates that variants are deleted with owning book.
-                    tracing::error!(
-                        "SQLite database may be corrupted. Found orphan variant for {}.",
-                        id
-                    );
+                    tracing::error!("Found orphan tag for ID {} while loading books.", id);
                 }
                 Some(book) => match tag.name.as_str() {
                     "author" => book
@@ -484,11 +471,11 @@ impl SQLiteDatabase {
             "SELECT * FROM multimap_tags WHERE multimap_tags.book_id {}",
             where_
         );
-        let raw_books = sqlx::query_as(&raw_book_query).fetch_all(&self.backend);
-        let raw_variants = sqlx::query_as(&raw_variant_query).fetch_all(&self.backend);
-        let raw_named_tags = sqlx::query_as(&raw_named_tag_query).fetch_all(&self.backend);
-        let raw_free_tags = sqlx::query_as(&raw_free_tag_query).fetch_all(&self.backend);
-        let raw_multimap_tags = sqlx::query_as(&raw_multimap_tag_query).fetch_all(&self.backend);
+        let raw_books = sqlx::query_as(&raw_book_query).fetch_all(&self.connection);
+        let raw_variants = sqlx::query_as(&raw_variant_query).fetch_all(&self.connection);
+        let raw_named_tags = sqlx::query_as(&raw_named_tag_query).fetch_all(&self.connection);
+        let raw_free_tags = sqlx::query_as(&raw_free_tag_query).fetch_all(&self.connection);
+        let raw_multimap_tags = sqlx::query_as(&raw_multimap_tag_query).fetch_all(&self.connection);
 
         let start = std::time::Instant::now();
 
@@ -539,7 +526,7 @@ impl SQLiteDatabase {
     {
         let mut books: HashMap<BookID, Option<Arc<Book>>> = ids
             .iter()
-            .map(|id| (*id, self.local_cache.get_book(*id)))
+            .map(|id| (*id, self.cache.get_book(*id)))
             .collect();
         let ids: Vec<_> = books
             .iter()
@@ -549,8 +536,8 @@ impl SQLiteDatabase {
         let (new_books, columns) = self.read_books_from_sql(&ids).await?;
         new_books
             .iter()
-            .for_each(|(_, book)| self.local_cache.insert_book(book.clone()));
-        self.local_cache.insert_columns(columns);
+            .for_each(|(_, book)| self.cache.insert_book(book.clone()));
+        self.cache.insert_columns(columns);
         new_books
             .into_iter()
             .for_each(|(id, book)| drop(books.insert(id, Some(book))));
@@ -564,15 +551,16 @@ impl SQLiteDatabase {
         &mut self,
     ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
         // TODO: Benchmark this for large databases with complex books.
-        let raw_books = sqlx::query_as!(BookData, "SELECT * FROM books").fetch_all(&self.backend);
+        let raw_books =
+            sqlx::query_as!(BookData, "SELECT * FROM books").fetch_all(&self.connection);
         let raw_variants =
-            sqlx::query_as!(VariantData, "SELECT * FROM variants").fetch_all(&self.backend);
+            sqlx::query_as!(VariantData, "SELECT * FROM variants").fetch_all(&self.connection);
         let raw_named_tags =
-            sqlx::query_as!(NamedTagData, "SELECT * FROM named_tags").fetch_all(&self.backend);
+            sqlx::query_as!(NamedTagData, "SELECT * FROM named_tags").fetch_all(&self.connection);
         let raw_free_tags =
-            sqlx::query_as!(FreeTagData, "SELECT * FROM free_tags").fetch_all(&self.backend);
-        let raw_multimap_tags =
-            sqlx::query_as!(NamedTagData, "SELECT * FROM multimap_tags").fetch_all(&self.backend);
+            sqlx::query_as!(FreeTagData, "SELECT * FROM free_tags").fetch_all(&self.connection);
+        let raw_multimap_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM multimap_tags")
+            .fetch_all(&self.connection);
 
         let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = tokio::join!(
             raw_books,
@@ -598,7 +586,7 @@ impl SQLiteDatabase {
             raw_multimap_tags,
         );
 
-        self.local_cache = BookCache::from_values_unchecked(books.into_iter().collect(), columns);
+        self.cache = BookCache::from_values_unchecked(books.into_iter().collect(), columns);
         Ok(())
     }
 }
@@ -624,7 +612,7 @@ impl SQLiteDatabase {
         });
 
         while book_iter.peek().is_some() {
-            let mut tx = self.backend.begin().await?;
+            let mut tx = self.connection.begin().await?;
             for variant in book_iter.by_ref().take(transaction_size) {
                 let variant: BookVariant = variant;
                 let title = variant.local_title.as_ref();
@@ -708,7 +696,7 @@ impl SQLiteDatabase {
 
                 let id = BookID::try_from(id as u64)
                     .expect("SQLite database should never return NULL ID from primary key.");
-                self.local_cache
+                self.cache
                     .insert_book(Arc::new(Book::from_variant(id, variant)));
 
                 ids.push(id);
@@ -719,7 +707,7 @@ impl SQLiteDatabase {
     }
 
     async fn clear_db_async(&mut self) -> Result<(), sqlx::Error> {
-        let mut tx = self.backend.begin().await?;
+        let mut tx = self.connection.begin().await?;
         sqlx::query!("DELETE FROM multimap_tags")
             .execute(&mut tx)
             .await?;
@@ -735,7 +723,7 @@ impl SQLiteDatabase {
         sqlx::query!("DELETE FROM books").execute(&mut tx).await?;
         // When deleting all books, 100% should do a vacuum
         tx.commit().await?;
-        sqlx::query!("VACUUM").execute(&self.backend).await?;
+        sqlx::query!("VACUUM").execute(&self.connection).await?;
         Ok(())
     }
 
@@ -743,7 +731,7 @@ impl SQLiteDatabase {
         &mut self,
         merges: I,
     ) -> Result<(), sqlx::Error> {
-        let mut tx = self.backend.begin().await?;
+        let mut tx = self.connection.begin().await?;
         let size = {
             let (low, high) = merges.size_hint();
             high.unwrap_or(low)
@@ -764,7 +752,7 @@ impl SQLiteDatabase {
     async fn merge_by_ids(&mut self, merges: &[(BookID, BookID)]) -> Result<(), sqlx::Error> {
         // titles, authors
         // variant by variant: identical hashmaps
-        let mut tx = self.backend.begin().await?;
+        let mut tx = self.connection.begin().await?;
         for (merged_into, merged_from) in merges.iter().cloned() {
             let merged_into = u64::from(merged_into) as i64;
             let merged_from = u64::from(merged_from) as i64;
@@ -814,10 +802,14 @@ impl SQLiteDatabase {
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<<Self as AppDatabase>::Error>> {
-        if !self.local_cache.edit_book_with_id(id, &edits)? {
+        if !self.cache.edit_book_with_id(id, &edits)? {
             return Err(DatabaseError::BookNotFound(id));
         }
-        let mut tx = self.backend.begin().await.map_err(DatabaseError::Backend)?;
+        let mut tx = self
+            .connection
+            .begin()
+            .await
+            .map_err(DatabaseError::Backend)?;
 
         let book_id = u64::from(id) as i64;
         for (column, edit) in edits {
@@ -1099,8 +1091,8 @@ impl AppDatabase for SQLiteDatabase {
             .map_err(DatabaseError::Backend)?;
 
         let db = Self {
-            backend: database,
-            local_cache: BookCache::default(),
+            connection: database,
+            cache: BookCache::default(),
             path: file_path.as_ref().to_path_buf(),
         };
 
@@ -1113,7 +1105,7 @@ impl AppDatabase for SQLiteDatabase {
             CREATE_VARIANTS,
         ] {
             sqlx::query(query)
-                .execute(&db.backend)
+                .execute(&db.connection)
                 .await
                 .map_err(DatabaseError::Backend)?;
         }
@@ -1132,7 +1124,7 @@ impl AppDatabase for SQLiteDatabase {
                 "CREATE INDEX IF NOT EXISTS {}_ids on {}(book_id);",
                 table, table
             ))
-            .execute(&db.backend)
+            .execute(&db.connection)
             .await
             .map_err(DatabaseError::Backend)?;
         }
@@ -1170,10 +1162,10 @@ impl AppDatabase for SQLiteDatabase {
         // "DELETE FROM books WHERE book_id = {id}"
         let idx = u64::from(id) as i64;
         sqlx::query!("DELETE FROM books WHERE book_id = ?", idx)
-            .execute(&self.backend)
+            .execute(&self.connection)
             .await
             .map_err(DatabaseError::Backend)?;
-        self.local_cache.remove_book(id);
+        self.cache.remove_book(id);
         Ok(())
     }
 
@@ -1185,7 +1177,7 @@ impl AppDatabase for SQLiteDatabase {
         ids: &HashSet<BookID>,
     ) -> Result<(), DatabaseError<Self::Error>> {
         // "DELETE FROM books WHERE book_id IN ({ids})"
-        self.local_cache.remove_books(ids);
+        self.cache.remove_books(ids);
         self.remove_books_async(ids.iter().cloned())
             .await
             .map_err(DatabaseError::Backend)
@@ -1223,7 +1215,7 @@ impl AppDatabase for SQLiteDatabase {
             .map(|x| x.id())
             .collect::<HashSet<_>>();
         // "DELETE FROM books WHERE book_id IN ({ids})"
-        self.local_cache.remove_books(&ids);
+        self.cache.remove_books(&ids);
         self.remove_books_async(ids.into_iter())
             .await
             .map_err(DatabaseError::Backend)
@@ -1237,13 +1229,13 @@ impl AppDatabase for SQLiteDatabase {
         self.clear_db_async()
             .await
             .map_err(DatabaseError::Backend)?;
-        self.local_cache.clear();
+        self.cache.clear();
         Ok(())
     }
 
     async fn get_book(&mut self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM books WHERE book_id = {id}"
-        match self.local_cache.get_book(id) {
+        match self.cache.get_book(id) {
             None => {
                 let mut books = self.load_book_ids(&[id]).await?;
                 books.remove(&id).ok_or(DatabaseError::BookNotFound(id))
@@ -1253,7 +1245,7 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     async fn has_column(&self, col: &UniCase<String>) -> Result<bool, DatabaseError<Self::Error>> {
-        Ok(self.local_cache.has_column(col))
+        Ok(self.cache.has_column(col))
     }
 
     async fn edit_book_with_id(
@@ -1296,7 +1288,7 @@ impl AppDatabase for SQLiteDatabase {
             .collect::<HashSet<_>>();
         // "DELETE FROM books WHERE book_id IN ({ids})"
         for id in ids.into_iter() {
-            self.local_cache.edit_book_with_id(id, edits)?;
+            self.cache.edit_book_with_id(id, edits)?;
             self.edit_book_with_id(id, edits).await?;
         }
         Ok(())
@@ -1309,7 +1301,7 @@ impl AppDatabase for SQLiteDatabase {
         //  move to a more robust deduplication strategy with the possibility
         //  of user feedback.
         self.load_books().await?;
-        let merged = self.local_cache.merge_similar_books();
+        let merged = self.cache.merge_similar_books();
         self.merge_by_ids(&merged)
             .await
             .map_err(DatabaseError::Backend)?;
