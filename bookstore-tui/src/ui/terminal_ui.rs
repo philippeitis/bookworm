@@ -180,6 +180,9 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
     /// # Errors
     /// This function may error if executing a particular action fails.
     async fn read_user_input(&mut self) -> Result<bool, TuiError<D::Error>> {
+        // It is possible for user changes to cause the currently loaded number of
+        // books to be too small - accordingly, we use a timer to render any missing
+        // books.
         match timeout(Duration::from_millis(20), self.event_receiver.next().fuse()).await {
             Ok(Some(Ok(event))) => {
                 match event {
@@ -291,14 +294,12 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                 };
                 terminal.draw(|f| {
                     let size = f.size();
+                    tracing::info!("Rendering into terminal with size {:?}", size);
+
                     if size.height < 2 || size.width < 2 {
                         return;
                     }
                     self.border_widget.render_into_frame(f, size);
-                    // TODO: If preparing the render takes too long and the user
-                    //  increases the window the window, it is possible for books to not be
-                    //  even if they are available, since lazy rendering.
-                    tracing::info!("Rendering into terminal with size {:?}", size);
                     self.active_view.render_into_frame(
                         f,
                         &self.ui_state,
