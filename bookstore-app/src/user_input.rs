@@ -9,6 +9,241 @@ use itertools::Itertools;
 use crate::autocomplete::AutoCompleteError;
 use crate::AutoCompleter;
 
+#[derive(Default)]
+struct CursoredText {
+    cursor: usize,
+    selection: Option<(NonZeroUsize, Direction)>,
+    text: Vec<char>,
+}
+
+impl CursoredText {
+    fn select_all(&mut self) {
+        self.cursor = self.text.len();
+        self.selection = NonZeroUsize::try_from(self.text.len())
+            .map(|x| (x, Direction::Right))
+            .ok();
+    }
+
+    fn deselect(&mut self) {
+        self.cursor = self.text.len();
+        self.selection = None;
+    }
+
+    fn key_up(&mut self) {
+        self.cursor = 0;
+        self.selection = None;
+    }
+
+    fn key_shift_up(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        self.selection = match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                let size = NonZeroUsize::try_from(midcursor).ok();
+                size.map(|x| (x, Direction::Left))
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor - usize::from(x);
+                let size = NonZeroUsize::try_from(midcursor).ok();
+                size.map(|x| (x, Direction::Left))
+            }
+            None => {
+                let size = NonZeroUsize::try_from(self.cursor).ok();
+                size.map(|x| (x, Direction::Left))
+            }
+        };
+
+        self.cursor = 0;
+    }
+
+    fn key_down(&mut self) {
+        self.cursor = self.text.len();
+        self.selection = None;
+    }
+
+    fn key_shift_down(&mut self) {
+        if self.cursor == self.text.len() {
+            return;
+        }
+
+        self.selection = match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                let size = NonZeroUsize::try_from(self.text.len().saturating_sub(midcursor)).ok();
+                size.map(|x| (x, Direction::Right))
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor - usize::from(x);
+                let size = NonZeroUsize::try_from(self.text.len().saturating_sub(midcursor)).ok();
+                size.map(|x| (x, Direction::Right))
+            }
+            None => {
+                let size = NonZeroUsize::try_from(self.text.len().saturating_sub(self.cursor)).ok();
+                size.map(|x| (x, Direction::Right))
+            }
+        };
+
+        self.cursor = self.text.len();
+    }
+
+    fn key_left(&mut self) {
+        match self.selection {
+            Some((_, Direction::Left)) => {}
+            Some((x, Direction::Right)) => {
+                self.cursor -= usize::from(x);
+            }
+            None => {
+                self.cursor = self.cursor.saturating_sub(1);
+            }
+        }
+
+        self.selection = None;
+    }
+
+    fn key_shift_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        self.cursor = self.cursor.saturating_sub(1);
+
+        self.selection = match self.selection {
+            Some((x, Direction::Left)) => {
+                let size =
+                    NonZeroUsize::try_from(1 + usize::from(x)).expect("Overflowed selection");
+                Some((size, Direction::Left))
+            }
+            Some((x, Direction::Right)) => {
+                let size = NonZeroUsize::try_from(usize::from(x).saturating_sub(1)).ok();
+                size.map(|x| (x, Direction::Right))
+            }
+            None => {
+                let size = NonZeroUsize::try_from(1)
+                    .expect("Cosmic rays or other such events have caused this error.");
+                Some((size, Direction::Left))
+            }
+        };
+    }
+
+    fn key_right(&mut self) {
+        match self.selection {
+            Some((x, Direction::Left)) => {
+                self.cursor += usize::from(x);
+            }
+            Some((_, Direction::Right)) => {}
+            None => {
+                self.cursor = self.cursor.add(1).min(self.text.len());
+            }
+        }
+
+        self.selection = None;
+    }
+
+    fn key_shift_right(&mut self) {
+        if self.cursor == self.text.len() {
+            return;
+        }
+
+        self.cursor += 1;
+
+        self.selection = match self.selection {
+            Some((x, Direction::Left)) => {
+                let size = NonZeroUsize::try_from(usize::from(x).saturating_sub(1)).ok();
+                size.map(|x| (x, Direction::Left))
+            }
+            Some((x, Direction::Right)) => {
+                let size = NonZeroUsize::try_from(1 + usize::from(x))
+                    .expect("User should never select >= 2^32 characters");
+                Some((size, Direction::Right))
+            }
+            None => {
+                let size = NonZeroUsize::try_from(1)
+                    .expect("Cosmic rays or other such events have caused this error.");
+                Some((size, Direction::Right))
+            }
+        };
+    }
+
+    fn del(&mut self) {
+        match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                self.text.drain(self.cursor..midcursor);
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor.saturating_sub(usize::from(x));
+                self.text.drain(midcursor..self.cursor);
+                self.cursor = midcursor;
+            }
+            None => {
+                if self.cursor != self.text.len() {
+                    self.text.remove(self.cursor);
+                }
+            }
+        };
+
+        self.selection = None;
+    }
+
+    fn backspace(&mut self) {
+        match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                self.text.drain(self.cursor..midcursor);
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor.saturating_sub(usize::from(x));
+                self.text.drain(midcursor..self.cursor);
+                self.cursor = midcursor;
+            }
+            None => {
+                if self.cursor != 0 {
+                    self.cursor -= 1;
+                    self.text.remove(self.cursor);
+                }
+            }
+        };
+
+        self.selection = None;
+    }
+
+    fn push(&mut self, c: char) {
+        match self.selection {
+            Some((x, Direction::Left)) => {
+                let midcursor = self.cursor + usize::from(x);
+                self.text.drain(self.cursor..midcursor);
+                self.text.insert(self.cursor, c);
+                self.cursor += 1;
+            }
+            Some((x, Direction::Right)) => {
+                let midcursor = self.cursor - usize::from(x);
+                self.text.drain(midcursor..self.cursor);
+                self.text.insert(midcursor, c);
+                self.cursor = midcursor + 1;
+            }
+            None => {
+                self.text.insert(self.cursor, c);
+                self.cursor += 1;
+            }
+        };
+
+        self.selection = None;
+    }
+
+    fn can_autocomplete(&mut self) -> bool {
+        self.selection.is_none()
+    }
+
+    fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+        self.selection = None;
+    }
+}
+
 pub struct EditState {
     pub started_edit: bool,
     value: CursoredText,
@@ -525,241 +760,6 @@ pub enum CharChunks<'a> {
 pub enum Direction {
     Left,
     Right,
-}
-
-#[derive(Default)]
-struct CursoredText {
-    cursor: usize,
-    selection: Option<(NonZeroUsize, Direction)>,
-    text: Vec<char>,
-}
-
-impl CursoredText {
-    fn select_all(&mut self) {
-        self.cursor = self.text.len();
-        self.selection = NonZeroUsize::try_from(self.text.len())
-            .map(|x| (x, Direction::Right))
-            .ok();
-    }
-
-    fn deselect(&mut self) {
-        self.cursor = self.text.len();
-        self.selection = None;
-    }
-
-    fn key_up(&mut self) {
-        self.cursor = 0;
-        self.selection = None;
-    }
-
-    fn key_shift_up(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-
-        self.selection = match self.selection {
-            Some((x, Direction::Left)) => {
-                let midcursor = self.cursor + usize::from(x);
-                let size = NonZeroUsize::try_from(midcursor).ok();
-                size.map(|x| (x, Direction::Left))
-            }
-            Some((x, Direction::Right)) => {
-                let midcursor = self.cursor - usize::from(x);
-                let size = NonZeroUsize::try_from(midcursor).ok();
-                size.map(|x| (x, Direction::Left))
-            }
-            None => {
-                let size = NonZeroUsize::try_from(self.cursor).ok();
-                size.map(|x| (x, Direction::Left))
-            }
-        };
-
-        self.cursor = 0;
-    }
-
-    fn key_down(&mut self) {
-        self.cursor = self.text.len();
-        self.selection = None;
-    }
-
-    fn key_shift_down(&mut self) {
-        if self.cursor == self.text.len() {
-            return;
-        }
-
-        self.selection = match self.selection {
-            Some((x, Direction::Left)) => {
-                let midcursor = self.cursor + usize::from(x);
-                let size = NonZeroUsize::try_from(self.text.len() - midcursor).ok();
-                size.map(|x| (x, Direction::Right))
-            }
-            Some((x, Direction::Right)) => {
-                let midcursor = self.cursor - usize::from(x);
-                let size = NonZeroUsize::try_from(self.text.len() - midcursor).ok();
-                size.map(|x| (x, Direction::Right))
-            }
-            None => {
-                let size = NonZeroUsize::try_from(self.text.len() - self.cursor).ok();
-                size.map(|x| (x, Direction::Right))
-            }
-        };
-
-        self.cursor = self.text.len();
-    }
-
-    fn key_left(&mut self) {
-        match self.selection {
-            Some((_, Direction::Left)) => {}
-            Some((x, Direction::Right)) => {
-                self.cursor -= usize::from(x);
-            }
-            None => {
-                self.cursor = self.cursor.saturating_sub(1);
-            }
-        }
-
-        self.selection = None;
-    }
-
-    fn key_shift_left(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-
-        self.cursor -= 1;
-
-        self.selection = match self.selection {
-            Some((x, Direction::Left)) => {
-                let size =
-                    NonZeroUsize::try_from(1 + usize::from(x)).expect("Overflowed selection");
-                Some((size, Direction::Left))
-            }
-            Some((x, Direction::Right)) => {
-                let size = NonZeroUsize::try_from(usize::from(x) - 1).ok();
-                size.map(|x| (x, Direction::Right))
-            }
-            None => {
-                let size = NonZeroUsize::try_from(1)
-                    .expect("Cosmic rays or other such events have caused this error.");
-                Some((size, Direction::Left))
-            }
-        };
-    }
-
-    fn key_right(&mut self) {
-        match self.selection {
-            Some((x, Direction::Left)) => {
-                self.cursor += usize::from(x);
-            }
-            Some((_, Direction::Right)) => {}
-            None => {
-                self.cursor = self.cursor.add(1).min(self.text.len());
-            }
-        }
-
-        self.selection = None;
-    }
-
-    fn key_shift_right(&mut self) {
-        if self.cursor == self.text.len() {
-            return;
-        }
-
-        self.cursor += 1;
-
-        self.selection = match self.selection {
-            Some((x, Direction::Left)) => {
-                let size = NonZeroUsize::try_from(usize::from(x) - 1).ok();
-                size.map(|x| (x, Direction::Left))
-            }
-            Some((x, Direction::Right)) => {
-                let size = NonZeroUsize::try_from(1 + usize::from(x))
-                    .expect("User should never select >= 2^32 characters");
-                Some((size, Direction::Right))
-            }
-            None => {
-                let size = NonZeroUsize::try_from(1)
-                    .expect("Cosmic rays or other such events have caused this error.");
-                Some((size, Direction::Right))
-            }
-        };
-    }
-
-    fn del(&mut self) {
-        match self.selection {
-            Some((x, Direction::Left)) => {
-                let midcursor = self.cursor + usize::from(x);
-                self.text.drain(self.cursor..midcursor);
-            }
-            Some((x, Direction::Right)) => {
-                let midcursor = self.cursor - usize::from(x);
-                self.text.drain(midcursor..self.cursor);
-                self.cursor = midcursor;
-            }
-            None => {
-                if self.cursor != self.text.len() {
-                    self.text.remove(self.cursor);
-                }
-            }
-        };
-
-        self.selection = None;
-    }
-
-    fn backspace(&mut self) {
-        match self.selection {
-            Some((x, Direction::Left)) => {
-                let midcursor = self.cursor + usize::from(x);
-                self.text.drain(self.cursor..midcursor);
-            }
-            Some((x, Direction::Right)) => {
-                let midcursor = self.cursor - usize::from(x);
-                self.text.drain(midcursor..self.cursor);
-                self.cursor = midcursor;
-            }
-            None => {
-                if self.cursor != 0 {
-                    self.cursor -= 1;
-                    self.text.remove(self.cursor);
-                }
-            }
-        };
-
-        self.selection = None;
-    }
-
-    fn push(&mut self, c: char) {
-        match self.selection {
-            Some((x, Direction::Left)) => {
-                let midcursor = self.cursor + usize::from(x);
-                self.text.drain(self.cursor..midcursor);
-                self.text.insert(self.cursor, c);
-                self.cursor += 1;
-            }
-            Some((x, Direction::Right)) => {
-                let midcursor = self.cursor - usize::from(x);
-                self.text.drain(midcursor..self.cursor);
-                self.text.insert(midcursor, c);
-                self.cursor = midcursor + 1;
-            }
-            None => {
-                self.text.insert(self.cursor, c);
-                self.cursor += 1;
-            }
-        };
-
-        self.selection = None;
-    }
-
-    fn can_autocomplete(&mut self) -> bool {
-        self.selection.is_none()
-    }
-
-    fn clear(&mut self) {
-        self.text.clear();
-        self.cursor = 0;
-        self.selection = None;
-    }
 }
 
 #[cfg(test)]
