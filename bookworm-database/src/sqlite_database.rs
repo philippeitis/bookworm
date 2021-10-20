@@ -1232,7 +1232,7 @@ impl AppDatabase for SQLiteDatabase {
             .get_books(ids)
             .into_iter()
             .zip(ids.iter().cloned())
-            .map(|(book, id)| (id, book))
+            .map(|(book, id)| (id, book.cloned()))
             .collect();
         tracing::info!("Finishing loading all cached books");
         let ids: Vec<_> = books

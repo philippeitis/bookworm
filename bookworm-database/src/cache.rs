@@ -71,13 +71,8 @@ impl BookCache {
     }
 
     #[must_use]
-    pub fn get_book(&self, id: BookID) -> Option<Arc<Book>> {
-        self.books.get(&id).cloned()
-    }
-
-    #[must_use]
-    pub fn get_books(&self, ids: &[BookID]) -> Vec<Option<Arc<Book>>> {
-        ids.iter().map(|id| self.books.get(id).cloned()).collect()
+    pub fn get_books(&self, ids: &[BookID]) -> Vec<Option<&Arc<Book>>> {
+        ids.iter().map(|id| self.books.get(id)).collect()
     }
 
     pub fn edit_book_with_id(
