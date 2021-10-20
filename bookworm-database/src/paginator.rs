@@ -896,7 +896,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
 
         self.selected = Selection::Range(
             target.clone(),
-            target.clone(),
+            target,
             self.sorting_rules.clone(),
             Direction::Down,
             clone_match_box(&self.matching_rules),
