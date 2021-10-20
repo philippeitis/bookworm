@@ -68,10 +68,10 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
         }
     }
 
-    pub fn window(&self) -> Vec<Arc<Book>> {
+    pub fn window(&self) -> &[Arc<Book>] {
         match self.scopes.last() {
-            None => self.root_cursor.window().to_vec(),
-            Some(cursor) => cursor.window().to_vec(),
+            None => self.root_cursor.window(),
+            Some(cursor) => cursor.window(),
         }
     }
 
