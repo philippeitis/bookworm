@@ -5,8 +5,8 @@ use tokio::sync::RwLock;
 
 use unicase::UniCase;
 
-use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{Book, ColumnOrder};
+use bookworm_records::book::{BookID, ColumnIdentifier, RecordError};
+use bookworm_records::{Book, ColumnOrder};
 
 use crate::paginator::{Paginator, Selection};
 use crate::search::{Error as SearchError, Search};

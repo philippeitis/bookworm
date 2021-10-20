@@ -6,9 +6,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use unicase::UniCase;
 
-use bookstore_input::Edit;
-use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{Book, BookVariant};
+use bookworm_input::Edit;
+use bookworm_records::book::{BookID, ColumnIdentifier, RecordError};
+use bookworm_records::{Book, BookVariant};
 
 use crate::paginator::{Selection, Variable};
 

@@ -17,15 +17,15 @@ use unicode_truncate::UnicodeTruncateStr;
 #[cfg(feature = "copypaste")]
 use clipboard::{ClipboardContext, ClipboardProvider};
 
-use bookstore_app::app::AppChannel;
-use bookstore_app::parser::Source;
-use bookstore_app::settings::InterfaceStyle;
-use bookstore_app::settings::{Color, SortSettings};
-use bookstore_app::{parse_args, ApplicationError, BookIndex, Command};
-use bookstore_database::paginator::Selection;
-use bookstore_database::{AppDatabase, DatabaseError};
-use bookstore_input::{user_input::InputRecorder, Edit};
-use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
+use bookworm_app::app::AppChannel;
+use bookworm_app::parser::Source;
+use bookworm_app::settings::InterfaceStyle;
+use bookworm_app::settings::{Color, SortSettings};
+use bookworm_app::{parse_args, ApplicationError, BookIndex, Command};
+use bookworm_database::paginator::Selection;
+use bookworm_database::{AppDatabase, DatabaseError};
+use bookworm_input::{user_input::InputRecorder, Edit};
+use bookworm_records::book::{BookID, ColumnIdentifier, RecordError};
 
 use crate::ui::help_strings::{help_strings, GENERAL_HELP};
 use crate::ui::scrollable_text::ScrollableText;
@@ -154,7 +154,7 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
     Ok(ApplicationTask::DoNothing)
 }
 
-fn to_tui(c: bookstore_app::settings::Color) -> tui::style::Color {
+fn to_tui(c: bookworm_app::settings::Color) -> tui::style::Color {
     match c {
         Color::Black => TColor::Black,
         Color::Red => TColor::Red,

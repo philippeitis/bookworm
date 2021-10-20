@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
 
 env:
-  BIN_NAME: bookstore-tui
-  PROJECT_NAME: bookstore-tui
-  REPO_NAME: philippeitis/bookstore
+  BIN_NAME: bookworm-tui
+  PROJECT_NAME: bookworm-tui
+  REPO_NAME: philippeitis/bookworm
 #   BREW_TAP: jondot/homebrew-tap
   CARGO_TERM_COLOR: always
 

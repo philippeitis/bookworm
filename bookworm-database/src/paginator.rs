@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use bookstore_records::book::{BookID, ColumnIdentifier};
-use bookstore_records::{Book, ColumnOrder};
+use bookworm_records::book::{BookID, ColumnIdentifier};
+use bookworm_records::{Book, ColumnOrder};
 
 use crate::search::Matcher;
 use crate::{AppDatabase, DatabaseError};

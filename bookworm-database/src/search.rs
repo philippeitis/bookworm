@@ -3,8 +3,8 @@ use std::borrow::Cow;
 use regex::{Error as RegexError, Regex};
 use sublime_fuzzy::best_match;
 
-use bookstore_records::book::ColumnIdentifier;
-use bookstore_records::Book;
+use bookworm_records::book::ColumnIdentifier;
+use bookworm_records::Book;
 
 use crate::paginator::Variable;
 

@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use bookstore_records::book::ColumnIdentifier;
-use bookstore_records::ColumnOrder;
+use bookworm_records::book::ColumnIdentifier;
+use bookworm_records::ColumnOrder;
 
 #[derive(Copy, Clone)]
 pub enum Color {
@@ -108,7 +108,7 @@ impl Default for DatabaseSettings {
             path: dirs::data_local_dir().map_or_else(
                 || PathBuf::from("."),
                 |mut p| {
-                    p.push("bookstore/bookstore.db");
+                    p.push("bookworm/bookworm.db");
                     p
                 },
             ),

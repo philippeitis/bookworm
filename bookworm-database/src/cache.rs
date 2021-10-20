@@ -5,9 +5,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use unicase::UniCase;
 
-use bookstore_input::Edit;
-use bookstore_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookstore_records::{Book, Edit as BEdit};
+use bookworm_input::Edit;
+use bookworm_records::book::{BookID, ColumnIdentifier, RecordError};
+use bookworm_records::{Book, Edit as BEdit};
 
 /// `BookCache` acts as an intermediate caching layer between the backend database
 /// and the front-end UI - allowing books that are already in memory to be provided

@@ -4,10 +4,10 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 
-use bookstore_database::search::{Search, SearchMode};
-use bookstore_input::Edit;
-use bookstore_records::book::{BookID, ColumnIdentifier};
-use bookstore_records::ColumnOrder;
+use bookworm_database::search::{Search, SearchMode};
+use bookworm_input::Edit;
+use bookworm_records::book::{BookID, ColumnIdentifier};
+use bookworm_records::ColumnOrder;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum BookIndex {

@@ -11,16 +11,16 @@ use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::Terminal;
 
-use bookstore_app::app::AppChannel;
-use bookstore_app::columns::Columns;
-use bookstore_app::settings::{
+use bookworm_app::app::AppChannel;
+use bookworm_app::columns::Columns;
+use bookworm_app::settings::{
     DatabaseSettings, InterfaceSettings, InterfaceStyle, NavigationSettings, Settings, SortSettings,
 };
-use bookstore_app::ApplicationError;
-use bookstore_database::bookview::BookViewError;
-use bookstore_database::{AppDatabase, BookView, DatabaseError};
-use bookstore_input::user_input::{CommandString, CommandStringError, InputRecorder};
-use bookstore_records::Book;
+use bookworm_app::ApplicationError;
+use bookworm_database::bookview::BookViewError;
+use bookworm_database::{AppDatabase, BookView, DatabaseError};
+use bookworm_input::user_input::{CommandString, CommandStringError, InputRecorder};
+use bookworm_records::Book;
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::views::{

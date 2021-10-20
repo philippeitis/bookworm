@@ -53,8 +53,8 @@ jobs:
       run: sudo apt-get update && sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
     - name: Environment Variables
       run: echo "DATABASE_URL=sqlite:$(echo "/${PWD##/}/reference.db")" >> $GITHUB_ENV
-    - name: Test bookstore with copypaste
-      run: cargo +nightly test -Z package-features --features bookstore-tui/copypaste
+    - name: Test bookworm with copypaste
+      run: cargo +nightly test -Z package-features --features bookworm-tui/copypaste
   fmt:
     runs-on: ubuntu-latest
     strategy:

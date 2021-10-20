@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use unicase::UniCase;
 
-use bookstore_records::book::ColumnIdentifier;
-use bookstore_records::Book;
+use bookworm_records::book::ColumnIdentifier;
+use bookworm_records::Book;
 
 #[derive(Default)]
 pub struct Columns {

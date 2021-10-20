@@ -1,5 +1,5 @@
 [package]
-name = "bookstore-records"
+name = "bookworm-records"
 version = "0.1.0"
 authors = ["philippeitis <33013301+philippeitis@users.noreply.github.com>"]
 edition = "2018"

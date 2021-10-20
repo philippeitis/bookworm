@@ -18,10 +18,10 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use tokio::sync::RwLock;
 use unicase::UniCase;
 
-use bookstore_input::Edit;
-use bookstore_records::book::{BookID, ColumnIdentifier};
-use bookstore_records::series::Series;
-use bookstore_records::{Book, BookVariant, Edit as BEdit};
+use bookworm_input::Edit;
+use bookworm_records::book::{BookID, ColumnIdentifier};
+use bookworm_records::series::Series;
+use bookworm_records::{Book, BookVariant, Edit as BEdit};
 
 use crate::cache::BookCache;
 use crate::paginator::{QueryBuilder, Selection, Variable};
@@ -1372,7 +1372,7 @@ impl AppDatabase for SQLiteDatabase {
         &mut self,
         _books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
-        unimplemented!("bookstore does not currently support updating book paths.")
+        unimplemented!("bookworm does not currently support updating book paths.")
     }
 
     // async fn perform_query(

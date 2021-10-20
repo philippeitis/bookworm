@@ -1,11 +1,11 @@
 [workspace]
 
 members = [
-    "bookstore-tui",
-    "bookstore-app",
-    "bookstore-records",
-    "bookstore-database",
-    "bookstore-input",
+    "bookworm-tui",
+    "bookworm-app",
+    "bookworm-records",
+    "bookworm-database",
+    "bookworm-input",
 ]
 resolver = "2"
 

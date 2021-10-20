@@ -8,8 +8,8 @@ use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, Borders, Paragraph};
 use tui::Frame;
 
-use bookstore_database::Book;
-use bookstore_input::user_input::{CharChunks, CommandString, Direction};
+use bookworm_database::Book;
+use bookworm_input::user_input::{CharChunks, CommandString, Direction};
 
 use crate::ui::scrollable_text::BlindOffset;
 
@@ -329,7 +329,7 @@ impl<B: Backend> Widget<B> for BorderWidget {
     fn render_into_frame(&self, f: &mut Frame<B>, chunk: Rect) {
         let block = Block::default()
             .title(format!(
-                " bookstore || {} || {}{}",
+                " bookworm || {} || {}{}",
                 self.name,
                 self.path.display(),
                 if self.saved { " " } else { " * " }

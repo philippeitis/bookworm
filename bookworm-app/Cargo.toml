@@ -1,5 +1,5 @@
 [package]
-name = "bookstore-app"
+name = "bookworm-app"
 version = "0.1.0"
 authors = ["philippeitis <33013301+philippeitis@users.noreply.github.com>"]
 edition = "2018"
@@ -7,9 +7,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bookstore-database = { version = "0.1.0", path = "../bookstore-database" }
-bookstore-records = { version = "0.1.0", path = "../bookstore-records" }
-bookstore-input = { version = "0.1.0", path = "../bookstore-input" }
+bookworm-database = { version = "0.1.0", path = "../bookworm-database" }
+bookworm-records = { version = "0.1.0", path = "../bookworm-records" }
+bookworm-input = { version = "0.1.0", path = "../bookworm-input" }
 
 serde = { version = "1.0", features = ["derive"] }
 

@@ -21,9 +21,9 @@ use tracing::subscriber::set_global_default;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{fmt, EnvFilter, Registry};
 
-use bookstore_app::{parse_args, App, Settings};
-use bookstore_database::AppDatabase;
-use bookstore_database::SQLiteDatabase;
+use bookworm_app::{parse_args, App, Settings};
+use bookworm_database::AppDatabase;
+use bookworm_database::SQLiteDatabase;
 
 use crate::ui::terminal_ui::UIState;
 use crate::ui::views::{run_command, AppView, ApplicationTask};
@@ -41,10 +41,10 @@ struct Opts {
 #[tokio::main]
 async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> {
     let logging_dir = if let Some(mut dir) = dirs::data_local_dir() {
-        dir.push("bookstore/logs/log");
+        dir.push("bookworm/logs/log");
         dir
     } else {
-        PathBuf::from("./bookstore/logs/log")
+        PathBuf::from("./bookworm/logs/log")
     };
 
     std::fs::create_dir_all(
@@ -90,7 +90,7 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
             Some(path),
         )
     } else if let Some(mut path) = dirs::config_dir() {
-        path.push("bookstore/settings.toml");
+        path.push("bookworm/settings.toml");
         (
             Settings::open(&path).unwrap_or_default().split(),
             Some(path),

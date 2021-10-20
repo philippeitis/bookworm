@@ -1,20 +1,20 @@
-# bookstore
-![CI](https://github.com/philippeitis/bookstore/actions/workflows/rust.yml/badge.svg)
+# bookworm
+![CI](https://github.com/philippeitis/bookworm/actions/workflows/rust.yml/badge.svg)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-bookstore is a fast TUI library management system, like Calibre.
+bookworm is a fast TUI library management system, like Calibre.
 
 # Features
 - High performance reading of ebook metadata
-  - bookstore can read ~8000 books per second, whereas Calibre, on the same system, with the same books, takes multiple minutes
+  - bookworm can read ~8000 books per second, whereas Calibre, on the same system, with the same books, takes multiple minutes
 - Command based interface, usable from both TUI and CLI
 - SQLite backend
   - Modifications are synchronized to the SQLite backend at the path specified via --database
 - Instant startup
-  - bookstore only reads books into memory when they're needed, allowing a database with millions of books to be opened instantly
+  - bookworm only reads books into memory when they're needed, allowing a database with millions of books to be opened instantly
 # Installation
 ## Download binary
-Binary downloads are available at https://github.com/philippeitis/bookstore/releases
+Binary downloads are available at https://github.com/philippeitis/bookworm/releases
 
 The Linux version requires installing dependencies for copy & paste beforehand, using the following command:
 ```bash
@@ -24,17 +24,17 @@ sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
 ## Build from source
 On Windows, MacOS
 ```bash
-git clone https://github.com/philippeitis/bookstore.git
-cd bookstore
-cargo install --path bookstore-tui --features copypaste 
+git clone https://github.com/philippeitis/bookworm.git
+cd bookworm
+cargo install --path bookworm-tui --features copypaste 
 ```
 
 On Linux distros, additional dependencies are required for copy-paste support:
 ```bash
-git clone https://github.com/philippeitis/bookstore.git
-cd bookstore
+git clone https://github.com/philippeitis/bookworm.git
+cd bookworm
 sudo apt-get install xorg-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
-cargo install --path bookstore-tui --features copypaste
+cargo install --path bookworm-tui --features copypaste
 ```
 
 The minimum supported Rust version is current stable.
@@ -57,7 +57,7 @@ Note that not all terminals are fully supported - Windows Command Prompt and Ubu
   - Finding books with regex or exact substring string or exact string or default: `:f ((-r|-e|-x)? [column] [search_str])+`
   - Jumping to a book with regex or exact substring string or exact string or default: `:j ((-r|-e|-x)? [column] [search_str])+`
   - View help strings: `:h (command)?`
-  - Supplying one or more commands from CLI: `bookstore [args] (-- [command])*`
+  - Supplying one or more commands from CLI: `bookworm [args] (-- [command])*`
 - Hotkey navigation and interaction
   - Scrolling up and down using:
     - scroll wheel on mouse
