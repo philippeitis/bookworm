@@ -294,7 +294,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                 };
                 terminal.draw(|f| {
                     let size = f.size();
-                    tracing::info!("Rendering into terminal with size {:?}", size);
+                    // tracing::info!("Rendering into terminal with size {:?}", size);
 
                     if size.height < 2 || size.width < 2 {
                         return;

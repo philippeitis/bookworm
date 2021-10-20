@@ -126,6 +126,7 @@ pub enum AppTask {
     EditBooks(Box<[BookID]>, Box<[(ColumnIdentifier, Edit)]>),
     EditSelection(Selection, Box<[(ColumnIdentifier, Edit)]>),
     AddBooks(Box<[Source]>),
+    UpdateBooks(Box<[Source]>),
     TryMergeAllBooks,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     OpenBookIn(BookID, usize, Target),
@@ -243,6 +244,14 @@ impl<D: AppDatabase + Send + Sync> AppChannel<D> {
         match self.receive().await.unwrap() {
             AppResponse::Created(result) => result,
             _ => panic!("Expected Created response from application"),
+        }
+    }
+
+    pub async fn update_books(&self, sources: Box<[Source]>) {
+        self.send(AppTask::UpdateBooks(sources)).await;
+        match self.receive().await.unwrap() {
+            AppResponse::Empty => {}
+            _ => panic!("Expected empty response from application"),
         }
     }
 
@@ -464,6 +473,44 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                     }
 
                     AppResponse::Created(ids)
+                }
+                AppTask::UpdateBooks(sources) => {
+                    let mut futs = vec![];
+                    for source in sources.into_vec() {
+                        match source {
+                            Source::File(f) => {
+                                if let Ok(book) = BookVariant::from_path(&f) {
+                                    let _ = async_write!(
+                                        self,
+                                        db,
+                                        db.update(std::iter::once(book)).await
+                                    );
+                                }
+                            }
+                            Source::Dir(dir, depth) => {
+                                if let Ok(books) = books_in_dir(&dir, depth) {
+                                    let db = self.db.clone();
+                                    futs.push(tokio::spawn(async move {
+                                        let _ = db.write().await.update(books.into_iter()).await;
+                                    }));
+                                }
+                            }
+                            Source::Glob(glob) => {
+                                if let Ok(books) = books_globbed(&glob) {
+                                    let db = self.db.clone();
+                                    futs.push(tokio::spawn(async move {
+                                        let _ =
+                                            db.write().await.insert_books(books.into_iter()).await;
+                                    }));
+                                }
+                            }
+                        }
+                    }
+
+                    for fut in futs {
+                        let _ = fut.await;
+                    }
+                    AppResponse::Empty
                 }
                 // Add details about strategies (eg. which types of books, what to do on conflict)
                 AppTask::TryMergeAllBooks => {

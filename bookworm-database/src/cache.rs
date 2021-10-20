@@ -61,7 +61,9 @@ impl BookCache {
     }
 
     pub fn remove_books(&mut self, ids: &HashSet<BookID>) {
-        self.books.retain(|id, _| !ids.contains(id));
+        for id in ids {
+            self.books.remove(id);
+        }
     }
 
     pub fn clear(&mut self) {

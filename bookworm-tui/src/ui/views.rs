@@ -97,6 +97,10 @@ pub(crate) async fn run_command<D: AppDatabase + Send + Sync>(
             app.add_books(sources).await;
             ui_state.book_view.refresh().await?;
         }
+        Command::UpdateBooks(sources) => {
+            app.update_books(sources).await;
+            ui_state.book_view.refresh().await?;
+        }
         Command::ModifyColumns(columns) => {
             app.modify_columns(columns, &mut ui_state.table_view, &mut ui_state.book_view)
                 .await?;
@@ -480,7 +484,7 @@ impl<D: AppDatabase + Send + Sync> ColumnWidget<D> {
 
 #[async_trait]
 impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for ColumnWidget<D> {
-    #[tracing::instrument(name = "Preparing ColumnWidgetRender", skip(self, state))]
+    // #[tracing::instrument(name = "Preparing ColumnWidgetRender", skip(self, state))]
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
         self.refresh_book_widget(state).await;
         let chunk = if let Some(book_widget) = &mut self.book_widget {
@@ -502,8 +506,8 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
             ])
             .split(chunk);
 
-        tracing::info!("Preparing to render into chunk with size {:?}", chunk);
-        tracing::info!("Have vertical chunks: {:?}", vchunks);
+        // tracing::info!("Preparing to render into chunk with size {:?}", chunk);
+        // tracing::info!("Have vertical chunks: {:?}", vchunks);
 
         // Account for column titles
         let _ = state
@@ -710,15 +714,17 @@ impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
                         curr_command.refresh_autofill()?;
                         match parse_args(curr_command.get_values().map(|(_, s)| s).collect()) {
                             Ok(command) => match command {
-                                Command::AddBooks(sources) => match sources.last() {
-                                    Some(Source::File(_)) => {
-                                        curr_command.auto_fill(false);
+                                Command::AddBooks(sources) | Command::UpdateBooks(sources) => {
+                                    match sources.last() {
+                                        Some(Source::File(_)) => {
+                                            curr_command.auto_fill(false);
+                                        }
+                                        Some(Source::Dir(_, _)) => {
+                                            curr_command.auto_fill(true);
+                                        }
+                                        _ => {}
                                     }
-                                    Some(Source::Dir(_, _)) => {
-                                        curr_command.auto_fill(true);
-                                    }
-                                    _ => {}
-                                },
+                                }
                                 _ => {}
                             },
                             Err(_) => {}

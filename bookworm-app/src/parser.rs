@@ -38,6 +38,7 @@ enum CommandRoot {
     FindMatches,
     JumpTo,
     Help,
+    Update,
 }
 
 impl FromStr for CommandRoot {
@@ -58,6 +59,7 @@ impl FromStr for CommandRoot {
             ":f" => CommandRoot::FindMatches,
             ":j" => CommandRoot::JumpTo,
             ":h" => CommandRoot::Help,
+            ":update" => CommandRoot::Update,
             _ => return Err(CommandError::UnknownCommand),
         })
     }
@@ -82,6 +84,7 @@ pub enum Command {
     FilterMatches(Box<[Search]>),
     JumpTo(Box<[Search]>),
     Help(String),
+    UpdateBooks(Box<[Source]>),
     GeneralHelp,
     // TODO:
     //  eg. :m 1 2 -> merge 2 into 1
@@ -193,6 +196,7 @@ impl CommandRoot {
             CommandRoot::FindMatches => Filter::from_args(start_args, trailing_args)?.into(),
             CommandRoot::JumpTo => Jump::from_args(start_args, trailing_args)?.into(),
             CommandRoot::Help => Help::from_args(start_args, trailing_args)?.into(),
+            CommandRoot::Update => UpdateBooks::from_args(start_args, trailing_args)?.into(),
         })
     }
 }
@@ -406,6 +410,92 @@ impl CommandParser for AddBooks {
         }
 
         Ok(AddBooks {
+            sources: sources.into_boxed_slice(),
+        })
+    }
+}
+
+#[cfg_attr(test, derive(PartialEq))]
+#[derive(Debug)]
+struct UpdateBooks {
+    sources: Box<[Source]>,
+}
+
+impl From<UpdateBooks> for Command {
+    fn from(ub: UpdateBooks) -> Self {
+        Command::UpdateBooks(ub.sources)
+    }
+}
+
+impl CommandParser for UpdateBooks {
+    fn from_args(
+        start_args: Vec<String>,
+        trailing_args: Vec<(String, Vec<String>)>,
+    ) -> Result<Self, CommandError> {
+        let mut sources: Vec<_> = start_args
+            .into_iter()
+            .map(PathBuf::from)
+            .map(Source::File)
+            .collect();
+        let mut prev_ind = sources.len();
+
+        let global_recursion = trailing_args
+            .first()
+            .map(|(r, a)| {
+                if r == "-r" {
+                    match a.first() {
+                        None => 255,
+                        Some(s) => u8::from_str(s).unwrap_or(255),
+                    }
+                } else {
+                    1
+                }
+            })
+            .unwrap_or(1);
+
+        for (flag, args) in trailing_args {
+            match flag.as_str() {
+                "-g" => {
+                    sources.extend(args.into_iter().map(Source::Glob));
+                    prev_ind = sources.len();
+                }
+                "-d" => {
+                    prev_ind = sources.len();
+                    for path in args {
+                        sources.push(Source::Dir(PathBuf::from(path), global_recursion));
+                    }
+                }
+                "-r" => {
+                    if prev_ind >= sources.len() {
+                        debug_assert!(prev_ind == sources.len());
+                        continue;
+                    }
+
+                    let local_depth = args.first().map(|s| u8::from_str(s).unwrap_or(255));
+
+                    for source in &mut sources[prev_ind..] {
+                        if let Source::Dir(_, depth) = source {
+                            *depth = local_depth.unwrap_or(255);
+                        }
+                    }
+
+                    let mut args = args.into_iter();
+                    if local_depth.is_some() {
+                        args.next();
+                    }
+
+                    sources.extend(args.map(PathBuf::from).map(Source::File));
+                    prev_ind = sources.len();
+                }
+                "-p" => {
+                    sources.extend(args.into_iter().map(PathBuf::from).map(Source::File));
+                    prev_ind = sources.len();
+                }
+                _ => return Err(CommandError::UnknownFlag),
+            }
+        }
+
+        Ok(UpdateBooks {
             sources: sources.into_boxed_slice(),
         })
     }

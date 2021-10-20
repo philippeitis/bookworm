@@ -169,7 +169,7 @@ pub trait AppDatabase {
     async fn update<I: Iterator<Item = BookVariant> + Send>(
         &mut self,
         books: I,
-    ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;
+    ) -> Result<(), DatabaseError<Self::Error>>;
 
     #[must_use]
     /// Returns whether the provided column exists in at least one book in the database.

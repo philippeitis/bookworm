@@ -1062,17 +1062,6 @@ impl SQLiteDatabase {
         tx.commit().await
     }
 
-    async fn update_books_async<I: Iterator<Item = BookVariant> + Send>(
-        &mut self,
-        _books: I,
-        _transaction_size: usize,
-    ) -> Result<Vec<BookID>, <Self as AppDatabase>::Error> {
-        // Get file sizes and hashes
-        // let books: Vec<BookVariant> = books.into_iter().collect();
-        // let sizes_and_hashes: Vec<_> = books.iter().map(|b| (b.file_size, b.hash)).collect();
-        unimplemented!();
-    }
-
     async fn edit_unique(
         &mut self,
         books: &HashMap<BookID, Arc<Book>>,
@@ -1368,11 +1357,118 @@ impl AppDatabase for SQLiteDatabase {
         true
     }
 
-    async fn update<I: IntoIterator<Item = BookVariant> + Send>(
+    #[tracing::instrument(name = "Updating books from sources", skip(self, books))]
+    async fn update<I: Iterator<Item = BookVariant> + Send>(
         &mut self,
-        _books: I,
-    ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
-        unimplemented!("bookworm does not currently support updating book paths.")
+        books: I,
+    ) -> Result<(), DatabaseError<Self::Error>> {
+        #[derive(sqlx::FromRow)]
+        struct VariantMetadata {
+            book_id: i64,
+            id: Option<i64>,
+            file_size: i64,
+            hash: Vec<u8>,
+        }
+
+        let raw_variants: Vec<VariantMetadata> = sqlx::query_as!(
+            VariantMetadata,
+            "SELECT book_id, id, file_size, hash FROM variants"
+        )
+        .fetch_all(&self.connection)
+        .await
+        .map_err(DatabaseError::Backend)?;
+
+        tracing::info!("Read {} hashes from disk", raw_variants.len());
+        let target_hashmap: HashMap<(u64, [u8; 32]), (Option<u32>, BookID)> = raw_variants
+            .into_iter()
+            .map(|vm| {
+                (
+                    (vm.file_size as u64, {
+                        let len = vm.hash.len();
+                        vm.hash
+                            .try_into()
+                            .map_err(|_| {
+                                DataError::Serialize(format!(
+                                    "Got {} byte hash, expected 32 byte hash",
+                                    len
+                                ))
+                            })
+                            .unwrap()
+                    }),
+                    (
+                        vm.id.map(|id| id as u32),
+                        BookID::try_from(vm.book_id as u64).unwrap(),
+                    ),
+                )
+            })
+            .collect();
+
+        sqlx::query!(
+            "CREATE INDEX IF NOT EXISTS variant_hashes on variants(book_id, id, file_size, hash);"
+        )
+        .execute(&self.connection)
+        .await
+        .map_err(DatabaseError::Backend)?;
+
+        tracing::info!("Created index for fast writes");
+        let mut tx = self
+            .connection
+            .begin()
+            .await
+            .map_err(DatabaseError::Backend)?;
+        for variant in books {
+            if let Some((id, book_id)) = target_hashmap.get(&(variant.file_size, variant.hash)) {
+                #[cfg(unix)]
+                let path = variant.path().as_os_str().as_bytes();
+                #[cfg(windows)]
+                let path = v16_to_v8(variant.path().as_os_str().encode_wide().collect());
+                let id = id.map(|id| id as i64);
+                let file_size = variant.file_size as i64;
+                let hash = variant.hash.to_vec();
+                let book_id_ = u64::from(*book_id) as i64;
+                tracing::info!(
+                    "Found matching variant, setting path to {} for variant with id {:?}, file size {:?}, hash {:?}, and book_id {}",
+                    variant.path.display(),
+                    id,
+                    file_size,
+                    hash,
+                    book_id_
+                );
+
+                let num_rows = if id.is_none() {
+                    sqlx::query!(
+                        "UPDATE variants SET path = ? WHERE (id is NULL AND file_size = ? AND hash = ? AND book_id = ?)",
+                        path,
+                        file_size,
+                        hash,
+                        book_id_
+                    )
+                } else {
+                    sqlx::query!(
+                        "UPDATE variants SET path = ? WHERE (id = ? AND file_size = ? AND hash = ? AND book_id = ?)",
+                        path,
+                        id,
+                        file_size,
+                        hash,
+                        book_id_
+                    )
+                }
+                    .execute(&mut tx)
+                    .await
+                    .map_err(DatabaseError::Backend)?
+                    .rows_affected();
+                if num_rows != 1 {
+                    tracing::error!("Query should have modified at least one value");
+                }
+
+                self.cache
+                    .write()
+                    .await
+                    .remove_books(&std::iter::once(*book_id).collect::<HashSet<_>>());
+            }
+        }
+        tracing::info!("Completing merge, committing transaction");
+        tx.commit().await.map_err(DatabaseError::Backend)
     }
 
     // async fn perform_query(
