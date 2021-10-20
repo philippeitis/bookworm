@@ -91,7 +91,7 @@ pub struct NavigationSettings {
 impl Default for NavigationSettings {
     fn default() -> Self {
         NavigationSettings {
-            scroll: 0,
+            scroll: 5,
             inverted: false,
         }
     }
