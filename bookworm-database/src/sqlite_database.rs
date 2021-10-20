@@ -518,50 +518,6 @@ impl SQLiteDatabase {
         Ok((new_books, columns))
     }
 
-    #[tracing::instrument(name = "Loading book IDs from disk or cache", skip(self))]
-    /// Loads the books with the provided ids - either reading from the underlying database,
-    /// or from the internal cache, on a book-by-book basis.
-    async fn load_book_ids(
-        &self,
-        ids: &[BookID],
-    ) -> Result<HashMap<BookID, Arc<Book>>, DatabaseError<<SQLiteDatabase as AppDatabase>::Error>>
-    {
-        let mut books: HashMap<BookID, Option<Arc<Book>>> = self
-            .cache
-            .read()
-            .await
-            .get_books(ids)
-            .into_iter()
-            .zip(ids.iter().cloned())
-            .map(|(book, id)| (id, book))
-            .collect();
-        tracing::info!("Finishing loading all cached books");
-        let ids: Vec<_> = books
-            .iter()
-            .filter(|(_, book)| book.is_none())
-            .map(|(id, _)| *id)
-            .collect();
-        tracing::info!(
-            "{} books were not available in cache - searching in DB",
-            ids.len()
-        );
-        let (new_books, columns) = self.read_books_from_sql(&ids).await?;
-        {
-            let mut cache = self.cache.write().await;
-            for book in new_books.iter().map(|(_, book)| book) {
-                cache.insert_book(book.clone());
-            }
-            cache.insert_columns(columns);
-        }
-        new_books
-            .into_iter()
-            .for_each(|(id, book)| drop(books.insert(id, Some(book))));
-        Ok(books
-            .into_iter()
-            .filter_map(|(id, book)| book.map(|book| (id, book)))
-            .collect())
-    }
-
     async fn load_books(
         &mut self,
     ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
@@ -1255,10 +1211,54 @@ impl AppDatabase for SQLiteDatabase {
     async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>> {
         // "SELECT * FROM books WHERE book_id = {id}"
         // If this is put in the match, the read lock will cause the process to hang
-        self.load_book_ids(&[id])
+        self.get_books(&[id])
             .await?
             .remove(&id)
             .ok_or(DatabaseError::BookNotFound(id))
+    }
+
+    #[tracing::instrument(name = "Loading book IDs from disk or cache", skip(self))]
+    /// Loads the books with the provided ids - either reading from the underlying database,
+    /// or from the internal cache, on a book-by-book basis.
+    async fn get_books(
+        &self,
+        ids: &[BookID],
+    ) -> Result<HashMap<BookID, Arc<Book>>, DatabaseError<<SQLiteDatabase as AppDatabase>::Error>>
+    {
+        let mut books: HashMap<BookID, Option<Arc<Book>>> = self
+            .cache
+            .read()
+            .await
+            .get_books(ids)
+            .into_iter()
+            .zip(ids.iter().cloned())
+            .map(|(book, id)| (id, book))
+            .collect();
+        tracing::info!("Finishing loading all cached books");
+        let ids: Vec<_> = books
+            .iter()
+            .filter(|(_, book)| book.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        tracing::info!(
+            "{} books were not available in cache - searching in DB",
+            ids.len()
+        );
+        let (new_books, columns) = self.read_books_from_sql(&ids).await?;
+        {
+            let mut cache = self.cache.write().await;
+            for book in new_books.iter().map(|(_, book)| book) {
+                cache.insert_book(book.clone());
+            }
+            cache.insert_columns(columns);
+        }
+        new_books
+            .into_iter()
+            .for_each(|(id, book)| drop(books.insert(id, Some(book))));
+        Ok(books
+            .into_iter()
+            .filter_map(|(id, book)| book.map(|book| (id, book)))
+            .collect())
     }
 
     async fn read_selected_books(
@@ -1267,7 +1267,7 @@ impl AppDatabase for SQLiteDatabase {
         bound_variables: &[Variable],
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
         let ids = self.read_book_ids(query, bound_variables).await?;
-        let books = self.load_book_ids(&ids).await?;
+        let books = self.get_books(&ids).await?;
 
         Ok(ids
             .iter()
@@ -1292,7 +1292,7 @@ impl AppDatabase for SQLiteDatabase {
             .map_err(DatabaseError::Backend)?;
 
         let mut book = self
-            .load_book_ids(&[id])
+            .get_books(&[id])
             .await?
             .remove(&id)
             .ok_or(DatabaseError::BookNotFound(id))?;

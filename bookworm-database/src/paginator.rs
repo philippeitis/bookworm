@@ -1116,7 +1116,24 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
             .cloned();
         self.books.clear();
         tracing::info!("Cleared internal books");
-        self.make_book_visible(target).await
+        self.make_book_visible(target).await?;
+        match &mut self.selected {
+            Selection::All(_) => {}
+            Selection::Partial(books, _) => {
+                let ids: Vec<_> = books.keys().cloned().collect();
+                *books = self.db.read().await.get_books(&ids).await?;
+            }
+            Selection::Range(start, end, _, _, _) => {
+                if let Ok(new_start) = self.db.read().await.get_book(start.id()).await {
+                    *start = new_start;
+                }
+                if let Ok(new_end) = self.db.read().await.get_book(end.id()).await {
+                    *end = new_end;
+                }
+            }
+            Selection::Empty => {}
+        }
+        Ok(())
     }
 
     pub fn window_size(&self) -> usize {

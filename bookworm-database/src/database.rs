@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::path;
 use std::sync::Arc;
@@ -120,6 +120,19 @@ pub trait AppDatabase {
     /// This function will return an error if the database fails or no book is found
     /// with the given ID.
     async fn get_book(&self, id: BookID) -> Result<Arc<Book>, DatabaseError<Self::Error>>;
+
+    #[must_use]
+    /// Finds and returns the books with the given IDs as entries in a hashmap.
+    ///
+    /// # Arguments
+    /// * ` ids ` - The IDs of the book to be returned.
+    ///
+    /// # Errors
+    /// This function will return an error if the database fails
+    async fn get_books(
+        &self,
+        id: &[BookID],
+    ) -> Result<HashMap<BookID, Arc<Book>>, DatabaseError<Self::Error>>;
 
     async fn read_selected_books(
         &self,
