@@ -1145,12 +1145,12 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
     }
     // https://github.com/rusqlite/rusqlite/blob/6a22bb7a56d4be48f5bea81c40ccc496fc74bb57/src/functions.rs#L844
 
-    pub fn relative_selections(&self) -> Vec<(usize, Arc<Book>)> {
+    pub fn relative_selections(&self) -> Vec<(usize, &Arc<Book>)> {
         self.window()
             .iter()
             .enumerate()
             .filter(|(i, book)| self.selected.contains(book.as_ref()))
-            .map(|(i, book)| (i, book.clone()))
+            .map(|(i, book)| (i, book))
             .collect()
     }
 

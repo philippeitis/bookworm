@@ -99,7 +99,7 @@ impl<D: AppDatabase + Send + Sync> UIState<D> {
         self.table_view.selected_cols().len()
     }
 
-    pub(crate) fn selected(&self) -> Option<(usize, Vec<(usize, Arc<Book>)>)> {
+    pub(crate) fn selected(&self) -> Option<(usize, Vec<(usize, &Arc<Book>)>)> {
         Some((self.selected_column, self.book_view.relative_selections()))
     }
 

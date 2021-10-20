@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::sync::Arc;
 
 use unicase::UniCase;
 
@@ -22,9 +21,9 @@ impl Columns {
         }
     }
 
-    pub fn read_columns<'s, 'a>(
+    pub fn read_columns<'s, 'a, B: AsRef<Book>>(
         &'s self,
-        books: &'a [Arc<Book>],
+        books: &'a [B],
     ) -> impl Iterator<Item = (&'s UniCase<String>, impl Iterator<Item = Cow<'a, str>> + 'a)> {
         Box::new(
             self.selected_cols
@@ -33,9 +32,11 @@ impl Columns {
                 .map(move |(col, col_id)| {
                     (
                         col,
-                        books
-                            .iter()
-                            .map(move |book| book.get_column(&col_id).unwrap_or(Cow::Borrowed(""))),
+                        books.iter().map(move |book| {
+                            book.as_ref()
+                                .get_column(&col_id)
+                                .unwrap_or(Cow::Borrowed(""))
+                        }),
                     )
                 }),
         )

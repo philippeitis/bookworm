@@ -109,7 +109,7 @@ impl<D: AppDatabase + Send + Sync + 'static> BookView<D> {
 
     /// Returns the books in the selection with their index, relative to the top
     /// and the book itself
-    pub fn relative_selections(&self) -> Vec<(usize, Arc<Book>)> {
+    pub fn relative_selections(&self) -> Vec<(usize, &Arc<Book>)> {
         match self.scopes.last() {
             None => self.root_cursor.relative_selections(),
             Some(cursor) => cursor.relative_selections(),
