@@ -892,7 +892,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         &mut self,
         target: Arc<Book>,
     ) -> Result<(), DatabaseError<D::Error>> {
-        self.make_book_visible(Some(target.clone())).await?;
+        self.make_book_visible(Some(&target)).await?;
 
         self.selected = Selection::Range(
             target.clone(),
