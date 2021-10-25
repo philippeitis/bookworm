@@ -208,7 +208,7 @@ impl Book {
     /// Sets specified columns, to the specified value. Titles will be stored directly,
     /// authors will be stored as a list containing a single author.
     /// ID and Variants can not be modified through `set_column`.
-    /// Series will be parsed to extract an index - strings in the form "series [num]"
+    /// Series will be parsed to extract an index - strings in the form "series \[num\]"
     /// will be parsed as ("series", num).
     ///
     /// All remaining arguments will be stored literally.
