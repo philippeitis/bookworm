@@ -1267,15 +1267,14 @@ impl AppDatabase for SQLiteDatabase {
         bound_variables: &[Variable],
     ) -> Result<Vec<Arc<Book>>, DatabaseError<Self::Error>> {
         let ids = self.read_book_ids(query, bound_variables).await?;
-        let books = self.get_books(&ids).await?;
+        let mut books = self.get_books(&ids).await?;
 
         Ok(ids
             .iter()
             .map(|id| {
                 books
-                    .get(id)
+                    .remove(id)
                     .expect("failed to load all books from SQLite")
-                    .clone()
             })
             .collect())
     }

@@ -774,13 +774,11 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
 
         let db = self.db.clone();
         tokio::spawn(async move {
-            let start = std::time::Instant::now();
             let _ = db
                 .write()
                 .await
                 .read_selected_books(&query, &bindings)
                 .await;
-            let end = std::time::Instant::now();
         });
 
         self.books.extend(books);
@@ -821,13 +819,11 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
 
         let db = self.db.clone();
         tokio::spawn(async move {
-            let start = std::time::Instant::now();
             let _ = db
                 .write()
                 .await
                 .read_selected_books(&query, &bindings)
                 .await;
-            let end = std::time::Instant::now();
         });
 
         if !books.is_empty() {
@@ -1149,7 +1145,7 @@ impl<D: AppDatabase + Send + Sync> Paginator<D> {
         self.window()
             .iter()
             .enumerate()
-            .filter(|(i, book)| self.selected.contains(book.as_ref()))
+            .filter(|(_, book)| self.selected.contains(book.as_ref()))
             .map(|(i, book)| (i, book))
             .collect()
     }
