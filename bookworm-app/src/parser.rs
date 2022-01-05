@@ -137,7 +137,7 @@ fn remove_string_quotes(mut s: String) -> String {
 ///
 /// # Arguments
 /// * ` args ` - A vector of command line arguments in sequential order.
-fn read_args<I: Iterator<Item=String>>(args: I) -> (Vec<String>, Vec<(String, Vec<String>)>) {
+fn read_args<I: Iterator<Item = String>>(args: I) -> (Vec<String>, Vec<(String, Vec<String>)>) {
     let mut v_iter = args.peekable();
     if v_iter.peek().is_none() {
         return (Vec::new(), Vec::new());
@@ -164,9 +164,7 @@ fn read_args<I: Iterator<Item=String>>(args: I) -> (Vec<String>, Vec<(String, Ve
 /// If the command is missing required arguments, or is unrecognized, an error is returned.
 pub fn parse_args(args: Vec<String>) -> Result<Command, CommandError> {
     let mut args = args.into_iter();
-    let c = args
-        .next()
-        .ok_or(CommandError::InsufficientArguments)?;
+    let c = args.next().ok_or(CommandError::InsufficientArguments)?;
 
     let (start, trail) = read_args(args);
     CommandRoot::from_str(&c)?.into_command(start, trail)
