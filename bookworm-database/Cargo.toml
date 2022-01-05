@@ -19,7 +19,7 @@ tokio = { version = "1.15.0", features = ["full", "rt"] }
 async-trait = "0.1.52"
 
 # SQLx dependencies
-sqlx = { version = "0.5.9", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
+sqlx = { version = "0.5.10", features = [ "runtime-tokio-native-tls", "sqlite", "macros" ], optional = true }
 ron = { version = "0.7.0", optional = true }
 
 tracing-futures = "0.2.5"
