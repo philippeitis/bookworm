@@ -162,8 +162,6 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
         AppInterface {
             border_widget: BorderWidget::new(name.into(), path),
             active_view: Box::new(ColumnWidget {
-                book_widget: None,
-                command_widget_selected: false,
                 database: Default::default(),
             }),
             update_tui: false,
@@ -210,8 +208,6 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                         match view {
                             AppView::Columns => {
                                 self.active_view = Box::new(ColumnWidget {
-                                    book_widget: None,
-                                    command_widget_selected: false,
                                     database: PhantomData,
                                 })
                             }
