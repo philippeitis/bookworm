@@ -373,3 +373,27 @@ impl StyleRules {
         self
     }
 }
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_chunk_split() {
+        let width = 50;
+        let c = Rect::new(0, 0, width, 0);
+
+        assert_eq!(split_chunk_into_columns(c, 0), vec![]);
+
+        for i in 1..width {
+            assert_eq!(
+                split_chunk_into_columns(c, i)
+                    .iter()
+                    .map(|r| r.width)
+                    .sum::<u16>(),
+                width
+            );
+        }
+    }
+}
