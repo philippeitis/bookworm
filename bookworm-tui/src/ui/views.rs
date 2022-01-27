@@ -2,9 +2,6 @@ use std::collections::VecDeque;
 
 use tui::layout::Rect;
 
-#[cfg(feature = "copypaste")]
-use clipboard::{ClipboardContext, ClipboardProvider};
-
 use bookworm_database::AppDatabase;
 
 use crate::ui::widgets::{BookWidget, ColumnWidget, CommandWidget, EditWidget, HelpWidget};
