@@ -23,11 +23,10 @@ use bookworm_input::user_input::{CommandString, CommandStringError, InputRecorde
 use bookworm_records::Book;
 
 use crate::ui::scrollable_text::ScrollableText;
-use crate::ui::views::{
-    AppView, ApplicationTask, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget,
+use crate::ui::utils::{AppView, ApplicationTask};
+use crate::ui::widgets::{
+    BorderWidget, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget, Widget,
 };
-use crate::ui::widgets::{BorderWidget, Widget};
-
 #[derive(Debug)]
 pub(crate) enum TuiError<DBError> {
     Application(ApplicationError<DBError>),

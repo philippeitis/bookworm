@@ -26,7 +26,7 @@ use bookworm_database::AppDatabase;
 use bookworm_database::SQLiteDatabase;
 
 use crate::ui::terminal_ui::UIState;
-use crate::ui::views::{run_command, AppView, ApplicationTask};
+use crate::ui::utils::{run_command, AppView, ApplicationTask};
 use crate::ui::{AppInterface, TuiError};
 
 #[derive(Parser)]
