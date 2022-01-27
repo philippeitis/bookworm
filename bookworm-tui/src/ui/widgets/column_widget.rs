@@ -1,0 +1,252 @@
+use std::marker::PhantomData;
+
+use crossterm::event::{Event, KeyCode, KeyModifiers, MouseEventKind};
+use tui::backend::Backend;
+use tui::layout::Rect;
+use tui::text::Span;
+use tui::widgets::Block;
+use tui::Frame;
+
+use bookworm_app::app::AppChannel;
+use bookworm_app::Command;
+use bookworm_database::{AppDatabase, DatabaseError};
+
+use crate::ui::tui_widgets::{MultiSelectList, MultiSelectListState};
+use crate::ui::utils::{cut_word_to_fit, split_chunk_into_columns, TuiStyle};
+use crate::ui::widgets::{InputHandler, ResizableWidget};
+use crate::{run_command, AppView, ApplicationTask, TuiError, UIState};
+
+use async_trait::async_trait;
+
+pub struct ColumnWidget<D> {
+    pub(crate) database: PhantomData<fn(D)>,
+}
+
+impl<D: AppDatabase + Send + Sync> ColumnWidget<D> {
+    async fn scroll_up(&mut self, state: &mut UIState<D>) -> Result<(), DatabaseError<D::Error>> {
+        let scroll = state.nav_settings.scroll;
+        if state.nav_settings.inverted {
+            state.book_view.scroll_down(scroll).await
+        } else {
+            state.book_view.scroll_up(scroll).await
+        }
+    }
+
+    async fn scroll_down(&mut self, state: &mut UIState<D>) -> Result<(), DatabaseError<D::Error>> {
+        let scroll = state.nav_settings.scroll;
+        if state.nav_settings.inverted {
+            state.book_view.scroll_up(scroll).await
+        } else {
+            state.book_view.scroll_down(scroll).await
+        }
+    }
+
+    async fn page_down(
+        &mut self,
+        state: &mut UIState<D>,
+        modifiers: KeyModifiers,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        if modifiers.intersects(KeyModifiers::SHIFT) {
+            state.book_view.select_page_down().await
+        } else {
+            state.book_view.page_down().await
+        }
+    }
+
+    async fn page_up(
+        &mut self,
+        state: &mut UIState<D>,
+        modifiers: KeyModifiers,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        if modifiers.intersects(KeyModifiers::SHIFT) {
+            state.book_view.select_page_up().await
+        } else {
+            state.book_view.page_up().await
+        }
+    }
+
+    async fn home(
+        &mut self,
+        state: &mut UIState<D>,
+        modifiers: KeyModifiers,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        if modifiers.intersects(KeyModifiers::SHIFT) {
+            state.book_view.select_to_start().await?;
+        } else {
+            state.book_view.home().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn end(
+        &mut self,
+        state: &mut UIState<D>,
+        modifiers: KeyModifiers,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        if modifiers.intersects(KeyModifiers::SHIFT) {
+            state.book_view.select_to_end().await?;
+        } else {
+            state.book_view.end().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn select_up(
+        &mut self,
+        state: &mut UIState<D>,
+        modifiers: KeyModifiers,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        if modifiers.intersects(KeyModifiers::SHIFT) {
+            state.book_view.select_up().await?;
+        } else {
+            state.book_view.up().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn select_down(
+        &mut self,
+        state: &mut UIState<D>,
+        modifiers: KeyModifiers,
+    ) -> Result<(), DatabaseError<D::Error>> {
+        if modifiers.intersects(KeyModifiers::SHIFT) {
+            state.book_view.select_down().await?;
+        } else {
+            state.book_view.down().await?;
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for ColumnWidget<D> {
+    // #[tracing::instrument(name = "Preparing ColumnWidgetRender", skip(self, state))]
+    async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
+        // Account for column titles
+        let _ = state
+            .book_view
+            .refresh_window_size(usize::from(chunk.height).saturating_sub(1))
+            .await;
+    }
+
+    fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect) {
+        let hchunks = split_chunk_into_columns(chunk, state.num_cols() as u16);
+        //
+        // let edit_style = state.style.edit_style();
+        let select_style = state.style.select_style();
+
+        // let highlighter = SelectionState::new(state);
+        // let books = state.book_view.window();
+        // for (col, ((title, data), &chunk)) in state
+        //     .table_view
+        //     .read_columns(&books)
+        //     .zip(hchunks.iter())
+        //     .enumerate()
+        // {
+        // for ((title, data), &chunk) in state.table_view.read_columns(&books).zip(hchunks.iter()) {
+        //     let width = usize::from(chunk.width).saturating_sub(1);
+        //     let column: Vec<_> = data.collect();
+        //     let items = column
+        //         .iter()
+        //         .enumerate()
+        //         .map(|(row, word)| highlighter.render_item(col, row, width, &self.edit, word))
+        //         .collect::<Vec<_>>();
+        //
+        //     let mut list = MultiSelectList::new(items)
+        //         .block(Block::default().title(Span::from(title.to_string())));
+        //
+        //     if !self.focused {
+        //         list = list.highlight_style(if Some(col) == highlighter.selected_col() {
+        //             edit_style
+        //         } else {
+        //             select_style
+        //         });
+        //     }
+        //
+        //     f.render_stateful_widget(list, chunk, &mut highlighter.multiselect());
+        // }
+
+        let books = state.book_view.window();
+        for ((title, data), &chunk) in state.table_view.read_columns(&books).zip(hchunks.iter()) {
+            let width = usize::from(chunk.width).saturating_sub(1);
+            let column: Vec<_> = data.collect();
+            let list = MultiSelectList::new(
+                column
+                    .iter()
+                    .map(|word| cut_word_to_fit(&word, width))
+                    .collect::<Vec<_>>(),
+            )
+            .block(Block::default().title(Span::from(title.to_string())))
+            .highlight_style(select_style);
+            let mut selected_row = MultiSelectListState::default();
+
+            if let Some((_, srows)) = state.selected() {
+                for (i, _) in srows {
+                    selected_row.select(i);
+                }
+            }
+
+            f.render_stateful_widget(list, chunk, &mut selected_row);
+        }
+    }
+}
+
+// NOTE: This is the only place where app scrolling takes place.
+#[async_trait]
+impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
+    // tODO: column widget should know what is selected & if in focus
+    // should split out logic for command widget and column view
+    async fn handle_input(
+        &mut self,
+        event: Event,
+        state: &mut UIState<D>,
+        app: &mut AppChannel<D>,
+    ) -> Result<ApplicationTask, TuiError<D::Error>> {
+        match event {
+            Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
+            Event::Mouse(m) => match m.kind {
+                MouseEventKind::ScrollDown => self.scroll_down(state).await?,
+                MouseEventKind::ScrollUp => self.scroll_up(state).await?,
+                _ => return Ok(ApplicationTask::DoNothing),
+            },
+            Event::Key(event) => {
+                // Text input
+                match event.code {
+                    KeyCode::F(2) => {
+                        if !state.book_view.selected_books().is_empty() {
+                            // Parent needs to switch this with EditWidget and remove bookwidget
+                            return Ok(ApplicationTask::SwitchView(AppView::Edit));
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if !state.book_view.selected_books().is_empty() {
+                            return Ok(ApplicationTask::SwitchView(AppView::Edit));
+                        }
+                    }
+                    // if active widget, deactivates
+                    KeyCode::Esc => {
+                        state.book_view.deselect_all();
+                        state.book_view.pop_scope();
+                    }
+                    KeyCode::Delete => {
+                        if !state.book_view.selected_books().is_empty() {
+                            run_command(app, Command::DeleteSelected, state).await?;
+                        }
+                    } // Scrolling
+                    KeyCode::Up => self.select_up(state, event.modifiers).await?,
+                    KeyCode::Down => self.select_down(state, event.modifiers).await?,
+                    KeyCode::PageDown => self.page_down(state, event.modifiers).await?,
+                    KeyCode::PageUp => self.page_up(state, event.modifiers).await?,
+                    KeyCode::Home => self.home(state, event.modifiers).await?,
+                    KeyCode::End => self.end(state, event.modifiers).await?,
+                    _ => return Ok(ApplicationTask::DoNothing),
+                }
+            }
+        }
+        Ok(ApplicationTask::UpdateUI)
+    }
+}
