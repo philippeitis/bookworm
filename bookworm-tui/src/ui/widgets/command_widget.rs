@@ -16,7 +16,7 @@ use bookworm_database::{AppDatabase, DatabaseError};
 use crate::ui::utils::{
     char_chunks_to_styled_text, copy_from_clipboard, paste_into_clipboard, StyleRules,
 };
-use crate::ui::widgets::{InputHandler, ResizableWidget};
+use crate::ui::widgets::Widget;
 use crate::{run_command, ApplicationTask, TuiError, UIState};
 
 use async_trait::async_trait;
@@ -26,7 +26,7 @@ pub struct CommandWidget<D> {
 }
 
 #[async_trait]
-impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for CommandWidget<D> {
+impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for CommandWidget<D> {
     async fn prepare_render(&mut self, _state: &mut UIState<D>, chunk: Rect) {}
 
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect) {
@@ -51,10 +51,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Com
         };
         f.render_widget(command_widget, chunk);
     }
-}
 
-#[async_trait]
-impl<D: AppDatabase + Send + Sync> InputHandler<D> for CommandWidget<D> {
     async fn handle_input(
         &mut self,
         event: Event,

@@ -20,7 +20,7 @@ use crate::ui::tui_widgets::{ListItemX, MultiSelectList, MultiSelectListState};
 use crate::ui::utils::{
     char_chunks_to_styled_text, copy_from_clipboard, split_chunk_into_columns, StyleRules, TuiStyle,
 };
-use crate::ui::widgets::{InputHandler, ResizableWidget};
+use crate::ui::widgets::Widget;
 use crate::{run_command, AppView, ApplicationTask, TuiError, UIState};
 
 use async_trait::async_trait;
@@ -73,7 +73,7 @@ impl<D: AppDatabase + Send + Sync> EditWidget<D> {
 }
 
 #[async_trait]
-impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for EditWidget<D> {
+impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for EditWidget<D> {
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
         // Account for top table row.
         let _ = state
@@ -143,10 +143,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Edi
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
     }
-}
 
-#[async_trait]
-impl<D: AppDatabase + Send + Sync> InputHandler<D> for EditWidget<D> {
     async fn handle_input(
         &mut self,
         event: Event,

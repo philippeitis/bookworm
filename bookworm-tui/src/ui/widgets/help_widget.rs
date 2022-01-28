@@ -12,7 +12,7 @@ use bookworm_app::app::AppChannel;
 use bookworm_database::AppDatabase;
 
 use crate::ui::scrollable_text::ScrollableText;
-use crate::ui::widgets::{InputHandler, ResizableWidget};
+use crate::ui::widgets::Widget;
 use crate::{AppView, ApplicationTask, TuiError, UIState};
 
 pub struct HelpWidget<D> {
@@ -23,7 +23,7 @@ pub struct HelpWidget<D> {
 use async_trait::async_trait;
 
 #[async_trait]
-impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for HelpWidget<D> {
+impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for HelpWidget<D> {
     async fn prepare_render(&mut self, _state: &mut UIState<D>, chunk: Rect) {
         let vchunks = Layout::default()
             .direction(Direction::Vertical)
@@ -55,10 +55,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Hel
 
         f.render_widget(Paragraph::new(text), vchunks[1])
     }
-}
 
-#[async_trait]
-impl<D: AppDatabase + Send + Sync> InputHandler<D> for HelpWidget<D> {
     async fn handle_input(
         &mut self,
         event: Event,

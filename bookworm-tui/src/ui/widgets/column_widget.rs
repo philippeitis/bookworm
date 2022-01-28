@@ -13,7 +13,7 @@ use bookworm_database::{AppDatabase, DatabaseError};
 
 use crate::ui::tui_widgets::{MultiSelectList, MultiSelectListState};
 use crate::ui::utils::{cut_word_to_fit, split_chunk_into_columns, TuiStyle};
-use crate::ui::widgets::{InputHandler, ResizableWidget};
+use crate::ui::widgets::Widget;
 use crate::{run_command, AppView, ApplicationTask, TuiError, UIState};
 
 use async_trait::async_trait;
@@ -123,7 +123,7 @@ impl<D: AppDatabase + Send + Sync> ColumnWidget<D> {
 }
 
 #[async_trait]
-impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for ColumnWidget<D> {
+impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for ColumnWidget<D> {
     // #[tracing::instrument(name = "Preparing ColumnWidgetRender", skip(self, state))]
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
         // Account for column titles
@@ -193,13 +193,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Col
             f.render_stateful_widget(list, chunk, &mut selected_row);
         }
     }
-}
 
-// NOTE: This is the only place where app scrolling takes place.
-#[async_trait]
-impl<D: AppDatabase + Send + Sync> InputHandler<D> for ColumnWidget<D> {
-    // tODO: column widget should know what is selected & if in focus
-    // should split out logic for command widget and column view
     async fn handle_input(
         &mut self,
         event: Event,

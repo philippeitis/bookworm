@@ -186,8 +186,6 @@ struct WidgetBox<D: AppDatabase + Send + Sync> {
 //
 //                 edits.render_into_frame(f, state, vchunks[0]);
 //                 CommandWidgetWrapper { database: PhantomData }.render_into_frame(f, state, vchunks[1]);
-//             }
-//             WidgetLayout::Help(help, b) => {
 //                 help.render_into_frame(f, state, chunk);
 //             }
 //         }

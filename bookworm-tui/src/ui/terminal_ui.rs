@@ -8,7 +8,6 @@ use futures::{future::FutureExt, StreamExt};
 use tokio::time::{timeout, Duration};
 
 use tui::backend::Backend;
-use tui::layout::Rect;
 use tui::Terminal;
 
 use bookworm_app::app::AppChannel;
@@ -24,9 +23,7 @@ use bookworm_records::Book;
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::utils::{AppView, ApplicationTask};
-use crate::ui::widgets::{
-    BorderWidget, ColumnWidget, EditWidget, HelpWidget, InputHandler, ResizableWidget, Widget,
-};
+use crate::ui::widgets::{BorderWidget, ColumnWidget, EditWidget, HelpWidget, Widget};
 #[derive(Debug)]
 pub(crate) enum TuiError<DBError> {
     Application(ApplicationError<DBError>),
@@ -108,22 +105,10 @@ impl<D: AppDatabase + Send + Sync> UIState<D> {
     }
 }
 
-trait ViewHandler<D: AppDatabase + Send + Sync, B: Backend>:
-    ResizableWidget<D, B> + InputHandler<D>
-{
-}
-
-impl<D: AppDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for ColumnWidget<D> {}
-
-impl<D: AppDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for EditWidget<D> {}
-
-impl<D: AppDatabase + Send + Sync, B: Backend> ViewHandler<D, B> for HelpWidget<D> {}
-
 // TODO: Use channels to allow CTRL+Q when application freezes
 //          Also, allow text input / waiting animation
-pub(crate) struct AppInterface<'a, D: 'a + AppDatabase + Send + Sync + 'static, B: Backend> {
-    border_widget: BorderWidget,
-    active_view: Box<dyn ViewHandler<D, B> + 'a>,
+pub(crate) struct AppInterface<D: AppDatabase + Send + Sync + 'static, B: Backend> {
+    active_view: BorderWidget<D, B>,
     ui_state: UIState<D>,
     update_tui: bool,
     settings_path: Option<PathBuf>,
@@ -131,7 +116,7 @@ pub(crate) struct AppInterface<'a, D: 'a + AppDatabase + Send + Sync + 'static, 
     app_channel: AppChannel<D>,
 }
 
-impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
+impl<D: AppDatabase + Send + Sync, B: Backend> AppInterface<D, B> {
     /// Returns a new interface, instantiated with the provided settings and database.
     ///
     /// # Arguments
@@ -146,7 +131,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
         app_channel: AppChannel<D>,
         event_receiver: EventStream,
         sort_settings: SortSettings,
-    ) -> AppInterface<'a, D, B> {
+    ) -> AppInterface<D, B> {
         let book_view = app_channel.new_book_view().await;
         let path = app_channel.db_path().await;
         let ui_state = UIState {
@@ -159,10 +144,13 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
             sort_settings,
         };
         AppInterface {
-            border_widget: BorderWidget::new(name.into(), path),
-            active_view: Box::new(ColumnWidget {
-                database: Default::default(),
-            }),
+            active_view: BorderWidget::new(
+                name.into(),
+                path,
+                Box::new(ColumnWidget {
+                    database: Default::default(),
+                }),
+            ),
             update_tui: false,
             ui_state,
             settings_path,
@@ -206,7 +194,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                         self.update_tui = true;
                         match view {
                             AppView::Columns => {
-                                self.active_view = Box::new(ColumnWidget {
+                                self.active_view.inner = Box::new(ColumnWidget {
                                     database: PhantomData,
                                 })
                             }
@@ -214,7 +202,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                                 let _ = self.ui_state.make_selection_visible().await;
                                 let selected_books = self.ui_state.book_view.relative_selections();
                                 if let Some(column) = self.ui_state.selected_column_values() {
-                                    self.active_view = Box::new(EditWidget {
+                                    self.active_view.inner = Box::new(EditWidget {
                                         edit: {
                                             let mut edit = InputRecorder::default();
                                             for ((_, book), col) in
@@ -230,7 +218,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                                 }
                             }
                             AppView::Help(help_string) => {
-                                self.active_view = Box::new(HelpWidget {
+                                self.active_view.inner = Box::new(HelpWidget {
                                     text: ScrollableText::new(help_string),
                                     database: PhantomData,
                                 })
@@ -271,20 +259,12 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
     ) -> Result<(), TuiError<D::Error>> {
         loop {
             if self.app_channel.take_update().await | self.take_update() {
-                self.border_widget.saved = self.app_channel.saved().await;
+                self.active_view.saved = self.app_channel.saved().await;
                 {
                     let frame = terminal.get_frame();
                     let size = frame.size();
                     self.active_view
-                        .prepare_render(
-                            &mut self.ui_state,
-                            Rect::new(
-                                size.x + 1,
-                                size.y + 1,
-                                size.width.saturating_sub(2),
-                                size.height.saturating_sub(2),
-                            ),
-                        )
+                        .prepare_render(&mut self.ui_state, size)
                         .await;
                 };
                 terminal.draw(|f| {
@@ -294,17 +274,7 @@ impl<'a, D: 'a + AppDatabase + Send + Sync, B: Backend> AppInterface<'a, D, B> {
                     if size.height < 2 || size.width < 2 {
                         return;
                     }
-                    self.border_widget.render_into_frame(f, size);
-                    self.active_view.render_into_frame(
-                        f,
-                        &self.ui_state,
-                        Rect::new(
-                            size.x + 1,
-                            size.y + 1,
-                            size.width.saturating_sub(2),
-                            size.height.saturating_sub(2),
-                        ),
-                    );
+                    self.active_view.render_into_frame(f, &self.ui_state, size);
                 })?;
             }
 

@@ -14,7 +14,7 @@ use bookworm_database::AppDatabase;
 use bookworm_records::Book;
 
 use crate::ui::scrollable_text::BlindOffset;
-use crate::ui::widgets::{InputHandler, ResizableWidget};
+use crate::ui::widgets::Widget;
 use crate::{ApplicationTask, TuiError, UIState};
 
 use async_trait::async_trait;
@@ -132,7 +132,7 @@ impl<D> BookWidget<D> {
 }
 
 #[async_trait]
-impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for BookWidget<D> {
+impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for BookWidget<D> {
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
         // need to push to parent
         let books = state.book_view.selected_books();
@@ -150,10 +150,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> ResizableWidget<D, B> for Boo
         let p = Paragraph::new(book_text).scroll((offset as u16, 0));
         f.render_widget(p, chunk);
     }
-}
 
-#[async_trait]
-impl<D: AppDatabase + Send + Sync> InputHandler<D> for BookWidget<D> {
     async fn handle_input(
         &mut self,
         event: Event,
