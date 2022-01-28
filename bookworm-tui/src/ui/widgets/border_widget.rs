@@ -22,7 +22,11 @@ pub struct BorderWidget<D: AppDatabase + Send + Sync, B: Backend> {
 }
 
 impl<D: AppDatabase + Send + Sync, B: Backend> BorderWidget<D, B> {
-    pub(crate) fn new(name: String, path: PathBuf, inner: Box<dyn Widget<D, B> + Send + Sync>) -> Self {
+    pub(crate) fn new(
+        name: String,
+        path: PathBuf,
+        inner: Box<dyn Widget<D, B> + Send + Sync>,
+    ) -> Self {
         BorderWidget {
             name,
             path,
@@ -35,15 +39,17 @@ impl<D: AppDatabase + Send + Sync, B: Backend> BorderWidget<D, B> {
 #[async_trait]
 impl<D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for BorderWidget<D, B> {
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
-        self.inner.prepare_render(
-            state,
-            Rect::new(
-                chunk.x + 1,
-                chunk.y + 1,
-                chunk.width.saturating_sub(2),
-                chunk.height.saturating_sub(2),
-            ),
-        ).await
+        self.inner
+            .prepare_render(
+                state,
+                Rect::new(
+                    chunk.x + 1,
+                    chunk.y + 1,
+                    chunk.width.saturating_sub(2),
+                    chunk.height.saturating_sub(2),
+                ),
+            )
+            .await
     }
 
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect) {
