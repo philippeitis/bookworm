@@ -21,9 +21,25 @@ pub struct WidgetBox<D: AppDatabase + Send + Sync, B: Backend> {
 }
 
 impl<D: AppDatabase + Send + Sync, B: Backend> WidgetBox<D, B> {
-    fn first_priority_mut(&mut self) -> Option<&mut Box<dyn Widget<D, B> + Send + Sync>> {
-        let ind = *self.widget_priority.front()? as usize;
-        self.widgets.get_mut(ind)
+    async fn cycle_priority(
+        &mut self,
+        event: Event,
+        state: &mut UIState<D>,
+        app: &mut AppChannel<D>,
+    ) -> Result<ApplicationTask, TuiError<D::Error>> {
+        for i in self.widget_priority.iter() {
+            match self
+                .widgets
+                .get_mut(*i as usize)
+                .expect("widget_priority possesses out of bounds indices")
+                .handle_input(event, state, app)
+                .await?
+            {
+                ApplicationTask::DoNothing => continue,
+                v => return Ok(v),
+            }
+        }
+        Ok(ApplicationTask::DoNothing)
     }
 }
 
@@ -78,27 +94,17 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
                         let val = self.widget_priority.remove(ind).unwrap();
                         self.widget_priority.push_front(val);
                     }
-                    if let Some(w) = self.first_priority_mut() {
-                        return w.handle_input(event, state, app).await;
-                    }
-                } else if let Some(w) = self.first_priority_mut() {
-                    return w.handle_input(event, state, app).await;
                 }
+                return self.cycle_priority(event, state, app).await;
             }
             Event::Key(event) => {
-                if let Some(w) = self.first_priority_mut() {
-                    // Is w capturing meta-keys?
-                    // eg. tab, esc
-                    if w.capturing(&Event::Key(event)) {
-                        return w.handle_input(Event::Key(event), state, app).await;
-                    }
-                } else if !self.widgets.is_empty() {
-                    // Text input
-                    match event.code {
+                match self.cycle_priority(Event::Key(event), state, app).await? {
+                    ApplicationTask::DoNothing => match event.code {
                         // if active widget isn't capturing tabs,
                         // capture tab and cycle active widgets
                         KeyCode::Tab => {
                             // switch to next in vec
+                            panic!("???");
                             if let Some(item) = self.widget_priority.pop_front() {
                                 self.widget_priority.push_back(item);
                             }
@@ -109,7 +115,8 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
                             }
                         }
                         _ => {}
-                    }
+                    },
+                    v => return Ok(v),
                 }
             }
         }

@@ -211,14 +211,18 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for ColumnWidget
                 // Text input
                 match event.code {
                     KeyCode::F(2) => {
-                        if !state.book_view.selected_books().is_empty() {
+                        return if !state.book_view.selected_books().is_empty() {
                             // Parent needs to switch this with EditWidget and remove bookwidget
-                            return Ok(ApplicationTask::SwitchView(AppView::Edit));
+                            Ok(ApplicationTask::SwitchView(AppView::Edit))
+                        } else {
+                            Ok(ApplicationTask::DoNothing)
                         }
                     }
                     KeyCode::Enter => {
-                        if !state.book_view.selected_books().is_empty() {
-                            return Ok(ApplicationTask::SwitchView(AppView::Edit));
+                        return if !state.book_view.selected_books().is_empty() {
+                            Ok(ApplicationTask::SwitchView(AppView::Edit))
+                        } else {
+                            Ok(ApplicationTask::DoNothing)
                         }
                     }
                     // if active widget, deactivates
@@ -227,8 +231,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for ColumnWidget
                         state.book_view.pop_scope();
                     }
                     KeyCode::Delete => {
-                        if !state.book_view.selected_books().is_empty() {
-                            run_command(app, Command::DeleteSelected, state).await?;
+                        return if !state.book_view.selected_books().is_empty() {
+                            run_command(app, Command::DeleteSelected, state).await
+                        } else {
+                            Ok(ApplicationTask::DoNothing)
                         }
                     } // Scrolling
                     KeyCode::Up => self.select_up(state, event.modifiers).await?,
