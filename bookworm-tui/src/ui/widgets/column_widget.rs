@@ -18,7 +18,6 @@ use crate::{run_command, AppView, ApplicationTask, TuiError, UIState};
 
 use async_trait::async_trait;
 
-
 // struct SelectionState {
 //     selected: Option<(usize, HashMap<usize, BookID>)>,
 //     style: StyleRules,
@@ -232,13 +231,13 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for ColumnWidget
         // }
 
         let books = state.book_view.window();
-        for ((title, data), &chunk) in state.table_view.read_columns(&books).zip(hchunks.iter()) {
+        for ((title, data), &chunk) in state.table_view.read_columns(books).zip(hchunks.iter()) {
             let width = usize::from(chunk.width).saturating_sub(1);
             let column: Vec<_> = data.collect();
             let list = MultiSelectList::new(
                 column
                     .iter()
-                    .map(|word| cut_word_to_fit(&word, width))
+                    .map(|word| cut_word_to_fit(word, width))
                     .collect::<Vec<_>>(),
             )
             .block(Block::default().title(Span::from(title.to_string())))

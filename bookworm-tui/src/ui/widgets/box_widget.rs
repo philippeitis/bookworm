@@ -100,17 +100,22 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
                         self.widget_priority.push_front(val);
                     }
 
-                    return self.widgets
+                    return self
+                        .widgets
                         .get_mut(i)
                         .expect("Bounding box does not correspond to existing widget")
-                        .handle_input(event, state, app).await;
+                        .handle_input(event, state, app)
+                        .await;
                 }
                 return self.handle_with_prioritized_widget(event, state, app).await;
             }
             Event::Key(event) => {
                 // Figure out how to handle esc for de-prioritize
                 // Figure out default when nothing is capturing
-                match self.handle_with_prioritized_widget(Event::Key(event), state, app).await? {
+                match self
+                    .handle_with_prioritized_widget(Event::Key(event), state, app)
+                    .await?
+                {
                     ApplicationTask::DoNothing => match event.code {
                         // if active widget isn't capturing tabs,
                         // capture tab and cycle active widgets

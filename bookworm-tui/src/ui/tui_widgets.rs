@@ -10,19 +10,10 @@ use tui::widgets::{Block, StatefulWidget, Widget};
 
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MultiSelectListState {
     offset: usize,
     selected: BTreeSet<usize>,
-}
-
-impl Default for MultiSelectListState {
-    fn default() -> MultiSelectListState {
-        MultiSelectListState {
-            offset: 0,
-            selected: BTreeSet::new(),
-        }
-    }
 }
 
 impl MultiSelectListState {

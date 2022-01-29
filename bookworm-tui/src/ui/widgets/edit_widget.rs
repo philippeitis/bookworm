@@ -101,7 +101,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for EditWidget<D
         let books = state.book_view.window();
         for (col, ((title, data), &chunk)) in state
             .table_view
-            .read_columns(&books)
+            .read_columns(books)
             .zip(hchunks.iter())
             .enumerate()
         {

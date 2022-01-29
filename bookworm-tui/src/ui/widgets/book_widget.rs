@@ -154,8 +154,8 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for BookWidget<D
         _app: &mut AppChannel<D>,
     ) -> Result<ApplicationTask, TuiError<D::Error>> {
         match event {
-            Event::Mouse(m) => match (m.kind, m.column, m.row) {
-                (MouseEventKind::ScrollDown, c, r) => {
+            Event::Mouse(m) => match m.kind {
+                MouseEventKind::ScrollDown => {
                     let inverted = state.nav_settings.inverted;
                     let scroll = state.nav_settings.scroll;
                     if inverted {
@@ -164,7 +164,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for BookWidget<D
                         self.offset_mut().scroll_down(scroll);
                     }
                 }
-                (MouseEventKind::ScrollUp, c, r) => {
+                MouseEventKind::ScrollUp => {
                     let inverted = state.nav_settings.inverted;
                     let scroll = state.nav_settings.scroll;
                     if inverted {

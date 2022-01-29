@@ -27,7 +27,7 @@ pub struct CommandWidget<D> {
 
 #[async_trait]
 impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for CommandWidget<D> {
-    async fn prepare_render(&mut self, _state: &mut UIState<D>, chunk: Rect) {}
+    async fn prepare_render(&mut self, _state: &mut UIState<D>, _chunk: Rect) {}
 
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect) {
         let command_widget = if state.curr_command.is_empty() {
@@ -201,16 +201,16 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for CommandWidge
 impl<D: AppDatabase + Send + Sync> CommandWidget<D> {
     async fn page_down(
         &mut self,
-        state: &mut UIState<D>,
-        modifiers: KeyModifiers,
+        _state: &mut UIState<D>,
+        _modifiers: KeyModifiers,
     ) -> Result<(), DatabaseError<D::Error>> {
         unimplemented!("Paging down on command widget not supported.");
     }
 
     async fn page_up(
         &mut self,
-        state: &mut UIState<D>,
-        modifiers: KeyModifiers,
+        _state: &mut UIState<D>,
+        _modifiers: KeyModifiers,
     ) -> Result<(), DatabaseError<D::Error>> {
         unimplemented!("Paging up on command widget not supported.");
     }
