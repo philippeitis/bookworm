@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -152,24 +151,17 @@ impl<D: AppDatabase + Send + Sync, B: 'static + Backend> AppInterface<D, B> {
             active_view: BorderWidget::new(
                 name.into(),
                 path,
-                Box::new(WidgetBox {
-                    widgets: vec![
-                        Box::new(ColumnWidget {
-                            database: Default::default(),
-                        }),
+                Box::new(WidgetBox::new(
+                    vec![
                         Box::new(CommandWidget {
                             database: PhantomData,
                         }),
+                        Box::new(ColumnWidget {
+                            database: Default::default(),
+                        }),
                     ],
-                    widget_priority: {
-                        let mut deque = VecDeque::new();
-                        deque.push_back(1);
-                        deque.push_back(0);
-                        deque
-                    },
-                    layout: Box::new(EditLayout {}),
-                    bounding_boxes: vec![],
-                }),
+                    Box::new(EditLayout {}),
+                )),
             ),
             update_tui: false,
             ui_state,
@@ -215,24 +207,17 @@ impl<D: AppDatabase + Send + Sync, B: 'static + Backend> AppInterface<D, B> {
                         self.update_tui = true;
                         match view {
                             AppView::Columns => {
-                                self.active_view.inner = Box::new(WidgetBox {
-                                    widgets: vec![
-                                        Box::new(ColumnWidget {
-                                            database: Default::default(),
-                                        }),
+                                self.active_view.inner = Box::new(WidgetBox::new(
+                                    vec![
                                         Box::new(CommandWidget {
                                             database: PhantomData,
                                         }),
+                                        Box::new(ColumnWidget {
+                                            database: Default::default(),
+                                        }),
                                     ],
-                                    widget_priority: {
-                                        let mut deque = VecDeque::new();
-                                        deque.push_back(1);
-                                        deque.push_back(0);
-                                        deque
-                                    },
-                                    layout: Box::new(EditLayout {}),
-                                    bounding_boxes: vec![],
-                                });
+                                    Box::new(EditLayout {}),
+                                ));
                             }
                             AppView::Edit => {
                                 let _ = self.ui_state.make_selection_visible().await;

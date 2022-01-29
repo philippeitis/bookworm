@@ -6,7 +6,10 @@ pub trait RectExt {
 
 impl RectExt for Rect {
     fn contains(&self, point: &(u16, u16)) -> bool {
-        point >= &(self.x, self.y) && point < &(self.x + self.width, self.y + self.height)
+        point.0 >= self.x
+            && point.0 < self.x + self.width
+            && point.1 >= self.y
+            && point.1 < self.y + self.height
     }
 }
 
@@ -18,13 +21,15 @@ pub struct EditLayout {}
 
 impl LayoutGenerator for EditLayout {
     fn layout(&self, chunk: Rect) -> Vec<Rect> {
-        Layout::default()
+        let mut layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(chunk.height.saturating_sub(1)),
                 Constraint::Length(1),
             ])
-            .split(chunk)
+            .split(chunk);
+        layout.swap(0, 1);
+        layout
     }
 }
 
@@ -43,8 +48,9 @@ impl LayoutGenerator for ColumnBookLayout {
                 Constraint::Length(hchunks[0].height.saturating_sub(1)),
                 Constraint::Length(1),
             ])
-            .split(chunk);
+            .split(hchunks[0]);
 
+        vchunks.swap(0, 1);
         vchunks.push(hchunks[1]);
         vchunks
     }

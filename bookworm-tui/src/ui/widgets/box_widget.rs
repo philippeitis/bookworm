@@ -1,5 +1,4 @@
 use crossterm::event::{Event, KeyCode, MouseEventKind};
-use std::collections::VecDeque;
 use tui::backend::Backend;
 use tui::layout::Rect;
 use tui::Frame;
@@ -13,29 +12,98 @@ use crate::{ApplicationTask, TuiError, UIState};
 
 use async_trait::async_trait;
 
+#[derive(Eq, PartialEq, Copy, Clone)]
+enum TabStatus {
+    None,
+    PastStart,
+    PastEnd,
+}
+
+pub struct PriorityIndex {
+    tab_status: TabStatus,
+    index: usize,
+    length: usize,
+}
+
+impl PriorityIndex {
+    pub(crate) fn new(length: usize) -> Self {
+        Self {
+            tab_status: TabStatus::None,
+            index: 0,
+            length,
+        }
+    }
+
+    fn increment(&mut self) -> bool {
+        match self.tab_status {
+            TabStatus::None => {
+                if self.index + 1 == self.length {
+                    self.tab_status = TabStatus::PastEnd;
+                    true
+                } else {
+                    self.index += 1;
+                    false
+                }
+            }
+            TabStatus::PastEnd | TabStatus::PastStart => {
+                self.tab_status = TabStatus::None;
+                self.index = 0;
+                false
+            }
+        }
+    }
+
+    fn decrement(&mut self) -> bool {
+        match self.tab_status {
+            TabStatus::None => {
+                if self.index == 0 {
+                    self.tab_status = TabStatus::PastStart;
+                    true
+                } else {
+                    self.index -= 1;
+                    false
+                }
+            }
+            TabStatus::PastStart | TabStatus::PastEnd => {
+                self.tab_status = TabStatus::None;
+                self.index = self.length.saturating_sub(1);
+                false
+            }
+        }
+    }
+}
+
 pub struct WidgetBox<D: AppDatabase + Send + Sync, B: Backend> {
     pub(crate) widgets: Vec<Box<dyn Widget<D, B> + Send + Sync>>,
-    pub(crate) widget_priority: VecDeque<u8>,
+    pub(crate) priority_index: PriorityIndex,
     pub(crate) layout: Box<dyn LayoutGenerator + Send + Sync>,
     pub(crate) bounding_boxes: Vec<Rect>,
 }
 
 impl<D: AppDatabase + Send + Sync, B: Backend> WidgetBox<D, B> {
+    pub(crate) fn new(
+        widgets: Vec<Box<dyn Widget<D, B> + Send + Sync>>,
+        layout: Box<dyn LayoutGenerator + Send + Sync>,
+    ) -> Self {
+        Self {
+            priority_index: PriorityIndex::new(widgets.len()),
+            widgets,
+            layout,
+            bounding_boxes: vec![],
+        }
+    }
+
     async fn handle_with_prioritized_widget(
         &mut self,
         event: Event,
         state: &mut UIState<D>,
         app: &mut AppChannel<D>,
     ) -> Result<ApplicationTask, TuiError<D::Error>> {
-        if let Some(i) = self.widget_priority.front() {
-            return self
-                .widgets
-                .get_mut(*i as usize)
-                .expect("widget_priority possesses out of bounds indices")
-                .handle_input(event, state, app)
-                .await;
-        }
-        Ok(ApplicationTask::DoNothing)
+        self.widgets
+            .get_mut(self.priority_index.index)
+            .expect("priority_index possesses out of bounds indices")
+            .handle_input(event, state, app)
+            .await
     }
 }
 
@@ -80,12 +148,6 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
                     .iter()
                     .position(|bb| bb.contains(&(m.column, m.row)))
                 {
-                    let ind = self
-                        .widget_priority
-                        .iter()
-                        .position(|x| (*x as usize) == i)
-                        .unwrap();
-
                     // Don't remove focus on scroll event.
                     // TODO: Should be even more specific, with something like
                     //  ApplicationTask::StealKeyboardFocus
@@ -96,8 +158,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
                     ]
                     .contains(&m.kind)
                     {
-                        let val = self.widget_priority.remove(ind).unwrap();
-                        self.widget_priority.push_front(val);
+                        self.priority_index.index = i;
                     }
 
                     return self
@@ -117,18 +178,15 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
                     .await?
                 {
                     ApplicationTask::DoNothing => match event.code {
-                        // if active widget isn't capturing tabs,
+                        // If active widget isn't capturing tabs,
                         // capture tab and cycle active widgets
+                        // TODO: Allow tabbing between nested WidgetBoxes
+                        //  seamlessly
                         KeyCode::Tab => {
-                            // switch to next in vec
-                            if let Some(item) = self.widget_priority.pop_front() {
-                                self.widget_priority.push_back(item);
-                            }
+                            self.priority_index.increment();
                         }
                         KeyCode::BackTab => {
-                            if let Some(item) = self.widget_priority.pop_back() {
-                                self.widget_priority.push_front(item);
-                            }
+                            self.priority_index.decrement();
                         }
                         _ => {}
                     },
