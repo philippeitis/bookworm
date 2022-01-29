@@ -1,5 +1,6 @@
 mod book_widget;
 mod border_widget;
+mod box_widget;
 mod column_widget;
 mod command_widget;
 mod edit_widget;
@@ -21,6 +22,7 @@ use crate::{TuiError, UIState};
 
 pub use book_widget::BookWidget;
 pub use border_widget::BorderWidget;
+pub use box_widget::WidgetBox;
 pub use column_widget::ColumnWidget;
 pub use command_widget::CommandWidget;
 pub use edit_widget::EditWidget;

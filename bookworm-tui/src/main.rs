@@ -139,9 +139,6 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
         }
     }
 
-    // Goes before due to lifetime issues.
-    let stdout_ = stdout();
-
     let mut app = AppInterface::new(
         "Really Cool Library",
         interface_settings,
@@ -152,7 +149,8 @@ async fn main() -> Result<(), TuiError<<SQLiteDatabase as AppDatabase>::Error>> 
     )
     .await;
 
-    let backend = CrosstermBackend::new(&stdout_);
+    let stdout_ = stdout();
+    let backend = CrosstermBackend::new(stdout());
     let mut terminal = Terminal::new(backend)?;
     crossterm::terminal::enable_raw_mode()?;
     execute!(

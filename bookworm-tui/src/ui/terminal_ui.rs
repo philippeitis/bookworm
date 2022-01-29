@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,7 +24,10 @@ use bookworm_records::Book;
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::utils::{AppView, ApplicationTask};
-use crate::ui::widgets::{BorderWidget, ColumnWidget, EditWidget, HelpWidget, Widget};
+use crate::ui::views::EditLayout;
+use crate::ui::widgets::{
+    BorderWidget, ColumnWidget, CommandWidget, EditWidget, HelpWidget, Widget, WidgetBox,
+};
 #[derive(Debug)]
 pub(crate) enum TuiError<DBError> {
     Application(ApplicationError<DBError>),
@@ -114,9 +118,10 @@ pub(crate) struct AppInterface<D: AppDatabase + Send + Sync + 'static, B: Backen
     settings_path: Option<PathBuf>,
     event_receiver: EventStream,
     app_channel: AppChannel<D>,
+    lifetime_marker: PhantomData<B>,
 }
 
-impl<D: AppDatabase + Send + Sync, B: Backend> AppInterface<D, B> {
+impl<D: AppDatabase + Send + Sync, B: 'static + Backend> AppInterface<D, B> {
     /// Returns a new interface, instantiated with the provided settings and database.
     ///
     /// # Arguments
@@ -147,8 +152,23 @@ impl<D: AppDatabase + Send + Sync, B: Backend> AppInterface<D, B> {
             active_view: BorderWidget::new(
                 name.into(),
                 path,
-                Box::new(ColumnWidget {
-                    database: Default::default(),
+                Box::new(WidgetBox {
+                    widgets: vec![
+                        Box::new(ColumnWidget {
+                            database: Default::default(),
+                        }),
+                        Box::new(CommandWidget {
+                            database: PhantomData,
+                        }),
+                    ],
+                    widget_priority: {
+                        let mut deque = VecDeque::new();
+                        deque.push_back(1);
+                        deque.push_back(0);
+                        deque
+                    },
+                    layout: Box::new(EditLayout {}),
+                    bounding_boxes: vec![],
                 }),
             ),
             update_tui: false,
@@ -156,6 +176,7 @@ impl<D: AppDatabase + Send + Sync, B: Backend> AppInterface<D, B> {
             settings_path,
             app_channel,
             event_receiver,
+            lifetime_marker: PhantomData,
         }
     }
 
@@ -194,9 +215,24 @@ impl<D: AppDatabase + Send + Sync, B: Backend> AppInterface<D, B> {
                         self.update_tui = true;
                         match view {
                             AppView::Columns => {
-                                self.active_view.inner = Box::new(ColumnWidget {
-                                    database: PhantomData,
-                                })
+                                self.active_view.inner = Box::new(WidgetBox {
+                                    widgets: vec![
+                                        Box::new(ColumnWidget {
+                                            database: Default::default(),
+                                        }),
+                                        Box::new(CommandWidget {
+                                            database: PhantomData,
+                                        }),
+                                    ],
+                                    widget_priority: {
+                                        let mut deque = VecDeque::new();
+                                        deque.push_back(1);
+                                        deque.push_back(0);
+                                        deque
+                                    },
+                                    layout: Box::new(EditLayout {}),
+                                    bounding_boxes: vec![],
+                                });
                             }
                             AppView::Edit => {
                                 let _ = self.ui_state.make_selection_visible().await;

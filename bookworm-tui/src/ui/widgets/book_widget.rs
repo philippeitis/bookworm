@@ -49,10 +49,6 @@ impl<D> BookWidget<D> {
         self.offset
             .fit_offset_in_height(self.to_widget_text().lines.len());
     }
-    pub fn contains_point(&self, col: u16, row: u16) -> bool {
-        let rect = self.chunk;
-        col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
-    }
 
     pub fn to_widget_text(&self) -> Text {
         let width = self.chunk.width as usize;
