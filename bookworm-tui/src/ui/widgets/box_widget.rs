@@ -1,4 +1,4 @@
-use crossterm::event::{Event, KeyCode};
+use crossterm::event::{Event, KeyCode, MouseEventKind};
 use std::collections::VecDeque;
 use tui::backend::Backend;
 use tui::layout::Rect;
@@ -27,7 +27,7 @@ impl<D: AppDatabase + Send + Sync, B: Backend> WidgetBox<D, B> {
         state: &mut UIState<D>,
         app: &mut AppChannel<D>,
     ) -> Result<ApplicationTask, TuiError<D::Error>> {
-        for i in self.widget_priority.iter() {
+        if let Some(i) = self.widget_priority.front() {
             return self
                 .widgets
                 .get_mut(*i as usize)
@@ -86,8 +86,25 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
                         .iter()
                         .position(|x| (*x as usize) == i)
                         .unwrap();
-                    let val = self.widget_priority.remove(ind).unwrap();
-                    self.widget_priority.push_front(val);
+
+                    // Don't remove focus on scroll event.
+                    // TODO: Should be even more specific, with something like
+                    //  ApplicationTask::StealKeyboardFocus
+                    if ![
+                        MouseEventKind::ScrollUp,
+                        MouseEventKind::ScrollDown,
+                        MouseEventKind::Moved,
+                    ]
+                    .contains(&m.kind)
+                    {
+                        let val = self.widget_priority.remove(ind).unwrap();
+                        self.widget_priority.push_front(val);
+                    }
+
+                    return self.widgets
+                        .get_mut(i)
+                        .expect("Bounding box does not correspond to existing widget")
+                        .handle_input(event, state, app).await;
                 }
                 return self.cycle_priority(event, state, app).await;
             }

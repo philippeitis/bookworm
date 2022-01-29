@@ -22,9 +22,9 @@ use bookworm_database::{AppDatabase, BookView, DatabaseError};
 use bookworm_input::user_input::{CommandString, CommandStringError, InputRecorder};
 use bookworm_records::Book;
 
+use crate::ui::layouts::EditLayout;
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::utils::{AppView, ApplicationTask};
-use crate::ui::layouts::EditLayout;
 use crate::ui::widgets::{
     BorderWidget, ColumnWidget, CommandWidget, EditWidget, HelpWidget, Widget, WidgetBox,
 };
