@@ -65,15 +65,10 @@ pub(crate) trait Widget<D: AppDatabase + Send + Sync, B: Backend> {
     /// * ` chunk ` - A chunk to specify the size of the widget.
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect);
 
-    /// Returns whether the widget is currently capturing the key event.
-    /// Typically returns true, but may return false if "esc" is pressed and nothing
-    /// is active, leaving parent to handle it.
-    fn capturing(&self, _event: &Event) -> bool {
-        true
-    }
-
     /// Processes the event and modifies the internal state accordingly. May modify app,
     /// depending on specific event.
+    ///
+    /// Returns ApplicationTask::DoNothing in the event that no input is captured.
     async fn handle_input(
         &mut self,
         event: Event,

@@ -142,6 +142,9 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for CommandWidge
                     // capture tab and cycle active widgets
                     KeyCode::Tab | KeyCode::BackTab => {
                         let curr_command = &mut state.curr_command;
+                        if curr_command.is_empty() {
+                            return Ok(ApplicationTask::DoNothing);
+                        }
                         curr_command.refresh_autofill()?;
                         match parse_args(curr_command.get_values().map(|(_, s)| s).collect()) {
                             Ok(command) => match command {

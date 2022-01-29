@@ -1,4 +1,4 @@
-use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
+use crossterm::event::{Event, KeyCode};
 use std::collections::VecDeque;
 use tui::backend::Backend;
 use tui::layout::Rect;
@@ -28,16 +28,12 @@ impl<D: AppDatabase + Send + Sync, B: Backend> WidgetBox<D, B> {
         app: &mut AppChannel<D>,
     ) -> Result<ApplicationTask, TuiError<D::Error>> {
         for i in self.widget_priority.iter() {
-            match self
+            return self
                 .widgets
                 .get_mut(*i as usize)
                 .expect("widget_priority possesses out of bounds indices")
                 .handle_input(event, state, app)
-                .await?
-            {
-                ApplicationTask::DoNothing => continue,
-                v => return Ok(v),
-            }
+                .await;
         }
         Ok(ApplicationTask::DoNothing)
     }
@@ -80,31 +76,30 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
             Event::Resize(_, _) => return Ok(ApplicationTask::UpdateUI),
             // find hovered widget & notify
             Event::Mouse(m) => {
-                if m.kind == MouseEventKind::Down(MouseButton::Left) {
-                    if let Some(i) = self
-                        .bounding_boxes
+                if let Some(i) = self
+                    .bounding_boxes
+                    .iter()
+                    .position(|bb| bb.contains(&(m.column, m.row)))
+                {
+                    let ind = self
+                        .widget_priority
                         .iter()
-                        .position(|bb| bb.contains(&(m.column, m.row)))
-                    {
-                        let ind = self
-                            .widget_priority
-                            .iter()
-                            .position(|x| (*x as usize) == i)
-                            .unwrap();
-                        let val = self.widget_priority.remove(ind).unwrap();
-                        self.widget_priority.push_front(val);
-                    }
+                        .position(|x| (*x as usize) == i)
+                        .unwrap();
+                    let val = self.widget_priority.remove(ind).unwrap();
+                    self.widget_priority.push_front(val);
                 }
                 return self.cycle_priority(event, state, app).await;
             }
             Event::Key(event) => {
+                // Figure out how to handle esc for de-prioritize
+                // Figure out default when nothing is capturing
                 match self.cycle_priority(Event::Key(event), state, app).await? {
                     ApplicationTask::DoNothing => match event.code {
                         // if active widget isn't capturing tabs,
                         // capture tab and cycle active widgets
                         KeyCode::Tab => {
                             // switch to next in vec
-                            panic!("???");
                             if let Some(item) = self.widget_priority.pop_front() {
                                 self.widget_priority.push_back(item);
                             }
