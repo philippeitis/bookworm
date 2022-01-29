@@ -24,7 +24,7 @@ use bookworm_records::Book;
 
 use crate::ui::scrollable_text::ScrollableText;
 use crate::ui::utils::{AppView, ApplicationTask};
-use crate::ui::views::EditLayout;
+use crate::ui::layouts::EditLayout;
 use crate::ui::widgets::{
     BorderWidget, ColumnWidget, CommandWidget, EditWidget, HelpWidget, Widget, WidgetBox,
 };

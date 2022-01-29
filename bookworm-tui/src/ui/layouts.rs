@@ -67,7 +67,7 @@ pub trait RectExt {
 
 impl RectExt for Rect {
     fn contains(&self, point: &(u16, u16)) -> bool {
-        point > &(self.x, self.y) && point <= &(self.x + self.width, self.y + self.height)
+        point >= &(self.x, self.y) && point < &(self.x + self.width, self.y + self.height)
     }
 }
 

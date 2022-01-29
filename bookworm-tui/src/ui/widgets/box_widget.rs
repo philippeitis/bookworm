@@ -7,7 +7,7 @@ use tui::Frame;
 use bookworm_app::app::AppChannel;
 use bookworm_database::AppDatabase;
 
-use crate::ui::views::{LayoutGenerator, RectExt};
+use crate::ui::layouts::{LayoutGenerator, RectExt};
 use crate::ui::widgets::Widget;
 use crate::{ApplicationTask, TuiError, UIState};
 

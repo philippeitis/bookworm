@@ -5,5 +5,5 @@ mod scrollable_text;
 pub(crate) mod terminal_ui;
 mod tui_widgets;
 pub(crate) mod utils;
-pub(crate) mod views;
+pub(crate) mod layouts;
 pub mod widgets;
