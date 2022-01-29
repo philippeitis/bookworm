@@ -54,7 +54,8 @@ impl TuiStyle for InterfaceStyle {
 
 #[async_trait]
 pub(crate) trait Widget<D: AppDatabase + Send + Sync, B: Backend> {
-    /// Resizes the widget before the rendering step.
+    /// Resizes the widget before the rendering step. May require changing the UIState - for example,
+    /// if more books need to be fetched.
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect);
 
     /// Renders the widget into the frame, using the provided space.
@@ -65,10 +66,13 @@ pub(crate) trait Widget<D: AppDatabase + Send + Sync, B: Backend> {
     /// * ` chunk ` - A chunk to specify the size of the widget.
     fn render_into_frame(&self, f: &mut Frame<B>, state: &UIState<D>, chunk: Rect);
 
-    /// Processes the event and modifies the internal state accordingly. May modify app,
+    /// Processes `event` and may modify the UI state `state`, or the overall application state `app`,
     /// depending on specific event.
     ///
-    /// Returns ApplicationTask::DoNothing in the event that no input is captured.
+    /// Example: If `event` triggers submission of command which adds books, then `state` may
+    /// register new books, and `app` may be updated as new books are added.
+    ///
+    /// Returns ApplicationTask::DoNothing in the event that the input is not captured.
     async fn handle_input(
         &mut self,
         event: Event,

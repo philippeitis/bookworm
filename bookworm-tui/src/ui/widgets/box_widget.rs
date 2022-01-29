@@ -21,7 +21,7 @@ pub struct WidgetBox<D: AppDatabase + Send + Sync, B: Backend> {
 }
 
 impl<D: AppDatabase + Send + Sync, B: Backend> WidgetBox<D, B> {
-    async fn cycle_priority(
+    async fn handle_with_prioritized_widget(
         &mut self,
         event: Event,
         state: &mut UIState<D>,
@@ -40,11 +40,10 @@ impl<D: AppDatabase + Send + Sync, B: Backend> WidgetBox<D, B> {
 }
 
 // Needs to do the following:
-// Maintain priority queue for input handling (so that we correctly switch between widgets)
-// Queue should consist of WidgetInformation - widget, bounding box,
 // Need some way to recompute layout - nested widgets
 // Need some way to change layout
-// Need some way to tab through nested widgets
+// Need some way to tab through nested widgets - almost, with nested TAB events, but need to trigger
+// tabbing behaviour in parent
 #[async_trait]
 impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D, B> {
     async fn prepare_render(&mut self, state: &mut UIState<D>, chunk: Rect) {
@@ -106,12 +105,12 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for WidgetBox<D,
                         .expect("Bounding box does not correspond to existing widget")
                         .handle_input(event, state, app).await;
                 }
-                return self.cycle_priority(event, state, app).await;
+                return self.handle_with_prioritized_widget(event, state, app).await;
             }
             Event::Key(event) => {
                 // Figure out how to handle esc for de-prioritize
                 // Figure out default when nothing is capturing
-                match self.cycle_priority(Event::Key(event), state, app).await? {
+                match self.handle_with_prioritized_widget(Event::Key(event), state, app).await? {
                     ApplicationTask::DoNothing => match event.code {
                         // if active widget isn't capturing tabs,
                         // capture tab and cycle active widgets
