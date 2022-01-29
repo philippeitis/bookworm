@@ -216,7 +216,7 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for ColumnWidget
                             Ok(ApplicationTask::SwitchView(AppView::Edit))
                         } else {
                             Ok(ApplicationTask::DoNothing)
-                        }
+                        };
                     }
                     KeyCode::Enter => {
                         return if !state.book_view.selected_books().is_empty() {
