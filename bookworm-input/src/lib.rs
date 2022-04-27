@@ -3,7 +3,6 @@
 #![deny(unused_attributes)]
 #![deny(unused_mut)]
 
-
 pub mod autocomplete;
 pub mod user_input;
 

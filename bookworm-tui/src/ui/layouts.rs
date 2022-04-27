@@ -56,7 +56,10 @@ impl LayoutGenerator for ColumnBookLayout {
     }
 }
 
-impl<F> LayoutGenerator for F where F: Fn(Rect) -> Vec<Rect> {
+impl<F> LayoutGenerator for F
+where
+    F: Fn(Rect) -> Vec<Rect>,
+{
     fn layout(&self, chunk: Rect) -> Vec<Rect> {
         self(chunk)
     }
