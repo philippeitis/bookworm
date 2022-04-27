@@ -1,5 +1,7 @@
 #![deny(unused_must_use)]
 #![deny(unused_imports)]
+#![deny(unused_attributes)]
+#![deny(unused_mut)]
 
 pub use bookview::BookView;
 pub use bookworm_records::book::Book;

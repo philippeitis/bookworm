@@ -145,6 +145,7 @@ struct FreeTagData {
 
 #[cfg(windows)]
 fn v8_to_v16(a: Vec<u8>) -> Vec<u16> {
+    // TODO: use array_chunks to make this nice and beautiful
     a.chunks(2)
         .map(|c| u16::from_be_bytes([c[0], c[1]]))
         .collect()
@@ -194,6 +195,7 @@ impl TryFrom<BookData> for Book {
                     index: series_id,
                 })
             },
+            variants: Vec::with_capacity(2),
             ..Default::default()
         })
     }
@@ -445,6 +447,111 @@ impl SQLiteDatabase {
     /// ```
     ///
     /// In the future, it would be nice to resolve minor hiccups when rapidly scrolling
+    async fn read_books_from_sql_prepared(
+        &self,
+        ids: &[BookID],
+    ) -> Result<
+        (Vec<(BookID, Arc<Book>)>, HashSet<UniCase<String>>),
+        DatabaseError<<SQLiteDatabase as AppDatabase>::Error>,
+    > {
+        if ids.is_empty() {
+            return Ok((Default::default(), Default::default()));
+        };
+        let where_ = format!(
+            "IN (?{})",
+            ", ?".repeat(ids.len().max(128).saturating_sub(1))
+        );
+        let raw_book_query = format!("SELECT * FROM books WHERE books.book_id {}", where_);
+        let raw_variant_query = format!("SELECT * FROM variants WHERE variants.book_id {}", where_);
+        let raw_named_tag_query = format!(
+            "SELECT * FROM named_tags WHERE named_tags.book_id {}",
+            where_
+        );
+        let raw_free_tag_query =
+            format!("SELECT * FROM free_tags WHERE free_tags.book_id {}", where_);
+        let raw_multimap_tag_query = format!(
+            "SELECT * FROM multimap_tags WHERE multimap_tags.book_id {}",
+            where_
+        );
+
+        let mut raw_books = sqlx::query_as(&raw_book_query);
+        let mut raw_variants = sqlx::query_as(&raw_variant_query);
+        let mut raw_named_tags = sqlx::query_as(&raw_named_tag_query);
+        let mut raw_free_tags = sqlx::query_as(&raw_free_tag_query);
+        let mut raw_multimap_tags = sqlx::query_as(&raw_multimap_tag_query);
+
+        for id in ids
+            .iter()
+            .map(|id| Some(u64::from(*id) as i64))
+            .chain(None)
+            .take(ids.len().max(128))
+        {
+            raw_books = raw_books.bind(id);
+            raw_variants = raw_variants.bind(id);
+            raw_named_tags = raw_named_tags.bind(id);
+            raw_free_tags = raw_free_tags.bind(id);
+            raw_multimap_tags = raw_multimap_tags.bind(id);
+        }
+        let raw_books = raw_books.fetch_all(&self.connection);
+        let raw_variants = raw_variants.fetch_all(&self.connection);
+        let raw_named_tags = raw_named_tags.fetch_all(&self.connection);
+        let raw_free_tags = raw_free_tags.fetch_all(&self.connection);
+        let raw_multimap_tags = raw_multimap_tags.fetch_all(&self.connection);
+        tracing::info!("Reading books from database");
+
+        let start = std::time::Instant::now();
+
+        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = tokio::join!(
+            raw_books,
+            raw_variants,
+            raw_named_tags,
+            raw_free_tags,
+            raw_multimap_tags
+        );
+
+        tracing::info!("Received results");
+
+        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
+            raw_books.map_err(DatabaseError::Backend)?,
+            raw_variants.map_err(DatabaseError::Backend)?,
+            raw_named_tags.map_err(DatabaseError::Backend)?,
+            raw_free_tags.map_err(DatabaseError::Backend)?,
+            raw_multimap_tags.map_err(DatabaseError::Backend)?,
+        );
+
+        let end = std::time::Instant::now();
+        tracing::info!(
+            "Took {}s to read {} books from SQLite",
+            (end - start).as_secs_f32(),
+            raw_books.len(),
+        );
+        let start = std::time::Instant::now();
+
+        let (new_books, columns) = SQLiteDatabase::books_from_sql(
+            raw_books,
+            raw_variants,
+            raw_named_tags,
+            raw_free_tags,
+            raw_multimap_tags,
+        );
+        let end = std::time::Instant::now();
+        tracing::info!("Took {}s to convert books", (end - start).as_secs_f32());
+
+        Ok((new_books, columns))
+    }
+
+    #[tracing::instrument(name = "Loading books from the database", skip(self))]
+    /// NOTE: The performance of this has been scrutinized to some degree.
+    /// tokio::join_all offers a substantial improvement in performance (>10x), and
+    /// scrolling is significantly smoother.
+    ///
+    /// Converting books is 10x faster than reading them from SQLite:
+    /// ```bash
+    ///    >>> Took 0.00082799s to read 19 books from SQLite
+    ///    >>> Took 0.000071805s to convert books
+    /// ```
+    ///
+    /// In the future, it would be nice to resolve minor hiccups when rapidly scrolling
     async fn read_books_from_sql(
         &self,
         ids: &[BookID],
@@ -469,11 +576,21 @@ impl SQLiteDatabase {
             where_
         );
 
-        let raw_books = sqlx::query_as(&raw_book_query).fetch_all(&self.connection);
-        let raw_variants = sqlx::query_as(&raw_variant_query).fetch_all(&self.connection);
-        let raw_named_tags = sqlx::query_as(&raw_named_tag_query).fetch_all(&self.connection);
-        let raw_free_tags = sqlx::query_as(&raw_free_tag_query).fetch_all(&self.connection);
-        let raw_multimap_tags = sqlx::query_as(&raw_multimap_tag_query).fetch_all(&self.connection);
+        let raw_books = sqlx::query_as(&raw_book_query)
+            .persistent(false)
+            .fetch_all(&self.connection);
+        let raw_variants = sqlx::query_as(&raw_variant_query)
+            .persistent(false)
+            .fetch_all(&self.connection);
+        let raw_named_tags = sqlx::query_as(&raw_named_tag_query)
+            .persistent(false)
+            .fetch_all(&self.connection);
+        let raw_free_tags = sqlx::query_as(&raw_free_tag_query)
+            .persistent(false)
+            .fetch_all(&self.connection);
+        let raw_multimap_tags = sqlx::query_as(&raw_multimap_tag_query)
+            .persistent(false)
+            .fetch_all(&self.connection);
 
         tracing::info!("Reading books from database");
 
@@ -1284,7 +1401,7 @@ impl AppDatabase for SQLiteDatabase {
         id: BookID,
         edits: &[(ColumnIdentifier, Edit)],
     ) -> Result<(), DatabaseError<Self::Error>> {
-        let mut tx = self
+        let tx = self
             .connection
             .begin()
             .await
@@ -1295,7 +1412,7 @@ impl AppDatabase for SQLiteDatabase {
             .await?
             .remove(&id)
             .ok_or(DatabaseError::BookNotFound(id))?;
-        let mut book_ = Arc::make_mut(&mut book);
+        let book_ = Arc::make_mut(&mut book);
         let tx = edit_book(tx, book_, edits).await?;
         tx.commit().await.map_err(DatabaseError::Backend)?;
         self.cache.write().await.insert_book(book);
