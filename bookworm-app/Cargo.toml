@@ -14,12 +14,12 @@ bookworm-input = { version = "0.1.0", path = "../bookworm-input" }
 serde = { version = "1.0", features = ["derive"] }
 
 glob = "0.3.0"
-toml = "0.5.7"
+toml = "0.5.9"
 unicase = { version = "2.6.0", git = "https://github.com/philippeitis/unicase.git", branch = "serde" }
-tokio = { version = "1.15.0", features = ["full", "rt"] }
+tokio = { version = "1.18.0", features = ["full", "rt"] }
 
 itertools = "0.10.1"
-rayon = "1.5.1"
+rayon = "1.5.2"
 jwalk = "0.6.0"
 dirs = "4.0.0"
 # TODO: Switch to mainline opener when changes are merged
