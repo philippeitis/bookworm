@@ -333,11 +333,10 @@ impl<K: Hash + PartialEq + Eq> InputRecorder<K> {
     pub fn push(&mut self, c: char) {
         self.events.push(TextEvent::Push(c));
 
-        if self.started_edit {
-            self.cursored.values_mut().for_each(|cursor| cursor.push(c));
-        } else {
+        if !self.started_edit {
             self.cursored.values_mut().for_each(|cursor| cursor.clear());
         }
+        self.cursored.values_mut().for_each(|cursor| cursor.push(c));
 
         self.started_edit = true;
     }
@@ -347,16 +346,15 @@ impl<K: Hash + PartialEq + Eq> InputRecorder<K> {
             self.events.push(TextEvent::Push(c));
         }
 
-        if self.started_edit {
-            self.cursored.values_mut().for_each(|cursor| {
-                for c in s.chars() {
-                    cursor.push(c);
-                }
-            });
-        } else {
+        if !self.started_edit {
             self.cursored.values_mut().for_each(|cursor| cursor.clear());
         }
 
+        self.cursored.values_mut().for_each(|cursor| {
+            for c in s.chars() {
+                cursor.push(c);
+            }
+        });
         self.started_edit = true;
     }
 
