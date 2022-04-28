@@ -151,10 +151,10 @@ impl<'b, D: AppDatabase + Send + Sync, B: Backend> Widget<D, B> for CommandWidge
                                 Command::AddBooks(sources) | Command::UpdateBooks(sources) => {
                                     match sources.last() {
                                         Some(Source::File(_)) => {
-                                            curr_command.auto_fill(false);
+                                            curr_command.autofill(false);
                                         }
                                         Some(Source::Dir(_, _)) => {
-                                            curr_command.auto_fill(true);
+                                            curr_command.autofill(true);
                                         }
                                         _ => {}
                                     }

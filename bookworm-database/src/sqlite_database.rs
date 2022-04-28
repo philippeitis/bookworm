@@ -21,7 +21,7 @@ use unicase::UniCase;
 use bookworm_input::Edit;
 use bookworm_records::book::{BookID, ColumnIdentifier};
 use bookworm_records::series::Series;
-use bookworm_records::{Book, BookVariant, Edit as BEdit};
+use bookworm_records::{Book, Edit as BEdit};
 
 use crate::cache::BookCache;
 use crate::paginator::{QueryBuilder, Selection, Variable};
@@ -56,7 +56,14 @@ const CREATE_BOOKS: &str = r#"CREATE TABLE IF NOT EXISTS `books` (
 `book_id` INTEGER NOT NULL PRIMARY KEY,
 `title` TEXT DEFAULT NULL,
 `series_name` TEXT DEFAULT NULL,
-`series_id` REAL DEFAULT NULL
+`series_id` REAL DEFAULT NULL,
+`book_type` TEXT NOT NULL,
+`path` BLOB NOT NULL,
+`identifier` TEXT DEFAULT NULL,
+`language` TEXT DEFAULT NULL,
+`description` TEXT DEFAULT NULL,
+`hash` BLOB NOT NULL,
+`file_size` INTEGER NOT NULL
 );"#;
 
 /// Tags for books with a particular name and single value
@@ -91,41 +98,17 @@ FOREIGN KEY(book_id) REFERENCES books(book_id)
     ON DELETE CASCADE
 );"#;
 
-/// Variant metadata - each book can have multiple variants
-const CREATE_VARIANTS: &str = r#"CREATE TABLE IF NOT EXISTS `variants` (
-`book_type` TEXT NOT NULL,
-`path` BLOB NOT NULL,
-`local_title` TEXT DEFAULT NULL,
-`identifier` TEXT DEFAULT NULL,
-`language` TEXT DEFAULT NULL,
-`description` TEXT DEFAULT NULL,
-`id` INTEGER DEFAULT NULL,
-`hash` BLOB NOT NULL,
-`file_size` INTEGER NOT NULL,
-`book_id` INTEGER NOT NULL,
-FOREIGN KEY(book_id) REFERENCES books(book_id)
-    ON UPDATE CASCADE
-    ON DELETE CASCADE
-);"#;
-
 #[derive(sqlx::FromRow)]
 struct BookData {
     book_id: i64,
     title: Option<String>,
     series_name: Option<String>,
     series_id: Option<f32>,
-}
-
-#[derive(sqlx::FromRow)]
-struct VariantData {
-    book_id: i64,
     book_type: String,
     path: Vec<u8>,
-    local_title: Option<String>,
     language: Option<String>,
     identifier: Option<String>,
     description: Option<String>,
-    id: Option<i64>,
     file_size: i64,
     hash: Vec<u8>,
 }
@@ -187,7 +170,9 @@ impl TryFrom<BookData> for Book {
             } else {
                 return Err(DataError::NullPrimaryID);
             },
-            title: bd.title.clone(),
+            format: ron::from_str(&bd.book_type).map_err(|_| {
+                DataError::Serialize(format!("Failed to parse book type: {}", bd.book_type))
+            })?,
             series: {
                 let series_id = bd.series_id;
                 bd.series_name.map(|sn| Series {
@@ -195,42 +180,27 @@ impl TryFrom<BookData> for Book {
                     index: series_id,
                 })
             },
-            variants: Vec::with_capacity(2),
-            ..Default::default()
-        })
-    }
-}
-
-impl TryFrom<VariantData> for BookVariant {
-    type Error = DataError;
-
-    fn try_from(vd: VariantData) -> Result<Self, Self::Error> {
-        Ok(BookVariant {
-            book_type: ron::from_str(&vd.book_type).map_err(|_| {
-                DataError::Serialize(format!("Failed to parse book type: {}", vd.book_type))
-            })?,
             #[cfg(unix)]
-            path: PathBuf::from(OsString::from_vec(vd.path)),
+            path: PathBuf::from(OsString::from_vec(bd.path)),
             #[cfg(windows)]
-            path: PathBuf::from(OsString::from_wide(&v8_to_v16(vd.path))),
-            local_title: vd.local_title,
-            identifier: vd
+            path: PathBuf::from(OsString::from_wide(&v8_to_v16(bd.path))),
+            title: bd.title,
+            identifier: bd
                 .identifier
                 .as_ref()
                 .map(|s| ron::from_str(s).ok())
                 .flatten(),
-            language: vd.language,
-            additional_authors: None,
+            language: bd.language,
+            authors: None,
             translators: None,
-            description: vd.description,
-            id: vd.id.map(|id| u32::try_from(id).unwrap()),
+            description: bd.description,
             hash: {
-                let len = vd.hash.len();
-                vd.hash.try_into().map_err(|_| {
+                let len = bd.hash.len();
+                bd.hash.try_into().map_err(|_| {
                     DataError::Serialize(format!("Got {} byte hash, expected 32 byte hash", len))
                 })?
             },
-            file_size: vd.file_size as u64,
+            file_size: bd.file_size as u64,
             free_tags: HashSet::new(),
             named_tags: HashMap::new(),
         })
@@ -308,7 +278,7 @@ impl SQLiteDatabase {
         let books = self
             .read_selected_books(
                 "SELECT book_id
-            FROM `variants`
+            FROM `books`
             GROUP BY hash
             HAVING COUNT(*) > 1",
                 &[],
@@ -317,7 +287,7 @@ impl SQLiteDatabase {
         // titles, authors
         // variant by variant: identical hashmaps
         // SELECT hash
-        // FROM variants
+        // FROM books
         // GROUP BY hash
         // HAVING COUNT(*) > 1
         // ORDER BY hash DESC;
@@ -326,17 +296,10 @@ impl SQLiteDatabase {
 
     #[tracing::instrument(
         name = "Converting SQLite data to Book records",
-        skip(
-            raw_books,
-            raw_variants,
-            raw_named_tags,
-            raw_free_tags,
-            raw_multimap_tags
-        )
+        skip(raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags)
     )]
     fn books_from_sql(
         raw_books: Vec<BookData>,
-        raw_variants: Vec<VariantData>,
         raw_named_tags: Vec<NamedTagData>,
         raw_free_tags: Vec<FreeTagData>,
         raw_multimap_tags: Vec<NamedTagData>,
@@ -351,23 +314,6 @@ impl SQLiteDatabase {
                 }
             })
             .collect();
-
-        for variant in raw_variants.into_iter() {
-            let id = NonZeroU64::try_from(variant.book_id as u64).expect("book_id is non-null");
-            let variant = match BookVariant::try_from(variant) {
-                Ok(variant) => variant,
-                Err(e) => {
-                    tracing::error!("Could not transform SQLite record into book variant: {}", e);
-                    continue;
-                }
-            };
-
-            if let Some(book) = books.get_mut(&id) {
-                book.push_variant(variant);
-            } else {
-                tracing::error!("Found orphan variant for ID {} while loading books.", id);
-            }
-        }
 
         // To get all columns: "SELECT DISTINCT tag_name FROM extended_tags"
         let mut prime_cols = HashSet::new();
@@ -462,7 +408,6 @@ impl SQLiteDatabase {
             ", ?".repeat(ids.len().max(128).saturating_sub(1))
         );
         let raw_book_query = format!("SELECT * FROM books WHERE books.book_id {}", where_);
-        let raw_variant_query = format!("SELECT * FROM variants WHERE variants.book_id {}", where_);
         let raw_named_tag_query = format!(
             "SELECT * FROM named_tags WHERE named_tags.book_id {}",
             where_
@@ -475,7 +420,6 @@ impl SQLiteDatabase {
         );
 
         let mut raw_books = sqlx::query_as(&raw_book_query);
-        let mut raw_variants = sqlx::query_as(&raw_variant_query);
         let mut raw_named_tags = sqlx::query_as(&raw_named_tag_query);
         let mut raw_free_tags = sqlx::query_as(&raw_free_tag_query);
         let mut raw_multimap_tags = sqlx::query_as(&raw_multimap_tag_query);
@@ -487,13 +431,11 @@ impl SQLiteDatabase {
             .take(ids.len().max(128))
         {
             raw_books = raw_books.bind(id);
-            raw_variants = raw_variants.bind(id);
             raw_named_tags = raw_named_tags.bind(id);
             raw_free_tags = raw_free_tags.bind(id);
             raw_multimap_tags = raw_multimap_tags.bind(id);
         }
         let raw_books = raw_books.fetch_all(&self.connection);
-        let raw_variants = raw_variants.fetch_all(&self.connection);
         let raw_named_tags = raw_named_tags.fetch_all(&self.connection);
         let raw_free_tags = raw_free_tags.fetch_all(&self.connection);
         let raw_multimap_tags = raw_multimap_tags.fetch_all(&self.connection);
@@ -501,19 +443,13 @@ impl SQLiteDatabase {
 
         let start = std::time::Instant::now();
 
-        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = tokio::join!(
-            raw_books,
-            raw_variants,
-            raw_named_tags,
-            raw_free_tags,
-            raw_multimap_tags
-        );
+        let (raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags) =
+            tokio::join!(raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags);
 
         tracing::info!("Received results");
 
-        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
+        let (raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
             raw_books.map_err(DatabaseError::Backend)?,
-            raw_variants.map_err(DatabaseError::Backend)?,
             raw_named_tags.map_err(DatabaseError::Backend)?,
             raw_free_tags.map_err(DatabaseError::Backend)?,
             raw_multimap_tags.map_err(DatabaseError::Backend)?,
@@ -529,7 +465,6 @@ impl SQLiteDatabase {
 
         let (new_books, columns) = SQLiteDatabase::books_from_sql(
             raw_books,
-            raw_variants,
             raw_named_tags,
             raw_free_tags,
             raw_multimap_tags,
@@ -564,7 +499,6 @@ impl SQLiteDatabase {
         };
         let where_ = format!("IN ({})", ids.iter().map(|id| id.to_string()).join(", "));
         let raw_book_query = format!("SELECT * FROM books WHERE books.book_id {}", where_);
-        let raw_variant_query = format!("SELECT * FROM variants WHERE variants.book_id {}", where_);
         let raw_named_tag_query = format!(
             "SELECT * FROM named_tags WHERE named_tags.book_id {}",
             where_
@@ -577,9 +511,6 @@ impl SQLiteDatabase {
         );
 
         let raw_books = sqlx::query_as(&raw_book_query)
-            .persistent(false)
-            .fetch_all(&self.connection);
-        let raw_variants = sqlx::query_as(&raw_variant_query)
             .persistent(false)
             .fetch_all(&self.connection);
         let raw_named_tags = sqlx::query_as(&raw_named_tag_query)
@@ -596,19 +527,13 @@ impl SQLiteDatabase {
 
         let start = std::time::Instant::now();
 
-        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = tokio::join!(
-            raw_books,
-            raw_variants,
-            raw_named_tags,
-            raw_free_tags,
-            raw_multimap_tags
-        );
+        let (raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags) =
+            tokio::join!(raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags);
 
         tracing::info!("Received results");
 
-        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
+        let (raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
             raw_books.map_err(DatabaseError::Backend)?,
-            raw_variants.map_err(DatabaseError::Backend)?,
             raw_named_tags.map_err(DatabaseError::Backend)?,
             raw_free_tags.map_err(DatabaseError::Backend)?,
             raw_multimap_tags.map_err(DatabaseError::Backend)?,
@@ -624,7 +549,6 @@ impl SQLiteDatabase {
 
         let (new_books, columns) = SQLiteDatabase::books_from_sql(
             raw_books,
-            raw_variants,
             raw_named_tags,
             raw_free_tags,
             raw_multimap_tags,
@@ -640,8 +564,6 @@ impl SQLiteDatabase {
     ) -> Result<(), DatabaseError<<SQLiteDatabase as AppDatabase>::Error>> {
         let raw_books =
             sqlx::query_as!(BookData, "SELECT * FROM books").fetch_all(&self.connection);
-        let raw_variants =
-            sqlx::query_as!(VariantData, "SELECT * FROM variants").fetch_all(&self.connection);
         let raw_named_tags =
             sqlx::query_as!(NamedTagData, "SELECT * FROM named_tags").fetch_all(&self.connection);
         let raw_free_tags =
@@ -649,17 +571,11 @@ impl SQLiteDatabase {
         let raw_multimap_tags = sqlx::query_as!(NamedTagData, "SELECT * FROM multimap_tags")
             .fetch_all(&self.connection);
 
-        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = tokio::join!(
-            raw_books,
-            raw_variants,
-            raw_named_tags,
-            raw_free_tags,
-            raw_multimap_tags
-        );
+        let (raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags) =
+            tokio::join!(raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags);
 
-        let (raw_books, raw_variants, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
+        let (raw_books, raw_named_tags, raw_free_tags, raw_multimap_tags) = (
             raw_books.map_err(DatabaseError::Backend)?,
-            raw_variants.map_err(DatabaseError::Backend)?,
             raw_named_tags.map_err(DatabaseError::Backend)?,
             raw_free_tags.map_err(DatabaseError::Backend)?,
             raw_multimap_tags.map_err(DatabaseError::Backend)?,
@@ -667,7 +583,6 @@ impl SQLiteDatabase {
 
         let (books, columns) = SQLiteDatabase::books_from_sql(
             raw_books,
-            raw_variants,
             raw_named_tags,
             raw_free_tags,
             raw_multimap_tags,
@@ -690,8 +605,8 @@ async fn edit_book<'a>(
     let id = book.id();
     let book_id = u64::from(id) as i64;
     for (column, edit) in edits {
-        if matches!(column, ColumnIdentifier::ID | ColumnIdentifier::Variants) {
-            tracing::error!("Attempted to edit immutable field (one of ID, Variants)");
+        if matches!(column, ColumnIdentifier::ID) {
+            tracing::error!("Attempted to edit immutable field (ID)");
             continue;
         }
 
@@ -723,9 +638,8 @@ async fn edit_book<'a>(
                         "UPDATE books SET series_name = null, series_id = null WHERE book_id = ?;",
                         book_id
                     ),
-                    ColumnIdentifier::Variants => unreachable!(),
                     ColumnIdentifier::Description => sqlx::query!(
-                        "UPDATE variants SET description = null WHERE book_id = ?;",
+                        "UPDATE books SET description = null WHERE book_id = ?;",
                         book_id
                     ),
                     ColumnIdentifier::NamedTag(column) => {
@@ -799,10 +713,9 @@ async fn edit_book<'a>(
                     .map_err(DatabaseError::Backend)?;
                 }
                 ColumnIdentifier::ID => unreachable!(),
-                ColumnIdentifier::Variants => unreachable!(),
                 ColumnIdentifier::Description => {
                     sqlx::query!(
-                        "UPDATE variants SET description = ? WHERE book_id = ?",
+                        "UPDATE books SET description = ? WHERE book_id = ?",
                         value,
                         book_id
                     )
@@ -872,10 +785,9 @@ async fn edit_book<'a>(
                     unreachable!("book should reject concatenating to series");
                 }
                 ColumnIdentifier::ID => unreachable!(),
-                ColumnIdentifier::Variants => unreachable!(),
                 ColumnIdentifier::Description => {
                     sqlx::query!(
-                        "UPDATE variants SET description = description || ? WHERE book_id = ?",
+                        "UPDATE books SET description = description || ? WHERE book_id = ?",
                         value,
                         book_id
                     )
@@ -933,7 +845,7 @@ async fn edit_book<'a>(
 }
 
 impl SQLiteDatabase {
-    async fn insert_books_async<I: Iterator<Item = BookVariant> + Send>(
+    async fn insert_books_async<I: Iterator<Item = Book> + Send>(
         &mut self,
         books: I,
         transaction_size: usize,
@@ -946,9 +858,8 @@ impl SQLiteDatabase {
 
         while book_iter.peek().is_some() {
             let mut tx = self.connection.begin().await?;
-            for variant in book_iter.by_ref().take(transaction_size) {
-                let variant: BookVariant = variant;
-                let title = variant.local_title.as_ref();
+            for mut book in book_iter.by_ref().take(transaction_size) {
+                let title = book.title.as_ref();
                 // let (series, series_index) = (None, None);
                 // match book.get_series() {
                 //     None => (None, None),
@@ -970,37 +881,35 @@ impl SQLiteDatabase {
                     .await?
                     .last_insert_rowid();
 
-                let book_type = ron::to_string(variant.book_type())
+                let book_type = ron::to_string(book.format())
                     .expect("Serialization of value should never fail.");
                 #[cfg(unix)]
-                let path = variant.path().as_os_str().as_bytes();
+                let path = book.path().as_os_str().as_bytes();
                 #[cfg(windows)]
                 let path = v16_to_v8(variant.path().as_os_str().encode_wide().collect());
-                let local_title = &variant.local_title;
-                let identifier = variant
+                let identifier = book
                     .identifier
                     .as_ref()
                     .map(|i| ron::to_string(i).expect("Serialization of value should never fail."));
-                let language = &variant.language;
-                let description = &variant.description;
-                let sub_id = &variant.id;
-                let hash = variant.hash.to_vec();
-                let file_size = variant.file_size as i64;
+                let language = &book.language;
+                let description = &book.description;
+                let sub_id = &book.id;
+                let hash = book.hash.to_vec();
+                let file_size = book.file_size as i64;
                 sqlx::query!(
-                    "INSERT into variants (book_type, path, local_title, identifier, language, description, id, hash, file_size, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT into books (book_type, path, title, identifier, language, description, hash, file_size, book_id) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     book_type,
                     path,
-                    local_title,
+                    title,
                     identifier,
                     language,
                     description,
-                    sub_id,
                     hash,
                     file_size,
                     id,
                 ).execute(&mut tx).await?;
 
-                for value in variant.free_tags.iter() {
+                for value in book.free_tags.iter() {
                     sqlx::query!(
                         "INSERT INTO free_tags (value, book_id) VALUES(?, ?);",
                         value,
@@ -1010,7 +919,7 @@ impl SQLiteDatabase {
                     .await?;
                 }
 
-                for (name, value) in variant.named_tags.iter() {
+                for (name, value) in book.named_tags.iter() {
                     sqlx::query!(
                         "INSERT INTO named_tags (name, value, book_id) VALUES(?, ?, ?);",
                         name,
@@ -1021,7 +930,7 @@ impl SQLiteDatabase {
                     .await?;
                 }
 
-                if let Some(authors) = &variant.additional_authors {
+                if let Some(authors) = &book.authors {
                     for author in authors {
                         sqlx::query!("INSERT INTO multimap_tags (name, value, book_id) VALUES(\"author\", ?, ?);", author, id).execute(&mut tx).await?;
                     }
@@ -1029,10 +938,8 @@ impl SQLiteDatabase {
 
                 let id = BookID::try_from(id as u64)
                     .expect("SQLite database should never return NULL ID from primary key.");
-                self.cache
-                    .write()
-                    .await
-                    .insert_book(Arc::new(Book::from_variant(id, variant)));
+                book.id = Some(id);
+                self.cache.write().await.insert_book(Arc::new(book));
 
                 ids.push(id);
             }
@@ -1051,9 +958,6 @@ impl SQLiteDatabase {
             .execute(&mut tx)
             .await?;
         sqlx::query!("DELETE FROM named_tags")
-            .execute(&mut tx)
-            .await?;
-        sqlx::query!("DELETE FROM variants")
             .execute(&mut tx)
             .await?;
         sqlx::query!("DELETE FROM books").execute(&mut tx).await?;
@@ -1088,6 +992,7 @@ impl SQLiteDatabase {
     }
 
     async fn merge_by_ids(&mut self, merges: &[(BookID, BookID)]) -> Result<(), sqlx::Error> {
+        unimplemented!("Implement relationship version of merge_by_ids");
         // titles, authors
         // variant by variant: identical hashmaps
         let mut tx = self.connection.begin().await?;
@@ -1118,14 +1023,6 @@ impl SQLiteDatabase {
 
             sqlx::query!(
                 "UPDATE free_tags SET book_id = ? WHERE book_id = ?",
-                merged_into,
-                merged_from
-            )
-            .execute(&mut tx)
-            .await?;
-
-            sqlx::query!(
-                "UPDATE variants SET book_id = ? WHERE book_id = ?",
                 merged_into,
                 merged_from
             )
@@ -1212,7 +1109,6 @@ impl AppDatabase for SQLiteDatabase {
             CREATE_FREE_TAGS,
             CREATE_NAMED_TAGS,
             CREATE_MULTIMAP_TAGS,
-            CREATE_VARIANTS,
         ] {
             sqlx::query(query)
                 .execute(&db.connection)
@@ -1223,13 +1119,7 @@ impl AppDatabase for SQLiteDatabase {
         // TODO: Disable this when doing large writes.
         // NOTE: These indices are absolutely essential for fast scrolling
         tracing::info!("Creating indices over book_id");
-        for table in [
-            "books",
-            "variants",
-            "named_tags",
-            "free_tags",
-            "multimap_tags",
-        ] {
+        for table in ["books", "named_tags", "free_tags", "multimap_tags"] {
             sqlx::query(&format!(
                 "CREATE INDEX IF NOT EXISTS {}_ids on {}(book_id);",
                 table, table
@@ -1250,10 +1140,7 @@ impl AppDatabase for SQLiteDatabase {
         Ok(())
     }
 
-    async fn insert_book(
-        &mut self,
-        book: BookVariant,
-    ) -> Result<BookID, DatabaseError<Self::Error>> {
+    async fn insert_book(&mut self, book: Book) -> Result<BookID, DatabaseError<Self::Error>> {
         let ids = self
             .insert_books_async(std::iter::once(book), 1)
             .await
@@ -1261,7 +1148,7 @@ impl AppDatabase for SQLiteDatabase {
         Ok(ids[0])
     }
 
-    async fn insert_books<I: Iterator<Item = BookVariant> + Send>(
+    async fn insert_books<I: Iterator<Item = Book> + Send>(
         &mut self,
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>> {
@@ -1474,28 +1361,25 @@ impl AppDatabase for SQLiteDatabase {
     }
 
     #[tracing::instrument(name = "Updating books from sources", skip(self, books))]
-    async fn update<I: Iterator<Item = BookVariant> + Send>(
+    async fn update<I: Iterator<Item = Book> + Send>(
         &mut self,
         books: I,
     ) -> Result<(), DatabaseError<Self::Error>> {
         #[derive(sqlx::FromRow)]
-        struct VariantMetadata {
+        struct BookMetadata {
             book_id: i64,
-            id: Option<i64>,
             file_size: i64,
             hash: Vec<u8>,
         }
 
-        let raw_variants: Vec<VariantMetadata> = sqlx::query_as!(
-            VariantMetadata,
-            "SELECT book_id, id, file_size, hash FROM variants"
-        )
-        .fetch_all(&self.connection)
-        .await
-        .map_err(DatabaseError::Backend)?;
+        let raw_books: Vec<BookMetadata> =
+            sqlx::query_as!(BookMetadata, "SELECT book_id, file_size, hash FROM books")
+                .fetch_all(&self.connection)
+                .await
+                .map_err(DatabaseError::Backend)?;
 
-        tracing::info!("Read {} hashes from disk", raw_variants.len());
-        let target_hashmap: HashMap<(u64, [u8; 32]), (Option<u32>, BookID)> = raw_variants
+        tracing::info!("Read {} hashes from disk", raw_books.len());
+        let target_hashmap: HashMap<(u64, [u8; 32]), BookID> = raw_books
             .into_iter()
             .map(|vm| {
                 (
@@ -1511,20 +1395,15 @@ impl AppDatabase for SQLiteDatabase {
                             })
                             .unwrap()
                     }),
-                    (
-                        vm.id.map(|id| id as u32),
-                        BookID::try_from(vm.book_id as u64).unwrap(),
-                    ),
+                    BookID::try_from(vm.book_id as u64).unwrap(),
                 )
             })
             .collect();
 
-        sqlx::query!(
-            "CREATE INDEX IF NOT EXISTS variant_hashes on variants(book_id, id, file_size, hash);"
-        )
-        .execute(&self.connection)
-        .await
-        .map_err(DatabaseError::Backend)?;
+        sqlx::query!("CREATE INDEX IF NOT EXISTS book_hashes on books(book_id, file_size, hash);")
+            .execute(&self.connection)
+            .await
+            .map_err(DatabaseError::Backend)?;
 
         tracing::info!("Created index for fast writes");
         let mut tx = self
@@ -1532,47 +1411,34 @@ impl AppDatabase for SQLiteDatabase {
             .begin()
             .await
             .map_err(DatabaseError::Backend)?;
-        for variant in books {
-            if let Some((id, book_id)) = target_hashmap.get(&(variant.file_size, variant.hash)) {
+        for book in books {
+            if let Some(book_id) = target_hashmap.get(&(book.file_size, book.hash)) {
                 #[cfg(unix)]
-                let path = variant.path().as_os_str().as_bytes();
+                let path = book.path().as_os_str().as_bytes();
                 #[cfg(windows)]
-                let path = v16_to_v8(variant.path().as_os_str().encode_wide().collect());
-                let id = id.map(|id| id as i64);
-                let file_size = variant.file_size as i64;
-                let hash = variant.hash.to_vec();
+                let path = v16_to_v8(book.path().as_os_str().encode_wide().collect());
+                let file_size = book.file_size as i64;
+                let hash = book.hash.to_vec();
                 let book_id_ = u64::from(*book_id) as i64;
                 tracing::info!(
-                    "Found matching variant, setting path to {} for variant with id {:?}, file size {:?}, hash {:?}, and book_id {}",
-                    variant.path.display(),
-                    id,
+                    "Found matching book, setting path to {} for book with file size {:?}, hash {:?}, and book_id {}",
+                    book.path.display(),
                     file_size,
                     hash,
                     book_id_
                 );
 
-                let num_rows = if id.is_none() {
-                    sqlx::query!(
-                        "UPDATE variants SET path = ? WHERE (id is NULL AND file_size = ? AND hash = ? AND book_id = ?)",
-                        path,
-                        file_size,
-                        hash,
-                        book_id_
-                    )
-                } else {
-                    sqlx::query!(
-                        "UPDATE variants SET path = ? WHERE (id = ? AND file_size = ? AND hash = ? AND book_id = ?)",
-                        path,
-                        id,
-                        file_size,
-                        hash,
-                        book_id_
-                    )
-                }
-                    .execute(&mut tx)
-                    .await
-                    .map_err(DatabaseError::Backend)?
-                    .rows_affected();
+                let num_rows = sqlx::query!(
+                    "UPDATE books SET path = ? WHERE (file_size = ? AND hash = ? AND book_id = ?)",
+                    path,
+                    file_size,
+                    hash,
+                    book_id_
+                )
+                .execute(&mut tx)
+                .await
+                .map_err(DatabaseError::Backend)?
+                .rows_affected();
                 if num_rows != 1 {
                     tracing::error!("Query should have modified at least one value");
                 }

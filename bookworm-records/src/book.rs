@@ -1,15 +1,19 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::convert::TryFrom;
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::str::FromStr;
+use std::{fmt, path};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::series::Series;
-use crate::ColumnOrder;
-use crate::{BookVariant, Edit};
+use crate::variant::{BookFormat, Identifier};
+use crate::Edit;
+use crate::{BookError, ColumnOrder};
 
 pub type BookID = std::num::NonZeroU64;
 
@@ -27,7 +31,6 @@ pub enum ColumnIdentifier {
     Author,
     Series,
     ID,
-    Variants,
     Description,
     Tags,
     ExactTag(String),
@@ -43,7 +46,6 @@ impl<S: AsRef<str>> From<S> for ColumnIdentifier {
             "title" => Self::Title,
             "series" => Self::Series,
             "id" => Self::ID,
-            "variant" | "variants" => Self::Variants,
             "description" => Self::Description,
             "tag" => Self::Tags,
             _ => Self::NamedTag(val.as_ref().to_owned()),
@@ -58,7 +60,6 @@ impl ColumnIdentifier {
             ColumnIdentifier::Author => "Author",
             ColumnIdentifier::Series => "Series",
             ColumnIdentifier::ID => "ID",
-            ColumnIdentifier::Variants => "Variants",
             ColumnIdentifier::Description => "Description",
             ColumnIdentifier::Tags | ColumnIdentifier::ExactTag(_) => "Tag",
             ColumnIdentifier::NamedTag(t) => return t,
@@ -76,15 +77,21 @@ impl ColumnIdentifier {
 /// Variants can be different file formats of the same book, or different realizations of the same
 /// book.
 pub struct Book {
+    pub format: BookFormat,
     pub id: Option<BookID>,
     pub title: Option<String>,
     // TODO: Should authors be a hashset?
     pub authors: Option<Vec<String>>,
     pub series: Option<Series>,
     pub description: Option<String>,
-    pub variants: Vec<BookVariant>,
     pub free_tags: HashSet<String>,
     pub named_tags: HashMap<String, String>,
+    pub path: path::PathBuf,
+    pub file_size: u64,
+    pub identifier: Option<Identifier>,
+    pub language: Option<String>,
+    pub translators: Option<Vec<String>>,
+    pub hash: [u8; 32],
 }
 
 impl Book {
@@ -98,10 +105,6 @@ impl Book {
 
     pub fn series(&self) -> Option<&Series> {
         self.series.as_ref()
-    }
-
-    pub fn variants(&self) -> &[BookVariant] {
-        &self.variants
     }
 
     pub fn tags(&self) -> &HashMap<String, String> {
@@ -128,23 +131,6 @@ impl Book {
         })
     }
 
-    pub fn push_variant(&mut self, mut variant: BookVariant) {
-        if self.title.is_none() {
-            self.title = std::mem::take(&mut variant.local_title);
-        }
-        if self.authors.is_none() {
-            self.authors = std::mem::take(&mut variant.additional_authors);
-        }
-        if self.description.is_none() {
-            self.description = std::mem::take(&mut variant.description);
-        }
-        if self.named_tags.is_empty() {
-            self.named_tags = std::mem::take(&mut variant.named_tags);
-        }
-
-        self.variants.push(variant);
-    }
-
     /// Merges self with other, assuming that other is in fact a variant of self.
     /// Missing metadata will be utilized from other, and `self` variants will be extended
     /// to include `other` variants.
@@ -162,7 +148,6 @@ impl Book {
             self.series = other.series.clone();
         }
 
-        self.variants.extend_from_slice(&other.variants);
         self.named_tags.extend(other.named_tags.clone());
     }
 }
@@ -178,21 +163,6 @@ impl Book {
     /// Returns true if `self` is a placeholder
     pub fn is_placeholder(&self) -> bool {
         self.id.is_none()
-    }
-
-    /// Creates a `Book` with the given ID and core metadata.
-    pub fn from_variant(id: BookID, mut variant: BookVariant) -> Book {
-        variant.id = Some(0);
-        Book {
-            id: Some(id),
-            title: std::mem::take(&mut variant.local_title),
-            authors: std::mem::take(&mut variant.additional_authors),
-            series: None,
-            description: std::mem::take(&mut variant.description),
-            named_tags: std::mem::take(&mut variant.named_tags),
-            free_tags: std::mem::take(&mut variant.free_tags),
-            variants: vec![variant],
-        }
     }
 
     /// Returns the ID, which can be used as an index.
@@ -232,7 +202,7 @@ impl Book {
             ColumnIdentifier::Author => {
                 self.authors = Some(vec![value.to_owned()]);
             }
-            ColumnIdentifier::ID | ColumnIdentifier::Variants => {
+            ColumnIdentifier::ID => {
                 return Err(RecordError::ImmutableColumn);
             }
             ColumnIdentifier::Series => {
@@ -286,7 +256,7 @@ impl Book {
                 x @ None => *x = Some(vec![value.to_string()]),
                 Some(authors) => authors.push(value.to_owned()),
             },
-            ColumnIdentifier::ID | ColumnIdentifier::Variants => {
+            ColumnIdentifier::ID => {
                 return Err(RecordError::ImmutableColumn);
             }
             ColumnIdentifier::Series => {
@@ -318,7 +288,7 @@ impl Book {
             ColumnIdentifier::Title => self.title = None,
             ColumnIdentifier::Description => self.description = None,
             ColumnIdentifier::Author => self.authors = None,
-            ColumnIdentifier::ID | ColumnIdentifier::Variants => {
+            ColumnIdentifier::ID => {
                 return Err(RecordError::ImmutableColumn);
             }
             ColumnIdentifier::Series => self.series = None,
@@ -446,5 +416,101 @@ mod test {
                 Some(expected.to_string())
             );
         }
+    }
+}
+
+impl Book {
+    /// Generates a book from the file at `file_path`, and fills in details from the
+    /// parsed book metadata.
+    ///
+    /// # Arguments
+    /// * ` file_path ` - The path to the file of interest.
+    ///
+    /// # Errors
+    /// Will return an error if the provided path can not be read.
+    /// Will panic if the title can not be set.
+    pub fn from_path<P>(file_path: P) -> Result<Self, BookError>
+    where
+        P: Into<path::PathBuf>,
+    {
+        let path = file_path.into();
+
+        let ext = if let Some(ext) = path.extension() {
+            ext
+        } else {
+            return Err(BookError::FileError);
+        };
+
+        let book_type = BookFormat::try_from(ext)?;
+
+        let (reader, hash, file_size) = {
+            let mut file = std::fs::File::open(&path)?;
+            let len = file.metadata()?.len();
+            let bytes_to_read = (len as usize).min(4096);
+
+            let mut buf = [0; 4096];
+            file.read_exact(&mut buf[..bytes_to_read])?;
+            file.seek(SeekFrom::Start(0))?;
+
+            let mut hasher = Sha256::new();
+            hasher.update(&buf[..bytes_to_read]);
+            let res = hasher.finalize();
+
+            (
+                BufReader::with_capacity(bytes_to_read, file),
+                res.into(),
+                len,
+            )
+        };
+
+        let mut book = Book {
+            format: book_type,
+            path,
+            hash,
+            file_size,
+            title: None,
+            identifier: None,
+            language: None,
+            authors: None,
+            translators: None,
+            description: None,
+            id: None,
+            free_tags: HashSet::new(),
+            named_tags: HashMap::new(),
+            series: None,
+        };
+
+        if let Ok(mut metadata_filler) = book.format.metadata_filler(reader) {
+            metadata_filler.take_title(&mut book.title);
+            metadata_filler.take_authors(&mut book.authors);
+            metadata_filler.take_description(&mut book.description);
+            metadata_filler.take_language(&mut book.language);
+            metadata_filler.take_identifier(&mut book.identifier);
+        }
+
+        if book.title.is_none() {
+            let file_name = if let Some(file_name) = book.path.file_name() {
+                file_name
+            } else {
+                return Err(BookError::FileError);
+            };
+
+            book.title = Some(
+                file_name
+                    .to_str()
+                    .expect("Handle local title strings")
+                    .to_string(),
+            );
+        }
+
+        Ok(book)
+    }
+
+    pub fn path(&self) -> &path::Path {
+        self.path.as_ref()
+    }
+
+    pub fn format(&self) -> &BookFormat {
+        &self.format
     }
 }

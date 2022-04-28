@@ -8,7 +8,7 @@ use unicase::UniCase;
 
 use bookworm_input::Edit;
 use bookworm_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookworm_records::{Book, BookVariant};
+use bookworm_records::Book;
 
 use crate::paginator::{Selection, Variable};
 
@@ -65,10 +65,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the database fails.
-    async fn insert_book(
-        &mut self,
-        book: BookVariant,
-    ) -> Result<BookID, DatabaseError<Self::Error>>;
+    async fn insert_book(&mut self, book: Book) -> Result<BookID, DatabaseError<Self::Error>>;
 
     /// Stores each book into the database, and returns a Vec of corresponding IDs.
     ///
@@ -77,7 +74,7 @@ pub trait AppDatabase {
     ///
     /// # Errors
     /// This function will return an error if the books can not be inserted into the database.
-    async fn insert_books<I: Iterator<Item = BookVariant> + Send>(
+    async fn insert_books<I: Iterator<Item = Book> + Send>(
         &mut self,
         books: I,
     ) -> Result<Vec<BookID>, DatabaseError<Self::Error>>;
@@ -179,7 +176,7 @@ pub trait AppDatabase {
     /// This function will return an error if updating the database fails.
     async fn merge_similar(&mut self) -> Result<HashSet<BookID>, DatabaseError<Self::Error>>;
 
-    async fn update<I: Iterator<Item = BookVariant> + Send>(
+    async fn update<I: Iterator<Item = Book> + Send>(
         &mut self,
         books: I,
     ) -> Result<(), DatabaseError<Self::Error>>;

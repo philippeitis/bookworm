@@ -14,7 +14,7 @@ use bookworm_database::paginator::Selection;
 use bookworm_database::{AppDatabase, Book, BookView, DatabaseError};
 use bookworm_input::Edit;
 use bookworm_records::book::{BookID, ColumnIdentifier, RecordError};
-use bookworm_records::{BookError, BookVariant};
+use bookworm_records::BookError;
 
 use crate::columns::Columns;
 use crate::parser::{ModifyColumn, Source, Target};
@@ -77,7 +77,7 @@ impl<DBError> From<PatternError> for ApplicationError<DBError> {
 // Benchmarks:
 // 5.3k books, Windows: 0.75s
 // 332 books, Linux: ~0.042s
-fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<BookVariant>, std::io::Error> {
+fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<Book>, std::io::Error> {
     // TODO: Handle reads erroring out due to filesystem issues somehow.
     Ok(jwalk::WalkDir::new(std::fs::canonicalize(dir)?)
         .max_depth(depth as usize)
@@ -86,11 +86,11 @@ fn books_in_dir<P: AsRef<Path>>(dir: P, depth: u8) -> Result<Vec<BookVariant>, s
         .map(|e| e.path())
         .collect::<Vec<_>>()
         .par_iter()
-        .filter_map(|path| BookVariant::from_path(path).ok())
+        .filter_map(|path| Book::from_path(path).ok())
         .collect::<Vec<_>>())
 }
 
-fn books_globbed<S: AsRef<str>>(glob: S) -> Result<Vec<BookVariant>, glob::PatternError> {
+fn books_globbed<S: AsRef<str>>(glob: S) -> Result<Vec<Book>, glob::PatternError> {
     // TODO: Handle reads erroring out due to filesystem issues somehow.
     // TODO: Measure how well this performs - solutions for std::fs::canonicalize?
     // TODO: Create a new, better glob that does stuff like take AsRef<str> and AsRef<OsStr>
@@ -101,18 +101,8 @@ fn books_globbed<S: AsRef<str>>(glob: S) -> Result<Vec<BookVariant>, glob::Patte
         .collect::<Vec<_>>()
         .par_iter()
         .filter_map(|path| std::fs::canonicalize(path).ok())
-        .filter_map(|path| BookVariant::from_path(path).ok())
+        .filter_map(|path| Book::from_path(path).ok())
         .collect::<Vec<_>>())
-}
-
-/// Returns the first available path amongst the variants of the book, or None if no such
-/// path exists.
-///
-/// # Arguments
-///
-/// * ` book ` - The book to find a path for.
-fn get_book_path(book: &Book, index: usize) -> Option<&Path> {
-    Some(book.variants().get(index)?.path())
 }
 
 pub enum AppTask {
@@ -368,14 +358,13 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 AppTask::OpenBookIn(book, index, target) => {
                     if let Ok(book) = self.db.read().await.get_book(book).await {
-                        if let Some(path) = get_book_path(&book, index) {
-                            match target {
-                                Target::FileManager => {
-                                    let _ = opener::open_in_file_manager(path);
-                                }
-                                Target::DefaultApp => {
-                                    let _ = opener::open(path);
-                                }
+                        // TODO: Should allow opening by file format
+                        match target {
+                            Target::FileManager => {
+                                let _ = opener::open_in_file_manager(book.path());
+                            }
+                            Target::DefaultApp => {
+                                let _ = opener::open(book.path());
                             }
                         }
                     }
@@ -416,7 +405,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                     for source in sources.into_vec() {
                         match source {
                             Source::File(f) => {
-                                if let Ok(book) = BookVariant::from_path(&f) {
+                                if let Ok(book) = Book::from_path(&f) {
                                     if let Ok(id) =
                                         async_write!(self, db, db.insert_book(book).await)
                                     {
@@ -474,7 +463,7 @@ impl<D: AppDatabase + Send + Sync> App<D> {
                     for source in sources.into_vec() {
                         match source {
                             Source::File(f) => {
-                                if let Ok(book) = BookVariant::from_path(&f) {
+                                if let Ok(book) = Book::from_path(&f) {
                                     let _ = async_write!(
                                         self,
                                         db,
