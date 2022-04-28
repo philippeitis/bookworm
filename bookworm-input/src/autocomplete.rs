@@ -4,7 +4,7 @@ use glob::{glob, PatternError};
 
 pub struct AutoCompleter<S> {
     word_len: usize,
-    possibilities: GetRing<S>,
+    candidates: RingFilter<S>,
 }
 
 #[derive(Debug)]
@@ -38,7 +38,7 @@ impl AutoCompleter<PathBuf> {
         p.sort();
         Ok(AutoCompleter {
             word_len,
-            possibilities: GetRing::new(p),
+            candidates: RingFilter::new(p),
         })
     }
 
@@ -59,26 +59,26 @@ impl AutoCompleter<PathBuf> {
     /// return a value.
     ///
     /// # Arguments
-    /// * ` p ` - A predicate which returns true if the given path should
+    /// * ` predicate ` - A predicate which returns true if the given path should
     ///             be returned, otherwise false.
-    pub fn next_word_by(&mut self, p: impl Fn(&PathBuf) -> bool) -> Option<&PathBuf> {
+    pub fn next_word_by<P: FnMut(&PathBuf) -> bool>(
+        &mut self,
+        mut predicate: P,
+    ) -> Option<&PathBuf> {
         let word_len = self.word_len;
-        self.possibilities
-            .next_item_by(|path| path.as_os_str().len() >= word_len && p(path))
+        self.candidates
+            .next_item_by(|path| path.as_os_str().len() >= word_len && predicate(path))
     }
 }
 
-struct GetRing<S> {
-    possibilities: Vec<S>,
-    curr_state: usize,
+struct RingFilter<S> {
+    items: Vec<S>,
+    index: usize,
 }
 
-impl<S> GetRing<S> {
-    fn new(possibilities: Vec<S>) -> Self {
-        GetRing {
-            possibilities,
-            curr_state: 0,
-        }
+impl<S> RingFilter<S> {
+    fn new(items: Vec<S>) -> Self {
+        RingFilter { items, index: 0 }
     }
 
     /// Returns the next item which satisfies the predicate, starting from the
@@ -91,17 +91,19 @@ impl<S> GetRing<S> {
     /// always be returned.
     ///
     /// # Arguments
-    /// * ` p ` - A predicate which returns true if the given item should
+    /// * ` predicate ` - A predicate which returns true if the given item should
     ///             be returned, otherwise false.
-    fn next_item_by(&mut self, p: impl Fn(&S) -> bool) -> Option<&S> {
-        if self.possibilities.is_empty() {
+    fn next_item_by<P: FnMut(&S) -> bool>(&mut self, mut predicate: P) -> Option<&S> {
+        if self.items.is_empty() {
             return None;
         }
-        self.curr_state %= self.possibilities.len();
-        let (p2, p1) = self.possibilities.split_at(self.curr_state);
+
+        self.index %= self.items.len();
+        let (p2, p1) = self.items.split_at(self.index);
+
         for item in p1.iter().chain(p2.iter()) {
-            self.curr_state += 1;
-            if p(item) {
+            self.index += 1;
+            if predicate(item) {
                 return Some(&item);
             }
         }
@@ -115,13 +117,13 @@ mod test {
 
     #[test]
     fn test_empty_ring_works_ok() {
-        let mut a: GetRing<u8> = GetRing::new(vec![]);
+        let mut a: RingFilter<u8> = RingFilter::new(vec![]);
         assert!(a.next_item_by(|_| true).is_none());
     }
 
     #[test]
     fn test_get_ring() {
-        let mut a = GetRing::new(vec![0u8, 1, 2, 3, 4, 5]);
+        let mut a = RingFilter::new(vec![0u8, 1, 2, 3, 4, 5]);
         assert_eq!(a.next_item_by(|&i| i % 2 == 0), Some(&0));
         assert_eq!(a.next_item_by(|&i| i % 2 == 0), Some(&2));
         assert_eq!(a.next_item_by(|&i| i % 2 == 0), Some(&4));
