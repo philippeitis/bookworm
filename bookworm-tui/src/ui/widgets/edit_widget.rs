@@ -43,7 +43,7 @@ impl<D: AppDatabase + Send + Sync> EditWidget<D> {
             let column = { state.table_view.selected_cols()[state.selected_column].to_owned() };
             let edits = vec![(
                 ColumnIdentifier::from(column),
-                Edit::Sequence(self.edit.get_base()),
+                Edit::Sequence(self.edit.events()),
             )]
             .into_boxed_slice();
             match run_command(app, Command::EditBook(BookIndex::Selected, edits), state).await {

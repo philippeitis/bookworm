@@ -6,7 +6,7 @@
 pub mod autocomplete;
 pub mod user_input;
 
-use crate::user_input::InputRecorder;
+use crate::user_input::EventBuffer;
 pub use autocomplete::AutoCompleter;
 
 #[derive(Debug, PartialEq)]
@@ -14,5 +14,5 @@ pub enum Edit {
     Delete,
     Replace(String),
     Append(String),
-    Sequence(InputRecorder<bool>),
+    Sequence(EventBuffer),
 }

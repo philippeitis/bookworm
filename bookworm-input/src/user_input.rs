@@ -300,182 +300,17 @@ impl CursoredText {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct InputRecorder<K: Hash + PartialEq + Eq> {
-    pub started_edit: bool,
+#[derive(Debug, Default, PartialEq, Clone)]
+pub struct EventBuffer {
     events: Vec<TextEvent>,
-    cursored: HashMap<K, CursoredText>,
 }
 
-impl<K: Hash + PartialEq + Eq> Default for InputRecorder<K> {
-    fn default() -> Self {
-        Self {
-            started_edit: false,
-            events: vec![],
-            cursored: HashMap::new(),
-        }
-    }
-}
-
-impl<K: Hash + PartialEq + Eq> InputRecorder<K> {
-    pub fn get(&self, key: &K) -> Option<&CursoredText> {
-        self.cursored.get(key)
+impl EventBuffer {
+    fn push(&mut self, event: TextEvent) {
+        self.events.push(event)
     }
 
-    pub fn get_base(&self) -> InputRecorder<bool> {
-        InputRecorder {
-            started_edit: self.started_edit,
-            events: self.events.clone(),
-            cursored: HashMap::new(),
-        }
-    }
-
-    pub fn push(&mut self, c: char) {
-        self.events.push(TextEvent::Push(c));
-
-        if !self.started_edit {
-            self.cursored.values_mut().for_each(|cursor| cursor.clear());
-        }
-        self.cursored.values_mut().for_each(|cursor| cursor.push(c));
-
-        self.started_edit = true;
-    }
-
-    pub fn extend(&mut self, s: &str) {
-        for c in s.chars() {
-            self.events.push(TextEvent::Push(c));
-        }
-
-        if !self.started_edit {
-            self.cursored.values_mut().for_each(|cursor| cursor.clear());
-        }
-
-        self.cursored.values_mut().for_each(|cursor| {
-            for c in s.chars() {
-                cursor.push(c);
-            }
-        });
-        self.started_edit = true;
-    }
-
-    pub fn del(&mut self) {
-        self.events.push(TextEvent::Del);
-
-        if self.started_edit {
-            self.cursored.values_mut().for_each(|cursor| cursor.del());
-        } else {
-            self.cursored.values_mut().for_each(|cursor| cursor.clear());
-        }
-
-        self.started_edit = true;
-    }
-
-    /// Performs backspace
-    pub fn backspace(&mut self) {
-        self.events.push(TextEvent::BackSpace);
-
-        if self.started_edit {
-            self.cursored
-                .values_mut()
-                .for_each(|cursor| cursor.backspace());
-        } else {
-            self.cursored.values_mut().for_each(|cursor| cursor.clear());
-        }
-
-        self.started_edit = true;
-    }
-
-    pub fn key_up(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::KeyUp);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.key_up());
-    }
-
-    pub fn key_shift_up(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::KeyShiftUp);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.key_shift_up());
-    }
-
-    pub fn key_down(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::KeyDown);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.key_down());
-    }
-
-    pub fn key_shift_down(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::KeyShiftDown);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.key_shift_down());
-    }
-
-    pub fn key_left(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::KeyLeft);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.key_left());
-    }
-
-    pub fn key_shift_left(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::KeyShiftLeft);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.key_shift_left());
-    }
-
-    pub fn key_right(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::KeyRight);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.key_right());
-    }
-
-    pub fn key_shift_right(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::KeyShiftRight);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.key_shift_right());
-    }
-
-    pub fn clear(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::SelectAll);
-        self.events.push(TextEvent::BackSpace);
-        self.cursored.values_mut().for_each(|cursor| cursor.clear());
-    }
-
-    pub fn select_all(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::SelectAll);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.select_all());
-    }
-
-    pub fn deselect(&mut self) {
-        self.started_edit = true;
-        self.events.push(TextEvent::Deselect);
-        self.cursored
-            .values_mut()
-            .for_each(|cursor| cursor.deselect());
-    }
-
-    pub fn add_cursor(&mut self, key: K, text: &str) {
-        self.cursored.insert(key, self.apply_to(text));
-    }
-
+    /// Applies all events so far to the provided text
     pub fn apply_to(&self, text: &str) -> CursoredText {
         let mut cursored_text = CursoredText {
             cursor: text.len(),
@@ -521,6 +356,163 @@ impl<K: Hash + PartialEq + Eq> InputRecorder<K> {
         }
 
         cursored_text
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct InputRecorder<K: Hash + PartialEq + Eq> {
+    pub started_edit: bool,
+    events: EventBuffer,
+    cursored: HashMap<K, CursoredText>,
+}
+
+impl<K: Hash + PartialEq + Eq> Default for InputRecorder<K> {
+    fn default() -> Self {
+        Self {
+            started_edit: false,
+            events: EventBuffer::default(),
+            cursored: HashMap::new(),
+        }
+    }
+}
+
+impl<K: Hash + PartialEq + Eq> InputRecorder<K> {
+    /// Applies the function to all internal cursored text
+    fn for_each<F: FnMut(&mut CursoredText)>(&mut self, f: F) {
+        self.cursored.values_mut().for_each(f)
+    }
+
+    pub fn get(&self, key: &K) -> Option<&CursoredText> {
+        self.cursored.get(key)
+    }
+
+    pub fn events(&self) -> EventBuffer {
+        self.events.clone()
+    }
+
+    pub fn push(&mut self, c: char) {
+        self.events.push(TextEvent::Push(c));
+
+        if !self.started_edit {
+            self.for_each(|cursor| cursor.clear());
+        }
+        self.for_each(|cursor| cursor.push(c));
+
+        self.started_edit = true;
+    }
+
+    pub fn extend(&mut self, s: &str) {
+        for c in s.chars() {
+            self.events.push(TextEvent::Push(c));
+        }
+
+        if !self.started_edit {
+            self.for_each(|cursor| cursor.clear());
+        }
+
+        self.for_each(|cursor| {
+            for c in s.chars() {
+                cursor.push(c);
+            }
+        });
+        self.started_edit = true;
+    }
+
+    pub fn del(&mut self) {
+        self.events.push(TextEvent::Del);
+
+        if self.started_edit {
+            self.for_each(|cursor| cursor.del());
+        } else {
+            self.for_each(|cursor| cursor.clear());
+        }
+
+        self.started_edit = true;
+    }
+
+    /// Performs backspace
+    pub fn backspace(&mut self) {
+        self.events.push(TextEvent::BackSpace);
+
+        if self.started_edit {
+            self.for_each(|cursor| cursor.backspace());
+        } else {
+            self.for_each(|cursor| cursor.clear());
+        }
+
+        self.started_edit = true;
+    }
+
+    pub fn key_up(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyUp);
+        self.for_each(|cursor| cursor.key_up());
+    }
+
+    pub fn key_shift_up(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyShiftUp);
+        self.for_each(|cursor| cursor.key_shift_up());
+    }
+
+    pub fn key_down(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyDown);
+        self.for_each(|cursor| cursor.key_down());
+    }
+
+    pub fn key_shift_down(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyShiftDown);
+        self.for_each(|cursor| cursor.key_shift_down());
+    }
+
+    pub fn key_left(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyLeft);
+        self.for_each(|cursor| cursor.key_left());
+    }
+
+    pub fn key_shift_left(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyShiftLeft);
+        self.for_each(|cursor| cursor.key_shift_left());
+    }
+
+    pub fn key_right(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyRight);
+        self.for_each(|cursor| cursor.key_right());
+    }
+
+    pub fn key_shift_right(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::KeyShiftRight);
+        self.for_each(|cursor| cursor.key_shift_right());
+    }
+
+    pub fn clear(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::SelectAll);
+        self.events.push(TextEvent::BackSpace);
+        self.for_each(|cursor| cursor.clear());
+    }
+
+    pub fn select_all(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::SelectAll);
+        self.for_each(|cursor| cursor.select_all());
+    }
+
+    pub fn deselect(&mut self) {
+        self.started_edit = true;
+        self.events.push(TextEvent::Deselect);
+        self.for_each(|cursor| cursor.deselect());
+    }
+
+    /// Adds a new line of text to modify
+    pub fn add_cursor(&mut self, key: K, text: &str) {
+        self.cursored.insert(key, self.events.apply_to(text));
     }
 }
 
