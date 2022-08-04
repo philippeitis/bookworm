@@ -623,6 +623,7 @@ fn read_column(column: &ColumnIdentifier, id: &str) -> Option<(String, Option<St
         ColumnIdentifier::Description => None, // variants / description
         ColumnIdentifier::MultiMap(_) => None, // unimplemented
         ColumnIdentifier::MultiMapExact(_, _) => None, // unimplemented
+        ColumnIdentifier::Variants => None,    // unsortable
         ColumnIdentifier::Tags => None,        // unsortable
         ColumnIdentifier::ExactTag(_) => None, // unsortable
     }
@@ -658,6 +659,7 @@ fn read_column(column: &ColumnIdentifier, id: &str) -> Option<(String, Option<St
 //         ColumnIdentifier::Description => None, // variants / description
 //         ColumnIdentifier::MultiMap(_) => None, // unimplemented
 //         ColumnIdentifier::MultiMapExact(_, _) => None, // unimplemented
+//         ColumnIdentifier::Variants => None,    // unsortable
 //         ColumnIdentifier::Tags => None,        // unsortable
 //         ColumnIdentifier::ExactTag(_) => None, // unsortable
 //     }

@@ -98,27 +98,26 @@ impl<D> BookWidget<D> {
             }
         }
 
-        // TODO: variants should be file formats
-        // let variants = self.book.variants();
-        // if !variants.is_empty() {
-        //     data.extend(Text::raw("\nVariant paths:"));
-        //     for variant in variants {
-        //         let s = format!(
-        //             "{:?}: {}",
-        //             variant.book_type(),
-        //             if let Some(p) = prefix.as_ref() {
-        //                 variant
-        //                     .path()
-        //                     .strip_prefix(p)
-        //                     .unwrap_or_else(|_| variant.path())
-        //             } else {
-        //                 variant.path()
-        //             }
-        //             .display()
-        //         );
-        //         data.extend(Text::styled(s, field_exists));
-        //     }
-        // }
+        let variants = self.book.variants();
+        if !variants.is_empty() {
+            data.extend(Text::raw("\nVariant paths:"));
+            for variant in variants {
+                let s = format!(
+                    "{:?}: {}",
+                    variant.book_type(),
+                    if let Some(p) = prefix.as_ref() {
+                        variant
+                            .path()
+                            .strip_prefix(p)
+                            .unwrap_or_else(|_| variant.path())
+                    } else {
+                        variant.path()
+                    }
+                    .display()
+                );
+                data.extend(Text::styled(s, field_exists));
+            }
+        }
 
         data
     }

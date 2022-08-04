@@ -18,11 +18,23 @@ pub(crate) enum Identifier {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Enumerates all supported book types.
-pub(crate) enum BookFormat {
+pub(crate) enum BookType {
     EPUB,
     MOBI,
     PDF,
     Unsupported(OsString),
+}
+
+#[derive(Default, Clone, Debug, PartialEq)]
+pub(crate) struct BookVariant {
+    pub(crate) local_title: Option<String>,
+    pub(crate) identifier: Option<Identifier>,
+    pub(crate) paths: Option<Vec<(BookType, path::PathBuf)>>,
+    pub(crate) language: Option<String>,
+    pub(crate) additional_authors: Option<Vec<String>>,
+    pub(crate) translators: Option<Vec<String>>,
+    pub(crate) description: Option<String>,
+    pub(crate) id: Option<u32>,
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -34,13 +46,8 @@ pub(crate) struct Book {
     pub(crate) title: Option<String>,
     pub(crate) authors: Option<Vec<String>>,
     pub(crate) series: Option<(String, Option<f32>)>,
-    pub(crate) local_title: Option<String>,
-    pub(crate) identifier: Option<Identifier>,
-    pub(crate) paths: Option<Vec<(BookFormat, path::PathBuf)>>,
-    pub(crate) language: Option<String>,
-    pub(crate) additional_authors: Option<Vec<String>>,
-    pub(crate) translators: Option<Vec<String>>,
-    pub(crate) description: Option<String>,
+    pub(crate) variants: Option<Vec<BookVariant>>,
+    pub(crate) id: u32,
     pub(crate) extended_tags: Option<HashMap<String, String>>,
 }
 

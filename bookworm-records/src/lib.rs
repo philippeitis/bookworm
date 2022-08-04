@@ -5,6 +5,7 @@
 
 pub use book::Book;
 pub use error::BookError;
+pub use variant::BookVariant;
 
 pub mod book;
 mod epub;
