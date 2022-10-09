@@ -2,7 +2,7 @@
 ![CI](https://github.com/philippeitis/bookworm/actions/workflows/rust.yml/badge.svg)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-bookworm is a fast TUI library management system, like Calibre.
+bookworm is a fast TUI library management system, like Calibre. It is designed to handle importing, navigating, and manipulating the metadata of millions of ebooks efficiently and reliably. 
 
 # Features
 - High performance reading of ebook metadata
@@ -13,6 +13,7 @@ bookworm is a fast TUI library management system, like Calibre.
 - Instant startup
   - bookworm only reads books into memory when they're needed, allowing a database with millions of books to be opened instantly
 # Installation
+
 ## Download binary
 Binary downloads are available at https://github.com/philippeitis/bookworm/releases
 
