@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["ColumnOrder",""],["Edit",""]],"mod":[["book",""],["error",""],["series",""],["variant",""]]};

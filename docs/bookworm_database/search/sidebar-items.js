@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Error",""],["SearchMode",""]],"struct":[["DefaultMatcher",""],["ExactStringMatcher",""],["ExactSubstringMatcher",""],["RegexMatcher",""],["Search",""]],"trait":[["Matcher","Provides a mechanism to determine if a particular book matches a particular search string, using some internally defined comparison method."]]};

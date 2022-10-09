@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["bookworm_records"] = [{"text":"impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.64.0/core/convert/trait.TryFrom.html\" title=\"trait core::convert::TryFrom\">TryFrom</a>&lt;&amp;<a class=\"struct\" href=\"https://doc.rust-lang.org/1.64.0/std/ffi/os_str/struct.OsStr.html\" title=\"struct std::ffi::os_str::OsStr\">OsStr</a>&gt; for <a class=\"enum\" href=\"bookworm_records/variant/enum.BookType.html\" title=\"enum bookworm_records::variant::BookType\">BookType</a>","synthetic":false,"types":["bookworm_records::variant::BookType"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

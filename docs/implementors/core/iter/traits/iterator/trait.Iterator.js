@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["bookworm_input"] = [{"text":"impl&lt;'a&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.64.0/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"struct\" href=\"bookworm_input/user_input/struct.CommandStringIter.html\" title=\"struct bookworm_input::user_input::CommandStringIter\">CommandStringIter</a>&lt;'a&gt;","synthetic":false,"types":["bookworm_input::user_input::CommandStringIter"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

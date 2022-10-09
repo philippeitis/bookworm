@@ -1,0 +1,1 @@
+window.ALL_CRATES = ["bookworm_app","bookworm_database","bookworm_input","bookworm_records","bookworm_tui"];

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":[["book_widget",""],["border_widget",""],["box_widget",""],["column_widget",""],["command_widget",""],["edit_widget",""],["help_widget",""]],"trait":[["Widget",""]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"struct":[["BookWidget","Contains information needed to render a book. Only guaranteed to reflect the current state of the book if no EditCommand occurs - should be regenerated during the prepare_render call"]]};

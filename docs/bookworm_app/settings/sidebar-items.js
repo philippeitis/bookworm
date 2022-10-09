@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["Color",""]],"struct":[["AppSettings",""],["DatabaseSettings",""],["InterfaceSettings",""],["InterfaceStyle",""],["NavigationSettings",""],["Settings","Provides terminal UI settings."],["SortSettings",""]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["BookType","Enumerates all supported book types."],["Identifier",""]],"struct":[["BookVariant",""]],"trait":[["MetadataFiller",""]]};

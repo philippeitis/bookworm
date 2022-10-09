@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["BookError","Enumerates all potential errors that can occur when using a Book."]]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":[["BookIndex",""],["Command",""],["CommandError",""],["ModifyColumn",""],["Source",""],["Target",""]],"fn":[["parse_args","Reads `args` and returns the corresponding command. If no corresponding command exists, an error is returned."]]};
